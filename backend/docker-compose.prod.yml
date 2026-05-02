@@ -1,0 +1,127 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: hook-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - hook-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [hook-net]
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: hook-ollama
+    restart: unless-stopped
+    volumes:
+      - hook-ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [hook-net]
+
+  api:
+    image: ${HOOK_IMAGE:-ghcr.io/your-org/hook:latest}
+    container_name: hook-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ConnectionStrings__HookDb: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Whatsapp__VerifyToken: ${WHATSAPP_VERIFY_TOKEN}
+      Whatsapp__AppSecret: ${WHATSAPP_APP_SECRET}
+      Whatsapp__PhoneNumberId: ${WHATSAPP_PHONE_NUMBER_ID}
+      Whatsapp__AccessToken: ${WHATSAPP_ACCESS_TOKEN}
+      Whatsapp__GraphApiVersion: ${WHATSAPP_GRAPH_API_VERSION:-v22.0}
+      Ollama__BaseUrl: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      Ollama__Model: ${OLLAMA_MODEL:-qwen2.5:3b}
+      GoogleGeocoding__ApiKey: ${GOOGLE_GEOCODING_API_KEY}
+      Serilog__WriteTo__1__Args__serverUrl: ${SEQ_URL:-http://seq:5341}
+      Serilog__WriteTo__1__Args__apiKey: ${SEQ_INGEST_API_KEY:-}
+    volumes:
+      - hook-logs:/app/logs
+    networks: [hook-net]
+
+  seq:
+    image: datalust/seq:latest
+    container_name: hook-seq
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+      SEQ_FIRSTRUN_ADMINPASSWORDHASH: ${SEQ_FIRSTRUN_ADMINPASSWORDHASH}
+    volumes:
+      - hook-seq-data:/data
+    networks: [hook-net]
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: hook-caddy
+    restart: unless-stopped
+    depends_on: [api, seq]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      HOOK_DOMAIN: ${HOOK_DOMAIN}
+      LOGS_DOMAIN: ${LOGS_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+      LOGS_BASIC_AUTH_USER: ${LOGS_BASIC_AUTH_USER}
+      LOGS_BASIC_AUTH_HASH: ${LOGS_BASIC_AUTH_HASH}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - hook-caddy-data:/data
+      - hook-caddy-config:/config
+    networks: [hook-net]
+
+  backup:
+    image: postgis/postgis:16-3.4
+    container_name: hook-backup
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      - ./scripts/backup.sh:/usr/local/bin/backup.sh:ro
+      - hook-backups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apt-get update -qq && apt-get install -y -qq cron && rm -rf /var/lib/apt/lists/*;
+        echo "0 3 * * * /usr/local/bin/backup.sh >> /var/log/backup.log 2>&1" > /etc/cron.d/hook-backup;
+        chmod 0644 /etc/cron.d/hook-backup;
+        crontab /etc/cron.d/hook-backup;
+        cron -f
+    networks: [hook-net]
+
+volumes:
+  hook-pg-data:
+  hook-caddy-data:
+  hook-caddy-config:
+  hook-logs:
+  hook-backups:
+  hook-seq-data:
+  hook-ollama-data:
+
+networks:
+  hook-net:
+    driver: bridge

@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Hook.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Hook.IntegrationTests/Hook.IntegrationTests.csproj" />
+    <Project Path="tests/Hook.TestHelpers/Hook.TestHelpers.csproj" />
+    <Project Path="tests/Hook.UnitTests/Hook.UnitTests.csproj" />
+  </Folder>
+</Solution>

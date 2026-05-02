@@ -1,0 +1,43 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.vscode/launch.json
+bin-alt/
+obj-alt/
+
+## Build output
+publish/
+artifacts/
+
+## Coverage
+coverage/
+*.cobertura.xml
+TestResults/
+
+## Rider / Visual Studio
+.idea/
+
+## Logs
+logs/
+*.log
+
+## Env / secrets
+.env
+.env.*
+!.env.example
+
+## Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+
+## Frontend build staged into backend wwwroot during publish
+backend/src/Hook/wwwroot/
+
+## OS
+.DS_Store
+Thumbs.db

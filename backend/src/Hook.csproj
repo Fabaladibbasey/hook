@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <ContainerRepository>fabaladibbasey/hook</ContainerRepository>
+    <ContainerBaseImage>mcr.microsoft.com/dotnet/aspnet:10.0-alpine</ContainerBaseImage>
+    <ContainerUser>app</ContainerUser>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ContainerPort Include="8080" Type="tcp" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <FrontendDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../../frontend'))</FrontendDir>
+    <FrontendDistDir>$(FrontendDir)/dist</FrontendDistDir>
+    <WwwrootDir>$(MSBuildProjectDirectory)/wwwroot</WwwrootDir>
+  </PropertyGroup>
+
+  <Target Name="BuildFrontend"
+          BeforeTargets="ComputeFilesToPublish"
+          Condition="'$(SkipFrontendBuild)' != 'true'">
+    <Message Importance="high" Text="Building frontend in $(FrontendDir)" />
+    <Exec Command="npm ci" WorkingDirectory="$(FrontendDir)" />
+    <Exec Command="npm run build" WorkingDirectory="$(FrontendDir)" />
+    <ItemGroup>
+      <_FrontendArtifacts Include="$(FrontendDistDir)/**/*" />
+    </ItemGroup>
+    <RemoveDir Directories="$(WwwrootDir)" Condition="Exists('$(WwwrootDir)')" />
+    <MakeDir Directories="$(WwwrootDir)" />
+    <Copy SourceFiles="@(_FrontendArtifacts)"
+          DestinationFiles="@(_FrontendArtifacts->'$(WwwrootDir)/%(RecursiveDir)%(Filename)%(Extension)')" />
+  </Target>
+
+  <ItemGroup>
+    <PackageReference Include="FluentValidation" Version="12.1.1" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.4" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.4">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.5.0" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.1" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL.NetTopologySuite" Version="10.0.1" />
+    <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.12.0-beta.1" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.12.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.12.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.12.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.12.0" />
+    <PackageReference Include="Polly" Version="8.6.6" />
+    <PackageReference Include="Scrutor" Version="7.0.0" />
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.Seq" Version="9.0.0" />
+    <PackageReference Include="WolverineFx" Version="5.35.2" />
+    <PackageReference Include="WolverineFx.EntityFrameworkCore" Version="5.35.2" />
+    <PackageReference Include="WolverineFx.Postgresql" Version="5.35.2" />
+  </ItemGroup>
+
+</Project>

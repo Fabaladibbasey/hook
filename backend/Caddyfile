@@ -1,0 +1,56 @@
+{
+    email {$ACME_EMAIL}
+}
+
+{$HOOK_DOMAIN} {
+    encode zstd gzip
+
+    # Webhook + API + SignalR + SPA
+    reverse_proxy api:8080 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # Strip WebSocket buffering for SignalR
+    @websockets {
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+    reverse_proxy @websockets api:8080
+
+    # Sensible TLS defaults; cert auto-managed by Caddy
+    tls {
+        protocols tls1.2 tls1.3
+    }
+
+    log {
+        output stdout
+        format console
+    }
+}
+
+{$LOGS_DOMAIN} {
+    encode zstd gzip
+
+    basic_auth {
+        {$LOGS_BASIC_AUTH_USER} {$LOGS_BASIC_AUTH_HASH}
+    }
+
+    reverse_proxy seq:80 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    tls {
+        protocols tls1.2 tls1.3
+    }
+
+    log {
+        output stdout
+        format console
+    }
+}

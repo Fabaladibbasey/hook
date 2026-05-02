@@ -1,0 +1,125 @@
+# Hook — Operations Run Book
+
+Production deploy uses Docker Compose on a single VPS, behind Caddy with auto Let's Encrypt.
+
+## Stack
+
+| Service     | Image                              | Role                                   |
+|-------------|------------------------------------|----------------------------------------|
+| `caddy`     | `caddy:2-alpine`                   | TLS termination + reverse proxy        |
+| `api`       | `ghcr.io/<org>/hook:<tag>`         | ASP.NET host (API + SignalR + SPA)     |
+| `postgres`  | `postgis/postgis:16-3.4`           | Postgres 16 + PostGIS + pg_trgm        |
+| `backup`    | `postgis/postgis:16-3.4` + cron    | Daily `pg_dump` to `hook-backups`      |
+
+All services share `hook-net`. Caddy is the only public surface (ports 80/443).
+
+## First-time setup
+
+1. **Provision VPS** with Docker Engine + Compose plugin, open ports 80/443.
+2. **Point DNS** for `HOOK_DOMAIN` at the VPS public IP (A/AAAA).
+3. **Clone deploy bundle:**
+   ```sh
+   git clone <repo> /opt/hook && cd /opt/hook
+   ```
+4. **Create `.env.prod`** from `.env.example`:
+   ```sh
+   cp .env.example .env.prod
+   chmod 600 .env.prod
+   # edit values
+   ```
+5. **First boot:**
+   ```sh
+   docker compose -f docker-compose.prod.yml --env-file .env.prod pull
+   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+   ```
+6. **Migrations** run on container start (the API applies EF migrations against `postgres` once it's healthy).
+7. **Verify:**
+   ```sh
+   curl -fsS https://${HOOK_DOMAIN}/healthz
+   curl -fsS https://${HOOK_DOMAIN}/metrics | head
+   ```
+
+## Required environment variables
+
+See `.env.example` for the full list. Categories:
+
+| Group              | Vars                                                                   |
+|--------------------|------------------------------------------------------------------------|
+| Domain / TLS       | `HOOK_DOMAIN`, `ACME_EMAIL`                                            |
+| Image              | `HOOK_IMAGE`                                                           |
+| Postgres           | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`                    |
+| WhatsApp           | `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_GRAPH_API_VERSION` |
+| Gemini             | `GEMINI_API_KEY`, `GEMINI_MODEL`                                       |
+| Google geocoding   | `GOOGLE_GEOCODING_API_KEY`                                             |
+| Chat               | `CHAT_TOKEN_SIGNING_KEY` (≥32-byte base64)                             |
+| Backups            | `BACKUP_RETENTION_DAYS` (default 14)                                   |
+
+`.env.prod` is git-ignored (`.env.*` glob in `.gitignore`).
+
+## Health & telemetry
+
+- **Liveness:** `GET /healthz` — JSON `{"status":"ok"}`. Used by Docker `HEALTHCHECK` and the deploy smoke probe.
+- **Metrics:** `GET /metrics` — Prometheus exposition. Counters: `hook.matches.total`, `hook.matches.pool_size`, `hook.ai.calls.total`, `hook.ai.latency_ms`, `hook.geocode.cache_hits`, `hook.geocode.api_calls`, `hook.whatsapp.outside_window_sends`, `hook.ratelimit.blocks`, plus standard ASP.NET / HTTP client / runtime metrics.
+- **Correlation IDs:** every request carries `X-Correlation-Id` (auto-generated when absent). Threads through Serilog `LogContext` — grep logs by id to trace one conversation end-to-end.
+
+## Logs
+
+- API logs: structured JSON to stdout (Docker journal) and rolling file `/app/logs/hook-YYYYMMDD.log` (mounted volume `hook-logs`).
+- Caddy access + cert logs: stdout (Docker journal).
+- Postgres logs: stdout (Docker journal).
+
+Tail one service:
+```sh
+docker compose -f docker-compose.prod.yml logs -f api
+```
+
+## Backups
+
+- `backup` container runs daily at 03:00 UTC (cron) and writes `hook-<UTC>.dump.gz` into the `hook-backups` volume.
+- Retention: `BACKUP_RETENTION_DAYS` (default 14).
+- **Off-host copy:** schedule a host-side cron to `rsync`/`rclone` `hook-backups` volume to remote storage. Example with rclone-to-S3:
+  ```sh
+  0 4 * * * docker run --rm -v hook_hook-backups:/data:ro rclone/rclone sync /data s3:hook-backups
+  ```
+- **Restore:**
+  ```sh
+  docker compose -f docker-compose.prod.yml exec -T postgres pg_restore \
+    --clean --if-exists --no-owner --dbname=$POSTGRES_DB \
+    < /path/to/hook-<stamp>.dump
+  ```
+  (gunzip the `.gz` first, or pipe via `zcat`.)
+
+## Rollback
+
+CI tags every image with both `:latest` and `:<short-sha>`. To roll back:
+
+```sh
+cd /opt/hook
+export HOOK_IMAGE=ghcr.io/<org>/hook:<previous-sha>
+docker compose -f docker-compose.prod.yml --env-file .env.prod pull api
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d api
+curl -fsS https://${HOOK_DOMAIN}/healthz
+```
+
+For schema rollback, restore from the latest pre-deploy `pg_dump` (see Backups above). EF migrations are forward-only by convention — never edit a shipped migration; write a new one.
+
+## CI / CD
+
+- **CI** (`.github/workflows/ci.yml`): build + test on every push/PR. Postgres service container is provisioned for integration tests.
+- **Deploy** (`.github/workflows/deploy.yml`): on push to `main` or tag `v*`:
+  1. Build multi-stage image, push to GHCR with tags `:<sha>` and `:latest`.
+  2. SSH into VPS, `docker compose pull api`, `up -d`, prune.
+  3. Curl `/healthz` until 200 (10×5s).
+- **Required secrets** (GitHub repo → Settings → Secrets → Actions, environment `production`):
+  `PROD_SSH_HOST`, `PROD_SSH_USER`, `PROD_SSH_KEY`, `PROD_SSH_PORT` (optional), `PROD_DEPLOY_DIR`, `PROD_DOMAIN`.
+
+## Troubleshooting
+
+| Symptom                         | Likely cause / first check                                         |
+|---------------------------------|--------------------------------------------------------------------|
+| `/healthz` 502 from Caddy       | `docker compose ps` — `api` not healthy. Check `docker logs hook-api`. |
+| Cert acquisition fails          | DNS not pointing yet, or port 80 not reachable. Check `docker logs hook-caddy`. |
+| Webhook 403 every time          | `WHATSAPP_APP_SECRET` mismatch. Verify Meta Business Manager value.|
+| AI calls all fail               | `GEMINI_API_KEY` quota / wrong model. Check `hook.ai.calls.total` metric outcome label. |
+| `outside_window_sends` climbing | Provider check-in timing drifted out of 24h window — investigate scheduling. |
+| Backup volume filling up        | Lower `BACKUP_RETENTION_DAYS` or move off-host copy schedule. |

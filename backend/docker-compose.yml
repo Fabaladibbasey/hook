@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: hook-postgres
+    environment:
+      POSTGRES_DB: hook
+      POSTGRES_USER: hook
+      POSTGRES_PASSWORD: hook
+    ports:
+      - "5432:5432"
+    volumes:
+      - hook-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hook -d hook"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: hook-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - hook-ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  hook-pg-data:
+  hook-ollama-data:
