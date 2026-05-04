@@ -29,7 +29,7 @@ export default defineConfig({
     })
   ],
   build: {
-    outDir: "../src/Hook/wwwroot",
+    outDir: "../backend/src/wwwroot",
     emptyOutDir: true
   },
   server: {

@@ -17,8 +17,6 @@
 
   <PropertyGroup>
     <FrontendDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../../frontend'))</FrontendDir>
-    <FrontendDistDir>$(FrontendDir)/dist</FrontendDistDir>
-    <WwwrootDir>$(MSBuildProjectDirectory)/wwwroot</WwwrootDir>
   </PropertyGroup>
 
   <Target Name="BuildFrontend"
@@ -27,13 +25,6 @@
     <Message Importance="high" Text="Building frontend in $(FrontendDir)" />
     <Exec Command="npm ci" WorkingDirectory="$(FrontendDir)" />
     <Exec Command="npm run build" WorkingDirectory="$(FrontendDir)" />
-    <ItemGroup>
-      <_FrontendArtifacts Include="$(FrontendDistDir)/**/*" />
-    </ItemGroup>
-    <RemoveDir Directories="$(WwwrootDir)" Condition="Exists('$(WwwrootDir)')" />
-    <MakeDir Directories="$(WwwrootDir)" />
-    <Copy SourceFiles="@(_FrontendArtifacts)"
-          DestinationFiles="@(_FrontendArtifacts->'$(WwwrootDir)/%(RecursiveDir)%(Filename)%(Extension)')" />
   </Target>
 
   <ItemGroup>

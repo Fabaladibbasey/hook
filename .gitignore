@@ -37,8 +37,15 @@ frontend/dist/
 frontend/.vite/
 frontend/coverage/
 
-## Frontend build staged into backend wwwroot during publish
-backend/src/Hook/wwwroot/
+## Frontend build output (vite writes here, regenerated on publish)
+backend/src/wwwroot/
+
+## Local Claude settings
+.claude/settings.local.json
+
+## Local scratch / log dumps
+/logs-*.txt
+/snap-*.txt
 
 ## OS
 .DS_Store
