@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+
 namespace Hook.Features.Ai;
 
 public sealed record ProbeResult(bool Healthy, DateTimeOffset CheckedAt, string? Error);
@@ -5,11 +7,12 @@ public sealed record ProbeResult(bool Healthy, DateTimeOffset CheckedAt, string?
 public sealed class AiReadinessProbe(
     IConversationAi ai,
     TimeProvider clock,
+    IOptions<OllamaOptions> options,
     ILogger<AiReadinessProbe> logger)
 {
     private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(2);
 
+    private readonly TimeSpan _probeTimeout = TimeSpan.FromSeconds(Math.Max(1, options.Value.ReadinessProbeTimeoutSeconds));
     private readonly SemaphoreSlim _gate = new(1, 1);
     private CachedResult? _cached;
 
@@ -27,7 +30,7 @@ public sealed class AiReadinessProbe(
                 return new ProbeResult(recheck.Healthy, recheck.CheckedAt, recheck.Error);
 
             using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            probeCts.CancelAfter(ProbeTimeout);
+            probeCts.CancelAfter(_probeTimeout);
 
             try
             {

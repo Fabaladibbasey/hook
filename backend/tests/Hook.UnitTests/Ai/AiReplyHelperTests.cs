@@ -51,6 +51,36 @@ public class AiReplyHelperTests
             AiReplyHelper.TryGenerateAsync(ai, Ctx, "test", NullLogger.Instance, cts.Token));
     }
 
+    [Theory]
+    [InlineData("I'm sorry, but I can't assist with that.")]
+    [InlineData("I cannot help with that request.")]
+    [InlineData("Sorry, I can't do that.")]
+    [InlineData("I'm just an AI and cannot provide that information.")]
+    [InlineData("As an AI, I cannot fulfill this request.")]
+    [InlineData("  i'm sorry, but i can't assist  ")]   // leading whitespace + lowercase
+    [InlineData("Sorry, but I cannot help.")]
+    public async Task TryGenerateAsync_ShouldReturnNull_WhenAiReturnsRefusal(string refusal)
+    {
+        var ai = new ScriptedAi(reply: refusal);
+
+        var result = await AiReplyHelper.TryGenerateAsync(ai, Ctx, "test", NullLogger.Instance, CancellationToken.None);
+
+        result.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData("Sorry for the wait — here are your matches: 1) +1234")]   // "sorry" mid-sentence is fine
+    [InlineData("I can fix that for you.")]
+    [InlineData("Hi there! Let's get you sorted.")]
+    public async Task TryGenerateAsync_ShouldPassThrough_WhenReplyContainsBenignSorry(string reply)
+    {
+        var ai = new ScriptedAi(reply: reply);
+
+        var result = await AiReplyHelper.TryGenerateAsync(ai, Ctx, "test", NullLogger.Instance, CancellationToken.None);
+
+        result.ShouldBe(reply);
+    }
+
     private sealed class ScriptedAi : IConversationAi
     {
         private readonly string? _reply;

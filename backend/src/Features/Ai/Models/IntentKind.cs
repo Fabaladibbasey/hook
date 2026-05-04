@@ -8,6 +8,7 @@ public enum IntentKind
     MatchSelection,
     NextMatches,
     IncreaseRange,
+    ShareContact,
     Confirmation,
     Rejection,
     Edit,

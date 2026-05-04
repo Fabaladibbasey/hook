@@ -54,7 +54,7 @@ public class ProviderRegistrationPipelineTests : IClassFixture<DevPipelineFixtur
     }
 
     [Fact]
-    public async Task RegisteredProvider_NewMessage_HeartbeatsExistingListing()
+    public async Task RegisteredProvider_NewMessage_HeartbeatsAndAcknowledges()
     {
         using var client = _fx.Factory.CreateClient();
         var phone = "+2207000003";
@@ -74,11 +74,17 @@ public class ProviderRegistrationPipelineTests : IClassFixture<DevPipelineFixtur
             phone,
             m => m.Body.Contains("You are listed", StringComparison.OrdinalIgnoreCase));
 
-        (await client.InjectTextAsync(phone, "still here")).EnsureSuccessStatusCode();
+        // A re-ping while listed extends the TTL AND sends an explicit ack so the
+        // user knows their listing is still active and what they can do next —
+        // silent heartbeats leave them wondering whether the system is broken.
+        (await client.InjectTextAsync(phone, "I offer carpentry")).EnsureSuccessStatusCode();
 
-        await Task.Delay(800);
-        var outbox = await client.GetOutboxAsync();
-        var afterHeartbeat = outbox.Where(m => m.To == phone && m.At > listed.At).ToList();
-        afterHeartbeat.ShouldBeEmpty();
+        var ack = await client.WaitForOutboundAsync(
+            phone,
+            m => m.Body.Contains("listed as a provider for", StringComparison.OrdinalIgnoreCase),
+            since: listed.At,
+            timeout: TimeSpan.FromSeconds(15));
+        ack.Body.ShouldContain("carpentry", Case.Insensitive);
+        ack.Body.ShouldContain("LEAVE", Case.Insensitive);
     }
 }

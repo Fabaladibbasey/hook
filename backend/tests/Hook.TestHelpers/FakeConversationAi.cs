@@ -6,8 +6,20 @@ namespace Hook.TestHelpers;
 
 public sealed class FakeConversationAi : IConversationAi
 {
+    private readonly Dictionary<string, IntentDetectionResult> _intentOverrides = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Force a specific (intent, confidence) for a given exact input — useful
+    /// for integration tests that need to drive low-confidence disambiguation paths.</summary>
+    public void OverrideIntent(string userMessage, IntentDetectionResult result) =>
+        _intentOverrides[userMessage] = result;
+
+    public void ResetOverrides() => _intentOverrides.Clear();
+
     public Task<IntentDetectionResult> DetectIntentAsync(string userMessage, CancellationToken ct = default)
     {
+        if (_intentOverrides.TryGetValue(userMessage, out var overridden))
+            return Task.FromResult(overridden);
+
         var lower = Normalize(userMessage);
         var intent = lower switch
         {
@@ -16,6 +28,15 @@ public sealed class FakeConversationAi : IConversationAi
             _ when Match(lower, "edit", "change", "remove", "add") => IntentKind.Edit,
             _ when Match(lower, "next", "more", "not these") => IntentKind.NextMatches,
             _ when Match(lower, "increase", "wider", "expand") => IntentKind.IncreaseRange,
+            _ when Match(lower,
+                "contact details", "contact info", "chat link",
+                "share contact", "share contacts", "share phone", "share number", "share link",
+                "share the chat", "share the contact", "share the phone", "share the number",
+                "send contact", "send phone", "send number", "send details",
+                "give me their", "give me the contact", "give me the phone", "give me the contacts",
+                "their phone", "their number", "their contact", "their details",
+                "connect us", "connect me", "put us in touch", "put me in touch",
+                "intro me", "intro us") => IntentKind.ShareContact,
             _ when Match(lower, "i need", "looking for", "find me", "i want") => IntentKind.ServiceRequest,
             _ when Match(lower, "i offer", "i do", "i fix", "i provide", "i can do", "available for") => IntentKind.ProviderRegistration,
             _ when Match(lower, "hi", "hello", "hey") => IntentKind.Greeting,
@@ -75,6 +96,8 @@ public sealed class FakeConversationAi : IConversationAi
     private static string Normalize(string text) =>
         text.ToLowerInvariant().TrimEnd('?', '!', '.', ' ');
 
+    // Word-boundary match so short tokens like "ok"/"no"/"hi" do not collide with
+    // substrings (e.g. "facebook" contains "ok", "snowboard" contains "no").
     private static bool Match(string text, params string[] needles) =>
-        needles.Any(n => text.Contains(n, StringComparison.Ordinal));
+        needles.Any(n => Regex.IsMatch(text, $@"\b{Regex.Escape(n)}\b"));
 }

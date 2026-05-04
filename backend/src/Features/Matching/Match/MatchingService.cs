@@ -28,11 +28,15 @@ public sealed class MatchingService(
 
         var radius = request.CurrentRadiusKm > 0 ? request.CurrentRadiusKm : options.Value.DefaultRadiusKm;
 
+        // Exclude the client's own phone — a sender who is also a listed provider
+        // at the same coords would otherwise self-match.
+        var excludePhones = request.ShownProviderPhones.Append(request.ClientPhone);
+
         var candidates = await query.FindCandidatesAsync(
             request.Location,
             request.ServiceSlug,
             radius,
-            request.ShownProviderPhones,
+            excludePhones,
             now,
             ct);
 

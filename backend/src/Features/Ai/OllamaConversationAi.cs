@@ -124,6 +124,7 @@ public sealed class OllamaConversationAi(
         {
             "greeting-reply" => AiPrompts.GreetingReplySystem,
             "out-of-scope" => AiPrompts.OutOfScopeReplySystem,
+            "match_presenter" => AiPrompts.MatchPresenterReplySystem,
             _ => AiPrompts.ReplySystem
         };
 

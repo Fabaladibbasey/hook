@@ -12,6 +12,7 @@ public static class GeocodingServiceCollectionExtensions
 
         if (configuration.GetValue<bool>("Dev:Geocoding:Enabled"))
         {
+            services.AddValidatedOptions<DevGeocodingOptions>(configuration);
             services.AddSingleton<IGeocoder, StaticGeocoder>();
         }
         else

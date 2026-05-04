@@ -2,6 +2,7 @@ using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
 using Hook.Features.Geocoding.Geocode;
 using Hook.Features.Matching;
+using Hook.Features.ProviderAvailability.AvailabilityAggregate;
 using Hook.Features.ServiceRequest.RequestAggregate;
 using Hook.Features.ServiceTaxonomy.ResolveSlug;
 using Hook.Features.Whatsapp;
@@ -16,6 +17,7 @@ namespace Hook.Features.ServiceRequest.Create;
 public sealed class ClientRequestOrchestrator(
     IClientRequestDraftRepository drafts,
     IServiceRequestRepository requests,
+    IProviderAvailabilityRepository availability,
     IConversationAi ai,
     SlugResolver slugResolver,
     GeocodingService geocoding,
@@ -70,7 +72,7 @@ public sealed class ClientRequestOrchestrator(
         draft.DraftServiceSlug = canonical.CanonicalSlug;
         draft.Step = ClientRequestStep.ConfirmService;
         await drafts.UpsertAsync(draft, ct);
-        await whatsapp.SendTextAsync(phone, $"Do you need {canonical.CanonicalSlug.Replace('-', ' ')}? Reply YES or NO.", ct);
+        await whatsapp.SendTextAsync(phone, $"Do you need {canonical.CanonicalSlug.Replace('-', ' ')}? Reply YES or NO — YES to confirm, NO to choose another service.", ct);
     }
 
     private async Task ConfirmServiceAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
@@ -94,7 +96,7 @@ public sealed class ClientRequestOrchestrator(
             await whatsapp.SendTextAsync(phone, "What service do you need?", ct);
             return;
         }
-        await whatsapp.SendTextAsync(phone, "Reply YES or NO.", ct);
+        await whatsapp.SendTextAsync(phone, $"Please reply YES or NO — YES to confirm {draft.DraftServiceSlug.Replace('-', ' ')}, NO to choose another service.", ct);
     }
 
     private async Task CollectLocationAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
@@ -160,7 +162,7 @@ public sealed class ClientRequestOrchestrator(
     private async Task CollectDescriptionAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
     {
         var text = message.Text?.Trim();
-        if (!string.IsNullOrEmpty(text) && !string.Equals(text, "SKIP", StringComparison.OrdinalIgnoreCase))
+        if (!IsSkipDescription(text))
         {
             draft.DraftDescription = text;
         }
@@ -169,23 +171,69 @@ public sealed class ClientRequestOrchestrator(
         {
             logger.LogWarning("Incomplete client draft for {Phone}", phone.Mask());
             await drafts.DeleteAsync(phone.Value, ct);
+            await whatsapp.SendTextAsync(phone,
+                "Couldn't save your request — some details were missing. Reply with what service you need to start over.", ct);
             return;
         }
 
-        var request = RequestAggregate.ServiceRequest.Create(
-            phone.Value,
-            draft.DraftServiceSlug,
-            new Location(draft.DraftLatitude.Value, draft.DraftLongitude.Value),
-            draft.DraftFormattedAddress,
-            draft.DraftDescription,
-            matchingOptions.Value.DefaultRadiusKm,
-            now);
+        // Reject same-service dual role: a listed plumbing provider cannot
+        // request plumbing from themselves. Different services (e.g. a plumber
+        // requesting carpentry) are allowed silently.
+        var existingAvailability = await availability.GetAsync(phone.Value, ct);
+        if (existingAvailability is not null &&
+            existingAvailability.Services.Contains(draft.DraftServiceSlug))
+        {
+            var human = draft.DraftServiceSlug.Replace('-', ' ');
+            logger.LogDebug("Rejecting same-service dual-role request for {Phone} slug={Slug}",
+                phone.Mask(), draft.DraftServiceSlug);
+            await drafts.DeleteAsync(phone.Value, ct);
+            await whatsapp.SendTextAsync(phone,
+                $"You're listed as a {human} provider. To request {human} instead, reply LEAVE to unlist first, then send your request again.", ct);
+            return;
+        }
 
-        await requests.AddAsync(request, ct);
-        await requests.SaveChangesAsync(ct);
-        await drafts.DeleteAsync(phone.Value, ct);
+        try
+        {
+            var request = RequestAggregate.ServiceRequest.Create(
+                phone.Value,
+                draft.DraftServiceSlug,
+                new Location(draft.DraftLatitude.Value, draft.DraftLongitude.Value),
+                draft.DraftFormattedAddress,
+                draft.DraftDescription,
+                matchingOptions.Value.DefaultRadiusKm,
+                now);
 
-        await whatsapp.SendTextAsync(phone, "Looking for nearby providers…", ct);
-        await bus.PublishAsync(new ServiceRequestCreated(request.Id));
+            await requests.AddAsync(request, ct);
+            await requests.SaveChangesAsync(ct);
+            await drafts.DeleteAsync(phone.Value, ct);
+
+            await whatsapp.SendTextAsync(phone, "Looking for nearby providers…", ct);
+            await bus.PublishAsync(new ServiceRequestCreated(request.Id));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to finalize client request for {Phone}", phone.Mask());
+            await drafts.DeleteAsync(phone.Value, ct);
+            await whatsapp.SendTextAsync(phone,
+                "Couldn't save your request right now. Reply with what service you need (e.g. 'I need a plumber') to try again.", ct);
+        }
+    }
+
+    private static bool IsSkipDescription([System.Diagnostics.CodeAnalysis.NotNullWhen(false)] string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return true;
+        if (string.Equals(text, "SKIP", StringComparison.OrdinalIgnoreCase)) return true;
+        if (QuickIntent.Detect(text) is IntentKind.Confirmation
+                                      or IntentKind.Rejection
+                                      or IntentKind.Cancel) return true;
+        var s = text.Trim().ToLowerInvariant();
+        return s is "no description" or "no desc" or "nothing"
+                 or "skip it" or "i'm good" or "im good" or "all good"
+                 or "continue" or "go ahead" or "proceed"
+                 or "no thanks" or "that's all" or "thats all";
     }
 }

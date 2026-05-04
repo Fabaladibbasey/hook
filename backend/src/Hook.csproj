@@ -4,10 +4,15 @@
     <ContainerRepository>fabaladibbasey/hook</ContainerRepository>
     <ContainerBaseImage>mcr.microsoft.com/dotnet/aspnet:10.0-alpine</ContainerBaseImage>
     <ContainerUser>app</ContainerUser>
+    <UserSecretsId>61a6a0df-4d5e-43ce-8cdd-e32b494fc287</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
     <ContainerPort Include="8080" Type="tcp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Hook.UnitTests" />
   </ItemGroup>
 
   <PropertyGroup>

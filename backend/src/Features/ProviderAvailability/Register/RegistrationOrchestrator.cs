@@ -4,6 +4,7 @@ using Hook.Features.Geocoding.Geocode;
 using Hook.Features.Geocoding.Models;
 using Hook.Features.ProviderAvailability.AvailabilityAggregate;
 using Hook.Features.ProviderAvailability.Refresh;
+using Hook.Features.ServiceRequest.RequestAggregate;
 using Hook.Features.ServiceTaxonomy.ResolveSlug;
 using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Models;
@@ -15,6 +16,7 @@ namespace Hook.Features.ProviderAvailability.Register;
 public sealed class RegistrationOrchestrator(
     IRegistrationDraftRepository drafts,
     IProviderAvailabilityRepository availability,
+    IServiceRequestRepository requests,
     IConversationAi ai,
     SlugResolver slugResolver,
     GeocodingService geocoding,
@@ -36,6 +38,9 @@ public sealed class RegistrationOrchestrator(
             await availability.SaveChangesAsync(ct);
             await refreshScheduler.ScheduleAsync(phone.Value, now, ct);
             logger.LogDebug("Heartbeat for active provider {Phone}", phone.Mask());
+            var listed = string.Join(", ", existing.Services);
+            await whatsapp.SendTextAsync(phone,
+                $"You're listed as a provider for {listed} (extended for {options.Value.ExpiryHours}h). To request a different service yourself, send 'I need …'. Reply LEAVE to unlist.", ct);
             return;
         }
 
@@ -84,6 +89,12 @@ public sealed class RegistrationOrchestrator(
         }
 
         var capped = canonicalSlugs.Distinct().Take(options.Value.MaxServicesPerProvider).ToList();
+        // Persist the draft BEFORE sending the prompt so a fast "yes" reply
+        // doesn't race ahead of the save and miss the draft in InboundRouter.
+        draft.DraftServices = capped;
+        draft.Step = RegistrationStep.ConfirmServices;
+        await drafts.UpsertAsync(draft, ct);
+
         if (canonicalSlugs.Count > options.Value.MaxServicesPerProvider)
         {
             await whatsapp.SendTextAsync(phone,
@@ -94,10 +105,6 @@ public sealed class RegistrationOrchestrator(
             await whatsapp.SendTextAsync(phone,
                 $"I detected: {string.Join(", ", capped)}. Reply YES to confirm or EDIT to change.", ct);
         }
-
-        draft.DraftServices = capped;
-        draft.Step = RegistrationStep.ConfirmServices;
-        await drafts.UpsertAsync(draft, ct);
     }
 
     private async Task ConfirmServicesAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
@@ -108,17 +115,17 @@ public sealed class RegistrationOrchestrator(
             : await ai.DetectIntentAsync(message.Text ?? string.Empty, ct);
         if (intent.Intent == IntentKind.Confirmation)
         {
-            await whatsapp.SendTextAsync(phone, "Send your location pin (or type your address).", ct);
             draft.Step = RegistrationStep.AwaitingLocation;
             await drafts.UpsertAsync(draft, ct);
+            await whatsapp.SendTextAsync(phone, "Send your location pin (or type your address).", ct);
             return;
         }
 
         if (intent.Intent == IntentKind.Edit)
         {
-            await whatsapp.SendTextAsync(phone, "Send the corrected list of services in one message.", ct);
             draft.Step = RegistrationStep.AwaitingServices;
             await drafts.UpsertAsync(draft, ct);
+            await whatsapp.SendTextAsync(phone, "Send the corrected list of services in one message.", ct);
             return;
         }
 
@@ -134,7 +141,7 @@ public sealed class RegistrationOrchestrator(
             draft.DraftFormattedAddress = loc.Address ?? loc.Name ?? "(GPS pin)";
             draft.Step = RegistrationStep.AwaitingConsent;
             await drafts.UpsertAsync(draft, ct);
-            await whatsapp.SendTextAsync(phone, "Got your location. Share your phone with clients on match? Reply YES or NO.", ct);
+            await whatsapp.SendTextAsync(phone, "Got your location. Share your phone with clients on match? Reply YES to share, NO to keep it private.", ct);
             return;
         }
 
@@ -170,7 +177,7 @@ public sealed class RegistrationOrchestrator(
             draft.DraftFormattedAddress = loc.Address ?? loc.Name ?? "(GPS pin)";
             draft.Step = RegistrationStep.AwaitingConsent;
             await drafts.UpsertAsync(draft, ct);
-            await whatsapp.SendTextAsync(phone, "Got your location. Share your phone with clients on match? Reply YES or NO.", ct);
+            await whatsapp.SendTextAsync(phone, "Got your location. Share your phone with clients on match? Reply YES to share, NO to keep it private.", ct);
             return;
         }
 
@@ -182,11 +189,11 @@ public sealed class RegistrationOrchestrator(
         {
             draft.Step = RegistrationStep.AwaitingConsent;
             await drafts.UpsertAsync(draft, ct);
-            await whatsapp.SendTextAsync(phone, "Share your phone with clients on match? Reply YES or NO.", ct);
+            await whatsapp.SendTextAsync(phone, "Share your phone with clients on match? Reply YES to share, NO to keep it private.", ct);
             return;
         }
 
-        await whatsapp.SendTextAsync(phone, "Reply YES to confirm or send your GPS pin.", ct);
+        await whatsapp.SendTextAsync(phone, "Reply YES to confirm this address, or send your GPS pin instead.", ct);
     }
 
     private async Task CollectConsentAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
@@ -204,7 +211,7 @@ public sealed class RegistrationOrchestrator(
 
         if (consent is null)
         {
-            await whatsapp.SendTextAsync(phone, "Reply YES or NO.", ct);
+            await whatsapp.SendTextAsync(phone, "Share your phone with clients on match? Reply YES to share, NO to keep it private.", ct);
             return;
         }
 
@@ -214,24 +221,61 @@ public sealed class RegistrationOrchestrator(
         {
             logger.LogWarning("Incomplete draft for {Phone} cannot finalize", phone.Mask());
             await drafts.DeleteAsync(phone.Value, ct);
+            await whatsapp.SendTextAsync(phone,
+                "Couldn't list you — some details were missing. Reply 'I offer …' to start over.", ct);
             return;
         }
 
-        var availabilityRow = AvailabilityAggregate.ProviderAvailability.Register(
-            phone.Value,
-            draft.DraftServices,
-            new Location(draft.DraftLatitude.Value, draft.DraftLongitude.Value),
-            draft.DraftFormattedAddress,
-            consent.Value,
-            TimeSpan.FromHours(options.Value.ExpiryHours),
-            now);
+        // Reject same-service dual role: if the user has an open request for one
+        // of the services they're trying to list, listing makes no sense (they'd
+        // be matched to themselves and serve their own request).
+        // Block on any non-closed request (Open or Matched). Matching pipeline runs
+        // async and may flip the status from Open to Matched between funnel steps —
+        // both states still represent an active engagement that conflicts with
+        // listing for the same service.
+        var openRequest = await requests.GetActiveByClientAsync(phone.Value, ct);
+        if (openRequest is not null &&
+            openRequest.Status != ServiceRequestStatus.Closed &&
+            draft.DraftServices.Contains(openRequest.ServiceSlug))
+        {
+            var human = openRequest.ServiceSlug.Replace('-', ' ');
+            logger.LogDebug("Rejecting same-service registration for {Phone} slug={Slug}",
+                phone.Mask(), openRequest.ServiceSlug);
+            await drafts.DeleteAsync(phone.Value, ct);
+            await whatsapp.SendTextAsync(phone,
+                $"You have an open request for {human}. Cancel it first (reply LEAVE) before listing yourself for {human}.", ct);
+            return;
+        }
 
-        await availability.AddAsync(availabilityRow, ct);
-        await availability.SaveChangesAsync(ct);
-        await drafts.DeleteAsync(phone.Value, ct);
-        await refreshScheduler.ScheduleAsync(phone.Value, now, ct);
+        try
+        {
+            var availabilityRow = AvailabilityAggregate.ProviderAvailability.Register(
+                phone.Value,
+                draft.DraftServices,
+                new Location(draft.DraftLatitude.Value, draft.DraftLongitude.Value),
+                draft.DraftFormattedAddress,
+                consent.Value,
+                TimeSpan.FromHours(options.Value.ExpiryHours),
+                now);
 
-        await whatsapp.SendTextAsync(phone,
-            $"You are listed for {options.Value.ExpiryHours}h. Reply any time to extend or update.", ct);
+            await availability.AddAsync(availabilityRow, ct);
+            await availability.SaveChangesAsync(ct);
+            await drafts.DeleteAsync(phone.Value, ct);
+            await refreshScheduler.ScheduleAsync(phone.Value, now, ct);
+
+            await whatsapp.SendTextAsync(phone,
+                $"You are listed for {options.Value.ExpiryHours}h. Reply 'I offer …' anytime to update your services, or LEAVE to unlist.", ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to finalize provider registration for {Phone}", phone.Mask());
+            await drafts.DeleteAsync(phone.Value, ct);
+            await whatsapp.SendTextAsync(phone,
+                "Couldn't list you right now. Reply 'I offer …' to try again.", ct);
+        }
     }
 }

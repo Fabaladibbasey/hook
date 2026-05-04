@@ -1,0 +1,161 @@
+using Hook.Features.Ai;
+using Hook.Features.Ai.Models;
+using Hook.TestHelpers;
+using Microsoft.Extensions.DependencyInjection;
+using Shouldly;
+
+namespace Hook.IntegrationTests;
+
+// Verifies the "always confirm when not sure" guardrail: if the LLM returns
+// ServiceRequest or ProviderRegistration with confidence < 0.6, the router asks
+// the user to disambiguate (HIRE = client, OFFER = provider) instead of silently
+// committing them to the wrong orchestrator. Numeric 1/2 still accepted for
+// back-compat with users mid-flow.
+public class AmbiguousIntentTests : IClassFixture<DevPipelineFixture>
+{
+    private readonly DevPipelineFixture _fx;
+
+    public AmbiguousIntentTests(DevPipelineFixture fx) => _fx = fx;
+
+    private FakeConversationAi GetFakeAi()
+    {
+        var ai = _fx.Factory.Services.GetRequiredService<IConversationAi>();
+        var fake = ai as FakeConversationAi;
+        fake.ShouldNotBeNull("Test fixture must register FakeConversationAi.");
+        return fake!;
+    }
+
+    [Fact]
+    public async Task LowConfidenceIntent_SendsDisambiguationPrompt()
+    {
+        const string text = "ambig-prompt-only";
+        const string phone = "+14155553001";
+        var ai = GetFakeAi();
+        ai.OverrideIntent(text,
+            new IntentDetectionResult(IntentKind.ServiceRequest, 0.4, "en", "test-low-conf"));
+        try
+        {
+            using var client = _fx.Factory.CreateClient();
+            (await client.InjectTextAsync(phone, text)).EnsureSuccessStatusCode();
+
+            var disambig = await client.WaitForOutboundAsync(
+                phone,
+                m => m.Body.Contains("Reply HIRE or OFFER", StringComparison.OrdinalIgnoreCase),
+                timeout: TimeSpan.FromSeconds(8));
+
+            disambig.Body.ShouldContain("HIRE", Case.Sensitive);
+            disambig.Body.ShouldContain("OFFER", Case.Sensitive);
+        }
+        finally
+        {
+            ai.ResetOverrides();
+        }
+    }
+
+    [Fact]
+    public async Task DisambiguateWith1_ReplaysIntoClientRequestOrchestrator()
+    {
+        const string text = "ambig-route-1";
+        const string phone = "+14155553002";
+        var ai = GetFakeAi();
+        // Original message gets a fake low-confidence ServiceRequest classification.
+        ai.OverrideIntent(text,
+            new IntentDetectionResult(IntentKind.ServiceRequest, 0.3, "en", "test-low-conf"));
+        try
+        {
+            using var client = _fx.Factory.CreateClient();
+            (await client.InjectTextAsync(phone, text)).EnsureSuccessStatusCode();
+            var disambig = await client.WaitForOutboundAsync(
+                phone,
+                m => m.Body.Contains("Reply HIRE or OFFER", StringComparison.OrdinalIgnoreCase),
+                timeout: TimeSpan.FromSeconds(8));
+
+            (await client.InjectTextAsync(phone, "HIRE")).EnsureSuccessStatusCode();
+
+            // After "1", the router replays the original text into the ClientRequest
+            // orchestrator. The fake AI doesn't extract any service from the dummy
+            // text so we expect the "What service do you need?" reply.
+            var clientReply = await client.WaitForOutboundAsync(
+                phone,
+                m => m.Body.Contains("What service do you need", StringComparison.OrdinalIgnoreCase),
+                since: disambig.At,
+                timeout: TimeSpan.FromSeconds(8));
+
+            clientReply.Body.ShouldNotContain("I detected", Case.Insensitive);
+        }
+        finally
+        {
+            ai.ResetOverrides();
+        }
+    }
+
+    [Fact]
+    public async Task DisambiguateWith2_ReplaysIntoRegistrationOrchestrator()
+    {
+        const string text = "ambig-route-2";
+        const string phone = "+14155553003";
+        var ai = GetFakeAi();
+        ai.OverrideIntent(text,
+            new IntentDetectionResult(IntentKind.ProviderRegistration, 0.3, "en", "test-low-conf"));
+        try
+        {
+            using var client = _fx.Factory.CreateClient();
+            (await client.InjectTextAsync(phone, text)).EnsureSuccessStatusCode();
+            var disambig = await client.WaitForOutboundAsync(
+                phone,
+                m => m.Body.Contains("Reply HIRE or OFFER", StringComparison.OrdinalIgnoreCase),
+                timeout: TimeSpan.FromSeconds(8));
+
+            (await client.InjectTextAsync(phone, "OFFER")).EnsureSuccessStatusCode();
+
+            // After "2", the router replays the original text into the Registration
+            // orchestrator. The fake AI extracts no services from the dummy text so
+            // we expect the "Tell me what services you offer" reply.
+            var providerReply = await client.WaitForOutboundAsync(
+                phone,
+                m => m.Body.Contains("services you offer", StringComparison.OrdinalIgnoreCase),
+                since: disambig.At,
+                timeout: TimeSpan.FromSeconds(8));
+
+            providerReply.Body.ShouldNotContain("Do you need", Case.Insensitive);
+        }
+        finally
+        {
+            ai.ResetOverrides();
+        }
+    }
+
+    [Fact]
+    public async Task UnrecognisedDisambigReply_RePromptsAndKeepsDraft()
+    {
+        const string text = "ambig-bad-reply";
+        const string phone = "+14155553004";
+        var ai = GetFakeAi();
+        ai.OverrideIntent(text,
+            new IntentDetectionResult(IntentKind.ServiceRequest, 0.4, "en", "test-low-conf"));
+        try
+        {
+            using var client = _fx.Factory.CreateClient();
+            (await client.InjectTextAsync(phone, text)).EnsureSuccessStatusCode();
+            var disambig = await client.WaitForOutboundAsync(
+                phone,
+                m => m.Body.Contains("Reply HIRE or OFFER", StringComparison.OrdinalIgnoreCase),
+                timeout: TimeSpan.FromSeconds(8));
+
+            (await client.InjectTextAsync(phone, "maybe")).EnsureSuccessStatusCode();
+
+            var reprompt = await client.WaitForOutboundAsync(
+                phone,
+                m => m.Body.Contains("Reply HIRE", StringComparison.OrdinalIgnoreCase),
+                since: disambig.At,
+                timeout: TimeSpan.FromSeconds(8));
+
+            reprompt.Body.ShouldContain("HIRE", Case.Sensitive);
+            reprompt.Body.ShouldContain("OFFER", Case.Sensitive);
+        }
+        finally
+        {
+            ai.ResetOverrides();
+        }
+    }
+}

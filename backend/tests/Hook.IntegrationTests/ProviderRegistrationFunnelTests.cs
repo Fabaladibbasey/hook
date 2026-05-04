@@ -1,6 +1,5 @@
 using Hook.Features.ProviderAvailability.AvailabilityAggregate;
-using Hook.Shared.Persistence.Data;
-using Microsoft.EntityFrameworkCore;
+using Hook.Features.ProviderAvailability.Register;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 
@@ -171,6 +170,50 @@ public class ProviderRegistrationFunnelTests : IClassFixture<DevPipelineFixture>
         stored.ShouldNotBeNull();
         stored!.ShareContact.ShouldBeFalse();
         stored.Services.ShouldContain("carpentry");
+    }
+
+    [Fact]
+    public async Task EndsSession_ProviderFunnel_DeletesDraftAndReplies()
+    {
+        using var client = _fx.Factory.CreateClient();
+        var phone = "+220700000093";
+
+        (await client.InjectTextAsync(phone, "I offer plumbing")).EnsureSuccessStatusCode();
+        await client.WaitForOutboundAsync(
+            phone,
+            m => m.Body.Contains("Reply YES", StringComparison.OrdinalIgnoreCase),
+            TimeSpan.FromSeconds(15));
+
+        (await client.InjectTextAsync(phone, "leave")).EnsureSuccessStatusCode();
+        var ended = await client.WaitForOutboundAsync(
+            phone,
+            m => m.Body.Contains("Session ended", StringComparison.OrdinalIgnoreCase),
+            TimeSpan.FromSeconds(15));
+        ended.ShouldNotBeNull();
+
+        using var scope = _fx.Factory.Services.CreateScope();
+        var drafts = scope.ServiceProvider.GetRequiredService<IRegistrationDraftRepository>();
+        (await drafts.GetAsync(phone, default)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task FuzzyConfirmation_TypoYse_AdvancesProviderFunnel()
+    {
+        using var client = _fx.Factory.CreateClient();
+        var phone = "+220700000094";
+
+        (await client.InjectTextAsync(phone, "I offer plumbing")).EnsureSuccessStatusCode();
+        await client.WaitForOutboundAsync(
+            phone,
+            m => m.Body.Contains("Reply YES", StringComparison.OrdinalIgnoreCase),
+            TimeSpan.FromSeconds(15));
+
+        (await client.InjectTextAsync(phone, "yse")).EnsureSuccessStatusCode();
+        var advanced = await client.WaitForOutboundAsync(
+            phone,
+            m => m.Body.Contains("Send your location", StringComparison.OrdinalIgnoreCase),
+            TimeSpan.FromSeconds(15));
+        advanced.ShouldNotBeNull();
     }
 
     private static int CountOccurrences(string haystack, string needle)

@@ -17,6 +17,10 @@ public class FakeConversationAiTests
     [InlineData("increase range", IntentKind.IncreaseRange)]
     [InlineData("hello there", IntentKind.Greeting)]
     [InlineData("I do car mechanic?", IntentKind.ProviderRegistration)]
+    [InlineData("give me the contact details", IntentKind.ShareContact)]
+    [InlineData("share the chat link with both of us", IntentKind.ShareContact)]
+    [InlineData("connect us", IntentKind.ShareContact)]
+    [InlineData("their phone please", IntentKind.ShareContact)]
     public async Task DetectIntent_ShouldClassifyKeywords(string message, IntentKind expected)
     {
         var result = await _ai.DetectIntentAsync(message);

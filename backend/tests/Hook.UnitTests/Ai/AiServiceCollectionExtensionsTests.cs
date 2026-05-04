@@ -1,7 +1,6 @@
 using Hook.Features.Ai;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Shouldly;
 
 namespace Hook.UnitTests.Ai;

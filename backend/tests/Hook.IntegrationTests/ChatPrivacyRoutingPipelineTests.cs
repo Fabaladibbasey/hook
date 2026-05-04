@@ -1,6 +1,5 @@
 using System.Text.RegularExpressions;
 using Hook.Features.ChatSession.ParticipantAggregate;
-using Hook.Features.ChatSession.SessionAggregate;
 using Hook.Shared.Persistence.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;

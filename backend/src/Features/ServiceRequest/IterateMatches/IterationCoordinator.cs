@@ -21,7 +21,8 @@ public sealed class IterationCoordinator(
         var request = await requests.GetActiveByClientAsync(clientPhone.Value, ct);
         if (request is null)
         {
-            await whatsapp.SendTextAsync(clientPhone, "No active request. Tell me what service you need.", ct);
+            await whatsapp.SendTextAsync(clientPhone,
+                "No active request. Reply with what service you need (e.g. 'I need a plumber') to start a new one.", ct);
             return;
         }
 
