@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Hook.Features.Ai.Models;
@@ -17,7 +18,10 @@ public sealed class OllamaConversationAi(
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        // Allow fence tags (<user_input>…</user_input>) to appear literally in the serialized
+        // body — the body goes only to the local Ollama endpoint, never to a browser.
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
     public async Task<IntentDetectionResult> DetectIntentAsync(string userMessage, CancellationToken ct = default)
@@ -35,15 +39,28 @@ public sealed class OllamaConversationAi(
             required = new[] { "intent", "confidence", "language" }
         };
 
-        using var json = await CallJsonAsync(AiPrompts.IntentSystem, userMessage, schema, ct);
+        using var json = await CallJsonAsync(
+            AiPrompts.IntentSystem,
+            PromptSafety.Fence(userMessage, options.Value.MaxUserInputChars),
+            schema, ct);
         var root = json.RootElement;
-        var intentText = root.GetProperty("intent").GetString() ?? "Unknown";
-        var confidence = root.TryGetProperty("confidence", out var c) ? c.GetDouble() : 0;
-        var language = root.TryGetProperty("language", out var l) ? l.GetString() ?? "en" : "en";
-        var notes = root.TryGetProperty("notes", out var n) ? n.GetString() : null;
+        var intentText = root.GetProperty("intent").GetString() ?? "";
+        var confidence = root.TryGetProperty("confidence", out var c) ? Math.Clamp(c.GetDouble(), 0, 1) : 0;
+        var language   = root.TryGetProperty("language",   out var l) ? l.GetString() ?? "en" : "en";
+        var notes      = root.TryGetProperty("notes",      out var n) ? n.GetString() : null;
 
-        if (!Enum.TryParse<IntentKind>(intentText, ignoreCase: true, out var intent))
-            intent = IntentKind.Unknown;
+        // Strict ordinal match against the enum's named members. No ignoreCase fuzz, no
+        // fallback for unknown labels — anything we don't recognise lands as Unknown,
+        // which the router routes to the disambiguation flow.
+        var intent = IntentKind.Unknown;
+        foreach (var name in Enum.GetNames<IntentKind>())
+        {
+            if (string.Equals(name, intentText, StringComparison.Ordinal))
+            {
+                intent = Enum.Parse<IntentKind>(name);
+                break;
+            }
+        }
 
         return new IntentDetectionResult(intent, confidence, language, notes);
     }
@@ -60,11 +77,16 @@ public sealed class OllamaConversationAi(
             required = new[] { "slugs" }
         };
 
-        using var json = await CallJsonAsync(AiPrompts.ServiceExtractionSystem, userMessage, schema, ct);
+        using var json = await CallJsonAsync(
+            AiPrompts.ServiceExtractionSystem,
+            PromptSafety.Fence(userMessage, options.Value.MaxUserInputChars),
+            schema, ct);
         var slugs = json.RootElement.GetProperty("slugs")
             .EnumerateArray()
             .Select(s => s.GetString() ?? string.Empty)
-            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Where(PromptSafety.LooksLikeSlug)
+            .Distinct(StringComparer.Ordinal)
+            .Take(8)
             .ToArray();
 
         return new ServiceExtractionResult(slugs);
@@ -96,25 +118,34 @@ public sealed class OllamaConversationAi(
         var root = json.RootElement;
 
         var matched = root.TryGetProperty("matchedSlug", out var m) ? m.GetString() : null;
-        var isNew = root.TryGetProperty("isNew", out var n) && n.GetBoolean();
-        var proposed = root.TryGetProperty("proposedSlug", out var p) ? p.GetString() : null;
+        var isNew   = root.TryGetProperty("isNew", out var n) && n.GetBoolean();
 
-        return new ServiceJudgeResult(matched, isNew, proposed);
+        // The DB is the only ground truth for the slug taxonomy. If the LLM returns a slug
+        // outside the candidate list we passed in, treat the proposal as new and let the
+        // caller decide what to do with it (SlugResolver creates the canonical row from the
+        // user's normalized slug, never from the LLM's string).
+        if (!string.IsNullOrEmpty(matched) && !candidateSlugs.Contains(matched, StringComparer.Ordinal))
+        {
+            matched = null;
+            isNew = true;
+        }
+
+        return new ServiceJudgeResult(matched, isNew, ProposedSlug: proposedSlug);
     }
 
     public async Task<string> GenerateReplyAsync(ReplyContext context, CancellationToken ct = default)
     {
-        var transcript = string.Join("\n", context.RecentTurns.Select(t => $"{t.Role}: {t.Text}"));
-        var facts = context.Facts is { Count: > 0 }
-            ? "\nFacts:\n" + string.Join("\n", context.Facts.Select(kv => $"- {kv.Key}: {kv.Value}"))
+        var transcript = PromptSafety.EncodeTurns(context.RecentTurns);
+        var factsBlock = context.Facts is { Count: > 0 }
+            ? "\nFacts (JSON object):\n" + JsonSerializer.Serialize(context.Facts)
             : string.Empty;
 
         var userPrompt = $"""
             Purpose: {context.Purpose}
             User language: {context.LanguageHint}
-            {facts}
+            {factsBlock}
 
-            Recent conversation:
+            Recent conversation (JSON array of role+text turns):
             {transcript}
 
             Write the next reply.
@@ -147,7 +178,10 @@ public sealed class OllamaConversationAi(
             required = new[] { "language", "confidence" }
         };
 
-        using var json = await CallJsonAsync(AiPrompts.LanguageDetectionSystem, userMessage, schema, ct);
+        using var json = await CallJsonAsync(
+            AiPrompts.LanguageDetectionSystem,
+            PromptSafety.Fence(userMessage, options.Value.MaxUserInputChars),
+            schema, ct);
         var root = json.RootElement;
         var lang = root.GetProperty("language").GetString() ?? "en";
         var conf = root.GetProperty("confidence").GetDouble();

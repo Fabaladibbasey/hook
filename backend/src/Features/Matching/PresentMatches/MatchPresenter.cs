@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
 using Hook.Features.ContactSharing.Events;
@@ -28,15 +29,22 @@ public sealed class MatchPresenter(
             return;
         }
 
-        var lines = batch.Scored
-            .Select((s, i) => $"{i + 1}. {Mask(s.Candidate.Phone)} — {s.Candidate.DistanceKm:F1}km away (score {s.Score:F2})")
-            .ToList();
+        const int MaxPresented = 5;
+        var presented = batch.Scored.Take(MaxPresented)
+            .Select((s, i) => new
+            {
+                n        = i + 1,
+                phone    = Mask(s.Candidate.Phone),
+                distance = Math.Round(s.Candidate.DistanceKm, 1),
+                score    = Math.Round(s.Score, 2)
+            })
+            .ToArray();
 
         var facts = new Dictionary<string, string>
         {
             ["service"] = serviceSlug,
-            ["matches"] = string.Join("; ", lines),
-            ["count"] = batch.Scored.Count.ToString()
+            ["matches"] = JsonSerializer.Serialize(presented),
+            ["count"]   = presented.Length.ToString()
         };
 
         var ctx = new ReplyContext(

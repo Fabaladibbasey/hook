@@ -22,24 +22,29 @@ public static class DevProviderSeedSet
         Location Offset(double northKm, double eastKm) =>
             new(refLat + northKm * LatDegPerKm, refLng + eastKm * lngDegPerKm);
 
+        string PhoneAt(int i, string fallback) =>
+            i < opts.Phones.Count && !string.IsNullOrWhiteSpace(opts.Phones[i])
+                ? opts.Phones[i]
+                : fallback;
+
         var services = new[] { "plumbing", "plumber" };
 
         return new DevProviderSpec[]
         {
             new(
-                Phone: "+2203000001",
+                Phone: PhoneAt(0, "+2203000001"),
                 Services: services,
                 Location: Offset(northKm: 1.0, eastKm: 0.0),
                 FormattedAddress: "Independence Drive, Banjul, Gambia",
                 ShareContact: true),
             new(
-                Phone: "+2203000002",
+                Phone: PhoneAt(1, "+2203000002"),
                 Services: services,
                 Location: Offset(northKm: 0.0, eastKm: 3.0),
                 FormattedAddress: "Kanifing East, Serrekunda, Gambia",
                 ShareContact: false),
             new(
-                Phone: "+2203000003",
+                Phone: PhoneAt(2, "+2203000003"),
                 Services: services,
                 Location: Offset(northKm: -3.2, eastKm: -3.2),
                 FormattedAddress: "Bakau New Town, Gambia",

@@ -18,4 +18,6 @@ public sealed class DevProviderSeedOptions
 
     [Range(1, 168)]
     public int TtlHours { get; init; } = 24;
+
+    public IReadOnlyList<string> Phones { get; init; } = Array.Empty<string>();
 }

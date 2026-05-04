@@ -34,6 +34,21 @@ public sealed class RegistrationOrchestrator(
         var existing = await availability.GetAsync(phone.Value, ct);
         if (existing is not null)
         {
+            // Listed providers can unlist by replying with any cancel-class token
+            // (leave/end/bye/quit/done/exit/goodbye/cancel). The heartbeat reply
+            // explicitly instructs "Reply LEAVE to unlist", so the handler must
+            // honour that intent before extending the TTL.
+            var quick = QuickIntent.Detect(message.Text);
+            if (quick == IntentKind.Cancel)
+            {
+                await availability.RemoveAsync(phone.Value, ct);
+                await availability.SaveChangesAsync(ct);
+                logger.LogDebug("Unlisted provider {Phone}", phone.Mask());
+                await whatsapp.SendTextAsync(phone,
+                    "You are unlisted. Reply 'I offer …' to list again, or 'I need …' to request a service.", ct);
+                return;
+            }
+
             existing.Heartbeat(TimeSpan.FromHours(options.Value.ExpiryHours), now);
             await availability.SaveChangesAsync(ct);
             await refreshScheduler.ScheduleAsync(phone.Value, now, ct);

@@ -40,10 +40,22 @@ public sealed class SlugResolver(
 
         if (top is not null && topSim >= opts.AiJudgeThreshold)
         {
-            var judged = await ai.JudgeServiceMatchAsync(normalized, candidates.Select(c => c.Slug).ToArray(), ct);
-            if (!judged.IsNew && !string.IsNullOrEmpty(judged.MatchedSlug))
+            var candidateList = candidates.Select(c => c.Slug).ToArray();
+            var judged = await ai.JudgeServiceMatchAsync(normalized, candidateList, ct);
+
+            // Defense-in-depth: even though the IConversationAi adapter is supposed to
+            // reject out-of-candidate matches at its own boundary, refuse here too. The
+            // canonical Service taxonomy never accepts an LLM-invented slug — only one
+            // already known to the database.
+            var matched = judged.MatchedSlug;
+            var isExistingMatch =
+                !judged.IsNew
+                && !string.IsNullOrEmpty(matched)
+                && candidateList.Contains(matched, StringComparer.Ordinal);
+
+            if (isExistingMatch)
             {
-                return await AcceptExistingAsync(judged.MatchedSlug, rawExample ?? proposedSlug, SlugResolution.AiJudgedMerge, topSim, ct);
+                return await AcceptExistingAsync(matched!, rawExample ?? proposedSlug, SlugResolution.AiJudgedMerge, topSim, ct);
             }
             logger.LogDebug("AI judged proposal {Slug} as new (top similarity {Sim:F2})", normalized, topSim);
         }

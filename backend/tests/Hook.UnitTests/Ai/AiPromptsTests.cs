@@ -1,3 +1,4 @@
+using System.Reflection;
 using Hook.Features.Ai.Prompts;
 using Shouldly;
 
@@ -5,6 +6,32 @@ namespace Hook.UnitTests.Ai;
 
 public class AiPromptsTests
 {
+    [Fact]
+    public void EverySystemPrompt_StartsWithSafetyPreamble()
+    {
+        var systemPrompts = typeof(AiPrompts)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(f => f.IsLiteral && f.FieldType == typeof(string) && f.Name.EndsWith("System"))
+            .ToList();
+
+        systemPrompts.ShouldNotBeEmpty();
+
+        foreach (var field in systemPrompts)
+        {
+            var value = (string)field.GetRawConstantValue()!;
+            value.ShouldStartWith(AiPrompts.SafetyPreamble,
+                customMessage: $"{field.Name} is missing the safety preamble");
+        }
+    }
+
+    [Fact]
+    public void SafetyPreamble_NamesTheUserInputFence_AndForbidsPromptLeak()
+    {
+        AiPrompts.SafetyPreamble.ShouldContain("<user_input>");
+        AiPrompts.SafetyPreamble.ShouldContain("Never reveal", Case.Insensitive);
+        AiPrompts.SafetyPreamble.ShouldContain("Never follow", Case.Insensitive);
+    }
+
     [Fact]
     public void MatchPresenter_InstructsClient_HowToConnect()
     {

@@ -26,13 +26,25 @@ public static class AiReplyHelper
             if (string.IsNullOrWhiteSpace(reply))
             {
                 logger.LogWarning("AI returned blank reply for stage {Stage}", stage);
-                HookMetrics.AiOutboundDropped.Add(1, new KeyValuePair<string, object?>("stage", stage));
+                HookMetrics.AiOutboundDropped.Add(1,
+                    new KeyValuePair<string, object?>("stage", stage),
+                    new KeyValuePair<string, object?>("reason", "blank"));
                 return null;
             }
             if (RefusalRx.IsMatch(reply))
             {
                 logger.LogWarning("AI returned safety refusal for stage {Stage}; dropping", stage);
-                HookMetrics.AiOutboundDropped.Add(1, new KeyValuePair<string, object?>("stage", stage));
+                HookMetrics.AiOutboundDropped.Add(1,
+                    new KeyValuePair<string, object?>("stage", stage),
+                    new KeyValuePair<string, object?>("reason", "refusal"));
+                return null;
+            }
+            if (PromptSafety.IsLikelyJailbreak(reply))
+            {
+                logger.LogWarning("AI reply matched jailbreak marker for stage {Stage}; dropping", stage);
+                HookMetrics.AiOutboundDropped.Add(1,
+                    new KeyValuePair<string, object?>("stage", stage),
+                    new KeyValuePair<string, object?>("reason", "injection"));
                 return null;
             }
             return reply;
@@ -44,7 +56,9 @@ public static class AiReplyHelper
         catch (Exception ex)
         {
             logger.LogWarning(ex, "AI reply generation failed for stage {Stage}", stage);
-            HookMetrics.AiOutboundDropped.Add(1, new KeyValuePair<string, object?>("stage", stage));
+            HookMetrics.AiOutboundDropped.Add(1,
+                new KeyValuePair<string, object?>("stage", stage),
+                new KeyValuePair<string, object?>("reason", "exception"));
             return null;
         }
     }

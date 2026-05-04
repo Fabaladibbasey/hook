@@ -115,6 +115,44 @@ public class SlugResolverTests
         result.Resolution.ShouldBe(SlugResolution.Created);
     }
 
+    [Fact]
+    public async Task ResolveAsync_ShouldRejectAiJudgedMatchOutsideCandidateList()
+    {
+        // Defense-in-depth: even if the IConversationAi implementation returns a slug
+        // that wasn't in the candidate list (e.g. a future bug or a non-validating
+        // adapter), SlugResolver itself must refuse to write it as a canonical row.
+        var repo = new FakeServiceRepository();
+        repo.Seed("plumbing");
+        repo.SimilarityRule = (existing, _) => existing == "plumbing" ? 0.65 : 0;
+        var ai = new ScriptedAi { JudgeResult = new ServiceJudgeResult("evil-slug", false, null) };
+        var resolver = Build(repo, ai);
+
+        var result = await resolver.ResolveAsync("plumbingg", "I do plumbingg");
+
+        result.CanonicalSlug.ShouldNotBe("evil-slug");
+        result.CanonicalSlug.ShouldBe("plumbingg");                  // user's normalized proposal
+        result.Resolution.ShouldBe(SlugResolution.AiJudgedNew);
+        repo.GetSeed("evil-slug").ShouldBeNull();                    // never written
+        repo.GetSeed("plumbingg").ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ShouldHonourAiJudgedMatchWhenInCandidateList()
+    {
+        // Sanity: a legitimate AI judgment that picks an actual candidate still works.
+        var repo = new FakeServiceRepository();
+        repo.Seed("plumbing");
+        repo.Seed("carpentry");
+        repo.SimilarityRule = (existing, _) => existing == "plumbing" ? 0.65 : 0;
+        var ai = new ScriptedAi { JudgeResult = new ServiceJudgeResult("plumbing", false, null) };
+        var resolver = Build(repo, ai);
+
+        var result = await resolver.ResolveAsync("pipe-fix", "leaky pipe");
+
+        result.CanonicalSlug.ShouldBe("plumbing");
+        result.Resolution.ShouldBe(SlugResolution.AiJudgedMerge);
+    }
+
     private sealed class FakeServiceRepository : IServiceRepository
     {
         private readonly Dictionary<string, Service> _store = new(StringComparer.OrdinalIgnoreCase);

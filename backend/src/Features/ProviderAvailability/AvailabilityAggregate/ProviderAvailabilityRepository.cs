@@ -11,5 +11,11 @@ public sealed class ProviderAvailabilityRepository(HookDbContext db) : IProvider
     public async Task AddAsync(ProviderAvailability availability, CancellationToken ct = default) =>
         await db.ProviderAvailabilities.AddAsync(availability, ct);
 
+    public async Task RemoveAsync(string phone, CancellationToken ct = default)
+    {
+        var row = await db.ProviderAvailabilities.FirstOrDefaultAsync(p => p.Phone == phone, ct);
+        if (row is not null) db.ProviderAvailabilities.Remove(row);
+    }
+
     public Task SaveChangesAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
 }

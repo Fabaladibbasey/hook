@@ -15,4 +15,13 @@ public class OllamaOptions
     // /readyz strict probe timeout. Default 2s preserves k8s liveness strictness;
     // local CPU dev should override (e.g. 8s) to accommodate qwen2.5:3b warm-up.
     public int ReadinessProbeTimeoutSeconds { get; init; } = 2;
+
+    // Minimum confidence the LLM must report on a classified intent before the router
+    // will act on it; below this we route to the existing disambiguation flow. Matches
+    // InboundRouterHandler.AmbiguityConfidenceThreshold.
+    public double IntentMinConfidence { get; init; } = 0.6;
+
+    // Hard cap on user-supplied text passed into a fenced LLM prompt. Defends against
+    // prompt-stuffing / context-padding attacks.
+    public int MaxUserInputChars { get; init; } = 1000;
 }
