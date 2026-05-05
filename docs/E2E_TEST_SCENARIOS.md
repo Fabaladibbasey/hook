@@ -891,7 +891,7 @@ Both finalize the request and publish `ServiceRequestCreated`.
 
 ---
 
-## Defect cross-reference (D1–D6 from `E2E_TEST_REPORT_20260504.md`)
+## Defect cross-reference (D1–D6 from initial run report)
 
 | Defect | Pinned scenario(s) |
 |---|---|

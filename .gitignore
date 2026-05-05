@@ -13,6 +13,9 @@ obj-test/
 publish/
 artifacts/
 
+## E2E run reports (date-stamped, see docs/E2E_TEST_SCENARIOS.md template)
+E2E_TEST_REPORT_*.md
+
 ## Coverage
 coverage/
 *.cobertura.xml
