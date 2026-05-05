@@ -11,7 +11,12 @@ export default function MessageList({
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    ref.current?.scrollTo({ top: ref.current.scrollHeight, behavior: "smooth" });
+    const el = ref.current;
+    if (!el) return;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distFromBottom < 120) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
+    }
   }, [messages]);
 
   return (
@@ -23,14 +28,14 @@ export default function MessageList({
         return (
           <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
             <div
-              className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${
+              className={`max-w-[80%] rounded-2xl px-3 py-2 text-base ${
                 mine
                   ? "bg-ink text-white rounded-br-none"
                   : "bg-white border rounded-bl-none"
               } ${undecrypted ? "italic opacity-60" : ""}`}
             >
               {body}
-              <div className="text-[10px] opacity-60 mt-1">
+              <div className="text-xs opacity-60 mt-1">
                 {new Date(m.createdAt).toLocaleTimeString()}
               </div>
             </div>

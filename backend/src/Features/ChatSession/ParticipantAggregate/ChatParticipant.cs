@@ -12,10 +12,6 @@ public class ChatParticipant
     public bool IsActiveSession { get; private set; } = true;
     public Guid CurrentSessionId { get; private set; } = Guid.NewGuid();
 
-    public byte[]? PublicKey { get; private set; }
-
-    public long LastInboundSequence { get; private set; }
-
     public static ChatParticipant Create(Guid chatId, ChatParticipantRole role, string? phone) => new()
     {
         Id = Guid.NewGuid(),
@@ -26,8 +22,8 @@ public class ChatParticipant
     };
 
     /// <summary>
-    /// Rotates the SignalR session marker. Encryption keypair is intentionally preserved
-    /// so that history stays readable across reconnects on the same browser.
+    /// Rotates the SignalR session marker. Per-device keypairs are persisted in the
+    /// chat_device_keys table so history stays readable across reconnects from the same device.
     /// </summary>
     public Guid RotateSession()
     {
@@ -37,15 +33,6 @@ public class ChatParticipant
     }
 
     public bool IsCurrentSession(Guid sessionId) => CurrentSessionId == sessionId;
-
-    public void SetPublicKey(byte[] spki) => PublicKey = spki;
-
-    public bool TryAdvanceSequence(long sequence)
-    {
-        if (sequence <= LastInboundSequence) return false;
-        LastInboundSequence = sequence;
-        return true;
-    }
 
     private static string GenerateToken()
     {

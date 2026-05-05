@@ -24,7 +24,7 @@ public sealed class IdleEndHandler(
         session.End();
         await chats.SaveChangesAsync(ct);
 
-        await hub.Clients.Group(ChatHub.GroupName(evt.ChatId)).SendAsync("ChatEnded",
+        await hub.Clients.Group(ChatHub.ChatGroup(evt.ChatId)).SendAsync("ChatEnded",
             new { reason = "idle" }, ct);
     }
 }

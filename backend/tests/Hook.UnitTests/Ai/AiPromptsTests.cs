@@ -33,14 +33,17 @@ public class AiPromptsTests
     }
 
     [Fact]
-    public void MatchPresenter_InstructsClient_HowToConnect()
+    public void MatchPresenter_BodyOnly_NoActionLine()
     {
         var prompt = AiPrompts.MatchPresenterReplySystem;
 
-        prompt.ShouldContain("Reply 1");
-        prompt.ShouldContain("NEXT");
-        prompt.ShouldContain("INCREASE");
+        // Bot owns the call-to-action verbatim (appended in MatchPresenter), so
+        // the LLM prompt must explicitly forbid the model from emitting one.
+        // Otherwise we get duplicate / conflicting action lines.
+        prompt.ShouldContain("Do NOT add an action line", Case.Sensitive);
+        prompt.ShouldContain("Reply X", Case.Sensitive);          // example of forbidden phrasing
         prompt.ShouldContain("masked", Case.Insensitive);
+        prompt.ShouldNotContain("Reply 1 to", Case.Insensitive);   // no advertised affordance
     }
 
     [Fact]

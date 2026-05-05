@@ -24,13 +24,47 @@ public sealed class ChatRepository(HookDbContext db) : IChatRepository
     public async Task<IReadOnlyList<ChatParticipant>> GetParticipantsAsync(Guid chatId, CancellationToken ct = default) =>
         await db.ChatParticipants.Where(p => p.ChatId == chatId).ToListAsync(ct);
 
-    public async Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(Guid chatId, int take, CancellationToken ct = default) =>
-        await db.ChatMessages
-            .Where(m => m.ChatId == chatId)
-            .OrderByDescending(m => m.CreatedAt)
-            .Take(take)
-            .OrderBy(m => m.CreatedAt)
-            .ToListAsync(ct);
+    public Task<ChatDeviceKey?> GetDeviceKeyAsync(Guid participantId, Guid deviceId, CancellationToken ct = default) =>
+        db.ChatDeviceKeys.FirstOrDefaultAsync(k => k.ParticipantId == participantId && k.DeviceId == deviceId, ct);
+
+    public async Task<IReadOnlyList<ChatDeviceKey>> GetDeviceKeysAsync(Guid chatId, CancellationToken ct = default) =>
+        await db.ChatDeviceKeys.Where(k => k.ChatId == chatId).ToListAsync(ct);
+
+    public async Task UpsertDeviceKeyAsync(Guid chatId, Guid participantId, Guid deviceId, byte[] publicKey, DateTimeOffset now, CancellationToken ct = default)
+    {
+        var existing = await db.ChatDeviceKeys
+            .FirstOrDefaultAsync(k => k.ParticipantId == participantId && k.DeviceId == deviceId, ct);
+        if (existing is null)
+        {
+            await db.ChatDeviceKeys.AddAsync(new ChatDeviceKey
+            {
+                ChatId = chatId,
+                ParticipantId = participantId,
+                DeviceId = deviceId,
+                PublicKey = publicKey,
+                FirstSeenAt = now,
+                LastSeenAt = now
+            }, ct);
+        }
+        else
+        {
+            existing.PublicKey = publicKey;
+            existing.LastSeenAt = now;
+        }
+    }
+
+    public async Task<IReadOnlyList<(ChatMessage Header, ChatMessageRecipient Envelope)>> GetMessagesForDeviceAsync(Guid chatId, Guid deviceId, int take, CancellationToken ct = default)
+    {
+        var rows = await (
+            from m in db.ChatMessages
+            where m.ChatId == chatId
+            join r in db.ChatMessageRecipients on m.Id equals r.MessageId
+            where r.RecipientDeviceId == deviceId
+            orderby m.CreatedAt descending
+            select new { Header = m, Envelope = r }
+        ).Take(take).ToListAsync(ct);
+        return rows.OrderBy(x => x.Header.CreatedAt).Select(x => (x.Header, x.Envelope)).ToList();
+    }
 
     public async Task AddSessionAsync(SessionAggregate.ChatSession session, CancellationToken ct = default) =>
         await db.ChatSessions.AddAsync(session, ct);

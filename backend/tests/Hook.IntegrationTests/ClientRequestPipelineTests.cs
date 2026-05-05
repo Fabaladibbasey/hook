@@ -149,11 +149,14 @@ public class ClientRequestPipelineTests : IClassFixture<DevPipelineFixture>
         clientShare.Body.ShouldContain(topProviderPhone);
 
         var outbox = await client.GetOutboxAsync();
+        // Filter on client phone too — the fixture's outbox is shared across all
+        // tests, and any other parallel client funnel ending in the same provider
+        // pool will leave a similarly-shaped "Client wants ..." notification.
         var providerNotice = outbox.FirstOrDefault(m =>
             m.To == topProviderPhone &&
-            m.Body.StartsWith("Client wants ", StringComparison.OrdinalIgnoreCase));
+            m.Body.StartsWith("Client wants ", StringComparison.OrdinalIgnoreCase) &&
+            m.Body.Contains(phone, StringComparison.Ordinal));
         providerNotice.ShouldNotBeNull();
-        providerNotice!.Body.ShouldContain(phone);
     }
 
     [Fact]
@@ -359,6 +362,60 @@ public class ClientRequestPipelineTests : IClassFixture<DevPipelineFixture>
             timeout: TimeSpan.FromSeconds(15));
 
         ambiguity.Body.ShouldContain("Reply 1");
+    }
+
+    // Regression for the screenshot bug: AI presenter paraphrased the CTA into
+    // "Would you like more information or want to proceed?". User replies
+    // "Proceed" / "Detail" — these must route to ShareTopOrAskAsync (same as
+    // "yes"), NOT fall through to the LLM where they'd mis-classify.
+    [Theory]
+    [InlineData("proceed",  "+220700000201")]
+    [InlineData("Proceed",  "+220700000202")]
+    [InlineData("PROCEED",  "+220700000203")]
+    [InlineData("Detail",   "+220700000204")]
+    [InlineData("details",  "+220700000205")]
+    [InlineData("more info","+220700000206")]
+    [InlineData("continue", "+220700000207")]
+    [InlineData("connect",  "+220700000208")]
+    [InlineData("go ahead", "+220700000209")]
+    public async Task ServiceRequest_NaturalConfirmAfterPresent_RoutesToShareTopOrAsk(string reply, string phone)
+    {
+        using var client = _fx.Factory.CreateClient();
+
+        var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(client, phone);
+
+        (await client.InjectTextAsync(phone, reply)).EnsureSuccessStatusCode();
+
+        var followup = await client.WaitForOutboundAsync(
+            phone,
+            m => m.Body.StartsWith("Which match", StringComparison.OrdinalIgnoreCase) ||
+                 m.Body.StartsWith("Provider for ", StringComparison.OrdinalIgnoreCase),
+            since: presented.At,
+            timeout: TimeSpan.FromSeconds(15));
+
+        followup.Body.ShouldNotContain("listed as a provider", Case.Insensitive);
+    }
+
+    // "NEW" advertised in MatchPresenter / IterationCoordinator pickHint must
+    // close the active request and prompt for a fresh service. Previously fell
+    // through to the LLM with no deterministic handler.
+    [Fact]
+    public async Task ServiceRequest_NewAfterPresent_ClosesRequestAndPromptsFresh()
+    {
+        using var client = _fx.Factory.CreateClient();
+        var phone = "+220700000096";
+
+        var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(client, phone);
+
+        (await client.InjectTextAsync(phone, "NEW")).EnsureSuccessStatusCode();
+
+        var freshPrompt = await client.WaitForOutboundAsync(
+            phone,
+            m => m.Body.Contains("what service do you need", StringComparison.OrdinalIgnoreCase),
+            since: presented.At,
+            timeout: TimeSpan.FromSeconds(15));
+
+        freshPrompt.Body.ShouldContain("I need", Case.Insensitive);
     }
 
     [Fact]

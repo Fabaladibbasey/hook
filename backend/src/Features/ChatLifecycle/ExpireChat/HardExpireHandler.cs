@@ -21,7 +21,7 @@ public sealed class HardExpireHandler(
             await chats.SaveChangesAsync(ct);
         }
 
-        await hub.Clients.Group(ChatHub.GroupName(evt.ChatId)).SendAsync("ChatExpired",
+        await hub.Clients.Group(ChatHub.ChatGroup(evt.ChatId)).SendAsync("ChatExpired",
             new { reason = "24h-expired" }, ct);
 
         logger.LogInformation("Chat {ChatId} hard-expired", evt.ChatId);

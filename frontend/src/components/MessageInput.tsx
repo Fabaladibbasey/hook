@@ -24,19 +24,25 @@ export default function MessageInput({
   };
 
   return (
-    <form onSubmit={submit} className="flex gap-2 p-3 border-t bg-white">
+    <form
+      onSubmit={submit}
+      className="sticky bottom-0 flex gap-2 p-3 border-t bg-white"
+      style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
+    >
       <input
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder={disabled ? "Establishing secure channel…" : "Type a message…"}
         disabled={disabled}
-        className="flex-1 border rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ink disabled:bg-slate-100 disabled:text-slate-400"
+        inputMode="text"
+        enterKeyHint="send"
         autoComplete="off"
+        className="flex-1 min-h-[44px] border rounded-full px-4 py-2 text-base focus:outline-none focus:ring-2 focus:ring-ink disabled:bg-slate-100 disabled:text-slate-400"
       />
       <button
         type="submit"
         disabled={busy || disabled || !text.trim()}
-        className="px-4 py-2 bg-ink text-white rounded-full text-sm disabled:opacity-50"
+        className="min-h-[44px] px-5 py-2 bg-ink text-white rounded-full text-base disabled:opacity-50"
       >
         Send
       </button>

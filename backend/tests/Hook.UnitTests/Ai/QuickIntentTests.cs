@@ -70,6 +70,40 @@ public class QuickIntentTests
     [InlineData("not right", IntentKind.Rejection)]
     [InlineData("that's wrong", IntentKind.Rejection)]
     [InlineData("wong", IntentKind.Rejection)]                           // fuzzy typo of "wrong"
+    // Affirmatives advertised after match presentation (post-paraphrase / authoritative CTA).
+    [InlineData("proceed", IntentKind.Confirmation)]
+    [InlineData("PROCEED", IntentKind.Confirmation)]
+    [InlineData("Proceed", IntentKind.Confirmation)]
+    [InlineData("continue", IntentKind.Confirmation)]
+    [InlineData("Continue", IntentKind.Confirmation)]
+    [InlineData("details", IntentKind.Confirmation)]
+    [InlineData("detail", IntentKind.Confirmation)]
+    [InlineData("Detail", IntentKind.Confirmation)]
+    [InlineData("info", IntentKind.Confirmation)]
+    [InlineData("share", IntentKind.Confirmation)]
+    [InlineData("connect", IntentKind.Confirmation)]
+    [InlineData("go", IntentKind.Confirmation)]
+    [InlineData("go ahead", IntentKind.Confirmation)]
+    [InlineData("go on", IntentKind.Confirmation)]
+    [InlineData("more info", IntentKind.Confirmation)]
+    [InlineData("more information", IntentKind.Confirmation)]
+    [InlineData("more details", IntentKind.Confirmation)]
+    [InlineData("tell me more", IntentKind.Confirmation)]
+    [InlineData("send it", IntentKind.Confirmation)]
+    [InlineData("share contact", IntentKind.Confirmation)]
+    [InlineData("connect us", IntentKind.Confirmation)]
+    [InlineData("connect me", IntentKind.Confirmation)]
+    [InlineData("intro me", IntentKind.Confirmation)]
+    [InlineData("want to proceed", IntentKind.Confirmation)]
+    [InlineData("i want to proceed", IntentKind.Confirmation)]
+    // Fuzzy typos for the longer affirmative tokens.
+    [InlineData("procced", IntentKind.Confirmation)]                     // fuzzy typo of "proceed"
+    [InlineData("detials", IntentKind.Confirmation)]                     // fuzzy typo of "details"
+    [InlineData("conect", IntentKind.Confirmation)]                      // fuzzy typo of "connect"
+    // Bare "new" → close active request and prompt fresh.
+    [InlineData("new", IntentKind.NewRequest)]
+    [InlineData("NEW", IntentKind.NewRequest)]
+    [InlineData(" New ", IntentKind.NewRequest)]
     public void Detect_KnownInputs(string input, IntentKind expected)
         => Assert.Equal(expected, QuickIntent.Detect(input));
 
@@ -82,6 +116,13 @@ public class QuickIntentTests
     [InlineData("yo")]                                       // 2 chars, distance-1 to "no" — must NOT collide
     [InlineData("of course not")]
     [InlineData("yes but no")]
+    // Adjacent English words that were potential fuzzy collisions for the new
+    // Confirmation tokens. Short tokens "go" / "info" / "share" are literal-only
+    // (excluded from fuzzy table) so these must NOT match Confirmation.
+    [InlineData("got")]                                      // dist 1 from "go" — must stay null
+    [InlineData("into")]                                     // dist 1 from "info" — must stay null
+    [InlineData("shore")]                                    // dist 1 from "share" — must stay null
+    [InlineData("shape")]                                    // dist 1 from "share" — must stay null
     public void Detect_ReturnsNullForUnrelated(string? input)
         => Assert.Null(QuickIntent.Detect(input));
 

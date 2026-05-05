@@ -4,10 +4,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import App from "./App";
 import ChatRoom from "./routes/ChatRoom";
 import DevConsole from "./routes/DevConsole";
-import { registerSW } from "./pwa/registerSW";
 import "./styles.css";
-
-registerSW();
 
 const root = createRoot(document.getElementById("root")!);
 root.render(

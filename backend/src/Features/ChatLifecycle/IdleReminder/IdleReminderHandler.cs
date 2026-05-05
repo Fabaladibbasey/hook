@@ -21,7 +21,7 @@ public sealed class IdleReminderHandler(
             return;
         }
 
-        await hub.Clients.Group(ChatHub.GroupName(evt.ChatId)).SendAsync(
+        await hub.Clients.Group(ChatHub.ChatGroup(evt.ChatId)).SendAsync(
             "IdleReminder",
             new { message = "Are you still available? Reply to continue." },
             ct);

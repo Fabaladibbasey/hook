@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { fetchJson } from "../api/fetchJson";
 
 type OutboxMessage = {
   at: string;
@@ -20,21 +21,17 @@ export default function DevConsole() {
   const [lng, setLng] = useState("-122.4194");
   const [outbox, setOutbox] = useState<OutboxMessage[]>([]);
   const [status, setStatus] = useState<string>("");
-  const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    fetch("/dev/whatsapp/status")
-      .then((r) => r.json())
-      .then((d: { enabled: boolean }) => setEnabled(d.enabled))
+    fetchJson<{ enabled: boolean }>("/dev/whatsapp/status")
+      .then((d) => setEnabled(d.enabled))
       .catch(() => setEnabled(false));
   }, []);
 
   useEffect(() => {
     if (!enabled) return;
 
-    fetch("/dev/whatsapp/outbox")
-      .then((r) => r.json())
-      .then((d: OutboxMessage[]) => setOutbox(d.slice().reverse()));
+    fetchJson<OutboxMessage[]>("/dev/whatsapp/outbox").then((d) => setOutbox(d.slice().reverse()));
 
     const es = new EventSource("/dev/whatsapp/outbox/stream");
     es.onmessage = (ev) => {
@@ -42,7 +39,6 @@ export default function DevConsole() {
       setOutbox((prev) => [msg, ...prev].slice(0, 200));
     };
     es.onerror = () => setStatus("SSE disconnected; will retry on reload");
-    esRef.current = es;
     return () => es.close();
   }, [enabled]);
 
@@ -55,13 +51,16 @@ export default function DevConsole() {
       body.latitude = parseFloat(lat);
       body.longitude = parseFloat(lng);
     }
-    const r = await fetch("/dev/whatsapp/inbound", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    });
-    const data = await r.json().catch(() => ({}));
-    setStatus(r.ok ? `Injected ${(data as any).messageId ?? ""}` : `Error ${r.status}: ${JSON.stringify(data)}`);
+    try {
+      const data = await fetchJson<{ messageId?: string }>("/dev/whatsapp/inbound", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      setStatus(`Injected ${data.messageId ?? ""}`);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    }
   }
 
   if (enabled === null) return <div className="p-6">Loading…</div>;

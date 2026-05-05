@@ -123,6 +123,24 @@ public sealed class InboundRouterHandler(
             return;
         }
 
+        // Bare "NEW" advertised by MatchPresenter / IterationCoordinator: close the
+        // current request and prompt for a fresh service description. Deterministic
+        // bypass keeps the LLM out of it — especially important for users who are
+        // also listed providers (would mis-route to the heartbeat path).
+        if (activeRequest is not null && QuickIntent.Detect(text) is IntentKind.NewRequest)
+        {
+            if (activeRequest.Status != ServiceRequestStatus.Closed)
+            {
+                activeRequest.Close();
+                await requests.SaveChangesAsync(ct);
+            }
+            logger.LogDebug("Route → NewRequest (closed {RequestId}, prompting) for {Phone}",
+                activeRequest.Id, masked);
+            await whatsapp.SendTextAsync(msg.From,
+                "OK — what service do you need now? Reply 'I need …' to start a new request.", ct);
+            return;
+        }
+
         // Deterministic hint short-circuits the LLM intent call entirely.
         var detected = hint is { } h
             ? new IntentDetectionResult(h, 1.0, "en", "hint")

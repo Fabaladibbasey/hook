@@ -28,10 +28,23 @@ public class ChatParticipantConfiguration : IEntityTypeConfiguration<ChatPartici
         builder.Property(p => p.Token).HasMaxLength(80).IsRequired();
         builder.PropertyAsStringEnum(p => p.Role, 16);
         builder.Property(p => p.Phone).HasMaxLength(20);
-        builder.Property(p => p.PublicKey).HasMaxLength(200);
-        builder.Property(p => p.LastInboundSequence).IsRequired();
         builder.HasIndex(p => p.Token).IsUnique().HasDatabaseName("ux_chat_participants_token");
         builder.HasIndex(p => p.ChatId).HasDatabaseName("ix_chat_participants_chat_id");
+    }
+}
+
+public class ChatDeviceKeyConfiguration : IEntityTypeConfiguration<ChatDeviceKey>
+{
+    public void Configure(EntityTypeBuilder<ChatDeviceKey> builder)
+    {
+        builder.ToTable("chat_device_keys");
+        builder.HasKey(k => k.Id);
+        builder.Property(k => k.PublicKey).HasMaxLength(200).IsRequired();
+        builder.Property(k => k.LastInboundSequence).IsRequired();
+        builder.HasIndex(k => new { k.ParticipantId, k.DeviceId })
+               .IsUnique()
+               .HasDatabaseName("ux_chat_device_keys_participant_device");
+        builder.HasIndex(k => k.ChatId).HasDatabaseName("ix_chat_device_keys_chat");
     }
 }
 
@@ -41,10 +54,25 @@ public class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMessage>
     {
         builder.ToTable("chat_messages");
         builder.HasKey(m => m.Id);
-        builder.Property(m => m.Ciphertext).HasMaxLength(5000).IsRequired();
-        builder.Property(m => m.Nonce).HasMaxLength(12).IsRequired();
         builder.Property(m => m.Sequence).IsRequired();
+        builder.Property(m => m.SenderDeviceId).IsRequired();
+        builder.HasMany(m => m.Recipients)
+               .WithOne()
+               .HasForeignKey(r => r.MessageId)
+               .OnDelete(DeleteBehavior.Cascade);
         builder.HasIndex(m => new { m.ChatId, m.CreatedAt }).HasDatabaseName("ix_chat_messages_chat_created");
+    }
+}
+
+public class ChatMessageRecipientConfiguration : IEntityTypeConfiguration<ChatMessageRecipient>
+{
+    public void Configure(EntityTypeBuilder<ChatMessageRecipient> builder)
+    {
+        builder.ToTable("chat_message_recipients");
+        builder.HasKey(r => new { r.MessageId, r.RecipientDeviceId });
+        builder.Property(r => r.Ciphertext).HasMaxLength(5000).IsRequired();
+        builder.Property(r => r.Nonce).HasMaxLength(12).IsRequired();
+        builder.HasIndex(r => r.RecipientDeviceId).HasDatabaseName("ix_chat_message_recipients_device");
     }
 }
 
