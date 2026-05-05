@@ -45,6 +45,15 @@ public class ProviderAvailability
         Services = services.Distinct().ToList();
     }
 
+    /// <summary>
+    /// Append additional services to the existing list (deduped). Caller is expected to
+    /// pass the per-provider cap so we can short-circuit once the list is full.
+    /// </summary>
+    public void AddServices(IEnumerable<string> services, int max)
+    {
+        Services = Services.Concat(services).Distinct().Take(max).ToList();
+    }
+
     public void UpdateLocation(Location location, string formattedAddress)
     {
         Location = location.ToPoint();

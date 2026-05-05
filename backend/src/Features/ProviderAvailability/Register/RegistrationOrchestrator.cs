@@ -49,6 +49,20 @@ public sealed class RegistrationOrchestrator(
                 return;
             }
 
+            // Incremental add: a listed provider sending "I also offer X" appends new
+            // canonical slugs to their availability silently. Yes/no/edit short tokens
+            // produce no extraction so they fall through to the heartbeat reply.
+            if (await TryAddServicesAsync(existing, message.Text ?? string.Empty, ct) is { Count: > 0 } added)
+            {
+                existing.Heartbeat(TimeSpan.FromHours(options.Value.ExpiryHours), now);
+                await availability.SaveChangesAsync(ct);
+                await refreshScheduler.ScheduleAsync(phone.Value, now, ct);
+                logger.LogDebug("Added {Count} services for provider {Phone}", added.Count, phone.Mask());
+                await whatsapp.SendTextAsync(phone,
+                    $"Added {string.Join(", ", added)}. You're now listed for {string.Join(", ", existing.Services)} (extended for {options.Value.ExpiryHours}h). Reply LEAVE to unlist.", ct);
+                return;
+            }
+
             existing.Heartbeat(TimeSpan.FromHours(options.Value.ExpiryHours), now);
             await availability.SaveChangesAsync(ct);
             await refreshScheduler.ScheduleAsync(phone.Value, now, ct);
@@ -85,6 +99,21 @@ public sealed class RegistrationOrchestrator(
         }
     }
 
+    /// Extends the TTL of an already-listed provider without sending any WhatsApp reply.
+    /// Caller (router) sends a tailored ack so we don't double-message on greetings.
+    public async Task<AvailabilityAggregate.ProviderAvailability?> HeartbeatSilentAsync(
+        PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
+    {
+        var existing = await availability.GetAsync(phone.Value, ct);
+        if (existing is null) return null;
+
+        existing.Heartbeat(TimeSpan.FromHours(options.Value.ExpiryHours), now);
+        await availability.SaveChangesAsync(ct);
+        await refreshScheduler.ScheduleAsync(phone.Value, now, ct);
+        logger.LogDebug("Silent heartbeat for active provider {Phone}", phone.Mask());
+        return existing;
+    }
+
     private async Task StartAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
     {
         var text = message.Text ?? string.Empty;
@@ -96,13 +125,7 @@ public sealed class RegistrationOrchestrator(
             return;
         }
 
-        var canonicalSlugs = new List<string>();
-        foreach (var slug in extracted.Slugs)
-        {
-            var resolved = await slugResolver.ResolveAsync(slug, text, ct);
-            canonicalSlugs.Add(resolved.CanonicalSlug);
-        }
-
+        var canonicalSlugs = await ResolveAllAsync(extracted.Slugs, text, ct);
         var capped = canonicalSlugs.Distinct().Take(options.Value.MaxServicesPerProvider).ToList();
         // Persist the draft BEFORE sending the prompt so a fast "yes" reply
         // doesn't race ahead of the save and miss the draft in InboundRouter.
@@ -125,6 +148,30 @@ public sealed class RegistrationOrchestrator(
     private async Task ConfirmServicesAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
     {
         var quick = QuickIntent.Detect(message.Text);
+
+        // Bracket-style "and X": if the reply is not a confirm/reject/edit/cancel token,
+        // try to extract another service and append before falling through to the
+        // standard yes/edit handling. Lets a provider register multiple services across
+        // separate messages instead of cramming them into a single offer.
+        if (quick is null or not (IntentKind.Confirmation or IntentKind.Rejection or IntentKind.Edit or IntentKind.Cancel))
+        {
+            var extracted = await ai.ExtractServicesAsync(message.Text ?? string.Empty, ct);
+            if (extracted.Slugs.Count > 0)
+            {
+                var canonical = await ResolveAllAsync(extracted.Slugs, message.Text ?? string.Empty, ct);
+                var merged = draft.DraftServices.Concat(canonical).Distinct()
+                    .Take(options.Value.MaxServicesPerProvider).ToList();
+                if (merged.Count != draft.DraftServices.Count)
+                {
+                    draft.DraftServices = merged;
+                    await drafts.UpsertAsync(draft, ct);
+                    await whatsapp.SendTextAsync(phone,
+                        $"Updated: {string.Join(", ", merged)}. Reply YES to confirm or EDIT to change.", ct);
+                    return;
+                }
+            }
+        }
+
         var intent = quick is { } q
             ? new IntentDetectionResult(q, 1.0, "en", "quick")
             : await ai.DetectIntentAsync(message.Text ?? string.Empty, ct);
@@ -145,6 +192,32 @@ public sealed class RegistrationOrchestrator(
         }
 
         await whatsapp.SendTextAsync(phone, "Reply YES to confirm or EDIT to change.", ct);
+    }
+
+    private async Task<List<string>> ResolveAllAsync(IEnumerable<string> slugs, string originalText, CancellationToken ct)
+    {
+        var canonical = new List<string>();
+        foreach (var slug in slugs)
+        {
+            var resolved = await slugResolver.ResolveAsync(slug, originalText, ct);
+            canonical.Add(resolved.CanonicalSlug);
+        }
+        return canonical;
+    }
+
+    private async Task<List<string>> TryAddServicesAsync(
+        AvailabilityAggregate.ProviderAvailability existing, string text, CancellationToken ct)
+    {
+        var extracted = await ai.ExtractServicesAsync(text, ct);
+        if (extracted.Slugs.Count == 0) return new List<string>();
+
+        var canonical = await ResolveAllAsync(extracted.Slugs, text, ct);
+        var newSlugs = canonical.Except(existing.Services).Distinct().ToList();
+        if (newSlugs.Count == 0) return new List<string>();
+
+        existing.AddServices(newSlugs, options.Value.MaxServicesPerProvider);
+        // Recompute the actually-added subset after the cap (Services is now capped).
+        return newSlugs.Where(s => existing.Services.Contains(s)).ToList();
     }
 
     private async Task CollectLocationAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)

@@ -130,10 +130,10 @@ internal static class AiPrompts
     public const string GreetingReplySystem = SafetyPreamble +
         """
         You are Hook, a WhatsApp bot. The user just greeted you. Greet them back
-        warmly in their language and ask one short question about what they need
-        help with. Under 15 words. Do NOT pitch services, do NOT list examples,
-        do NOT mention plumbing/registration. Plain text, no markdown, no emojis
-        unless the user used them.
+        warmly in their language, then ask in one short sentence whether they want
+        to REQUEST a service (they need help) or REGISTER as a provider (they offer
+        a service). Under 30 words. Plain text, no markdown, no emojis unless the
+        user used them.
         """;
 
     public const string MatchPresenterReplySystem = SafetyPreamble +

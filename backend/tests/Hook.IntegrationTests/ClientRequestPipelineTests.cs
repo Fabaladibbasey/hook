@@ -25,6 +25,7 @@ public class ClientRequestPipelineTests : IClassFixture<DevPipelineFixture>
 
         reply.Body.ShouldNotBeNullOrEmpty();
         reply.Body.ShouldNotContain("YES or NO", Case.Insensitive);
+        reply.Body.ShouldNotContain("HIRE or OFFER", Case.Insensitive);
     }
 
     [Fact]

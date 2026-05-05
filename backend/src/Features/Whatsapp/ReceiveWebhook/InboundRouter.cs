@@ -54,8 +54,25 @@ public sealed class InboundRouterHandler(
             if (await AbandonAsync(phone, msg.From, ct)) return;
         }
 
+        // Compute hint up front so we can detect cross-flow intent switches before
+        // dispatching into an active draft. Hint is deterministic regex; LLM intent
+        // detection happens only on the no-active-draft path below.
+        var hint = QuickIntent.DetectIntentHint(text);
+
         if (await registrationDrafts.GetAsync(phone, ct) is not null)
         {
+            // Cross-flow switch: provider mid-registration sends a strong service-request
+            // hint ("I need …", "my X is broken", "no power"). Discard the reg draft and
+            // route to client funnel. Hint-only by design — ambiguous text continues the
+            // current funnel; user can always type CANCEL/END to start over.
+            if (hint == IntentKind.ServiceRequest)
+            {
+                await registrationDrafts.DeleteAsync(phone, ct);
+                logger.LogDebug("Cross-flow switch reg→client for {Phone}", masked);
+                await clientOrchestrator.HandleAsync(msg, ct);
+                return;
+            }
+
             logger.LogDebug("Route → RegistrationOrchestrator (active reg draft) for {Phone}", masked);
             await registrationOrchestrator.HandleAsync(msg, ct);
             return;
@@ -63,6 +80,17 @@ public sealed class InboundRouterHandler(
 
         if (await clientDrafts.GetAsync(phone, ct) is not null)
         {
+            // Cross-flow switch: client mid-request sends a strong provider-registration
+            // hint ("I'm a plumber", "I offer carpentry"). Discard client draft and route
+            // to reg funnel.
+            if (hint == IntentKind.ProviderRegistration)
+            {
+                await clientDrafts.DeleteAsync(phone, ct);
+                logger.LogDebug("Cross-flow switch client→reg for {Phone}", masked);
+                await registrationOrchestrator.HandleAsync(msg, ct);
+                return;
+            }
+
             logger.LogDebug("Route → ClientRequestOrchestrator (active client draft) for {Phone}", masked);
             await clientOrchestrator.HandleAsync(msg, ct);
             return;
@@ -70,7 +98,6 @@ public sealed class InboundRouterHandler(
 
         if (await TryResolveAmbiguousAsync(msg, text, masked, ct)) return;
 
-        var hint = QuickIntent.DetectIntentHint(text);
         var intent = new LazyIntent(ai, text);
 
         if (await feedback.GetLatestPendingForClientAsync(phone, ct) is { } pendingFeedback)
@@ -101,7 +128,18 @@ public sealed class InboundRouterHandler(
             ? new IntentDetectionResult(h, 1.0, "en", "hint")
             : await intent.GetAsync(ct);
 
-        if (hint is null
+        // One lookup, reused below by the ambiguity guard and the Greeting/Unknown branch.
+        // Listed providers shouldn't see the HIRE/OFFER prompt — they're already on the
+        // provider side and the orchestrator can disambiguate based on draft state.
+        var listedProvider = detected.Intent is IntentKind.ServiceRequest
+                                              or IntentKind.ProviderRegistration
+                                              or IntentKind.Greeting
+                                              or IntentKind.Unknown
+            ? await providers.GetAsync(phone, ct)
+            : null;
+
+        if (listedProvider is null
+            && hint is null
             && detected.Intent is IntentKind.ServiceRequest or IntentKind.ProviderRegistration
             && detected.Confidence < AmbiguityConfidenceThreshold
             && (activeRequest is null || activeRequest.Status != ServiceRequestStatus.Open))
@@ -130,7 +168,18 @@ public sealed class InboundRouterHandler(
             case IntentKind.ShareContact when activeRequest is not null:
                 await ShareTopOrAskAsync(activeRequest, msg.From, text, detected, masked, ct);
                 return;
-            case IntentKind.ServiceRequest when activeRequest?.Status != ServiceRequestStatus.Open:
+            case IntentKind.ServiceRequest when activeRequest is not null:
+                // Silent supersede: close the existing request and start a fresh client
+                // funnel from the captured text. Replaces the older END/KEEP detour.
+                if (activeRequest.Status != ServiceRequestStatus.Closed)
+                {
+                    activeRequest.Close();
+                    await requests.SaveChangesAsync(ct);
+                    logger.LogDebug("Silent supersede: closed {RequestId} for {Phone}", activeRequest.Id, masked);
+                }
+                await clientOrchestrator.HandleAsync(msg, ct);
+                return;
+            case IntentKind.ServiceRequest:
                 logger.LogDebug("Route → ClientRequestOrchestrator (new request) for {Phone}", masked);
                 await clientOrchestrator.HandleAsync(msg, ct);
                 return;
@@ -139,16 +188,32 @@ public sealed class InboundRouterHandler(
                 await registrationOrchestrator.HandleAsync(msg, ct);
                 return;
             case IntentKind.Greeting:
-            case IntentKind.Unknown:
-                if (await providers.GetAsync(phone, ct) is not null)
+                if (listedProvider is not null)
                 {
-                    logger.LogDebug("Silent heartbeat for listed provider {Phone}", masked);
+                    await registrationOrchestrator.HeartbeatSilentAsync(msg.From, clock.GetUtcNow(), ct);
+                    var services = string.Join(", ", listedProvider.Services);
+                    var ack = $"Hi! You're currently listed as a provider for {services}. " +
+                              "Reply 'I need …' to request a different service yourself, or LEAVE to unlist.";
+                    await whatsapp.SendTextAsync(msg.From, ack, ct);
+                    logger.LogDebug("Listed-provider greet-back for {Phone}", masked);
+                    return;
+                }
+                logger.LogDebug("Cold reply (greeting-reply) for {Phone}", masked);
+                await SendColdReplyAsync(msg.From, text, detected, "greeting-reply", ct);
+                return;
+            case IntentKind.Unknown:
+                if (listedProvider is not null)
+                {
+                    // Listed provider sending off-topic text — orchestrator extends TTL
+                    // AND sends the visible heartbeat ack ("You're listed for X, extended
+                    // for Nh, reply LEAVE to unlist"). Never silent: every inbound gets
+                    // a reply so the provider knows the bot is alive and TTL was bumped.
+                    logger.LogDebug("Listed-provider heartbeat ack for {Phone}", masked);
                     await registrationOrchestrator.HandleAsync(msg, ct);
                     return;
                 }
-                var purpose = detected.Intent == IntentKind.Greeting ? "greeting-reply" : "out-of-scope";
-                logger.LogDebug("Cold reply ({Purpose}) for {Phone} intent={Intent}", purpose, masked, detected.Intent);
-                await SendColdReplyAsync(msg.From, text, detected, purpose, ct);
+                logger.LogDebug("Cold reply (out-of-scope) for {Phone}", masked);
+                await SendColdReplyAsync(msg.From, text, detected, "out-of-scope", ct);
                 return;
             case IntentKind.Cancel:
                 await AbandonAsync(phone, msg.From, ct);

@@ -41,7 +41,7 @@ frontend/coverage/
 backend/src/wwwroot/
 
 ## Local Claude settings
-.claude/settings.local.json
+.claude/
 
 ## Local scratch / log dumps
 /logs-*.txt

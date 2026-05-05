@@ -98,7 +98,18 @@ public static class QuickIntent
         (EmergencyRx,               IntentKind.ServiceRequest),
     };
 
-    private static readonly string?[] ConfirmTokens = { "y", "yes", "yeah", "yep", "yup", "ok", "okay", "sure", "confirm", "correct", "exactly" };
+    private static readonly string?[] ConfirmTokens =
+    {
+        "y", "yes", "yeah", "yep", "yup", "ok", "okay", "sure", "confirm", "correct", "exactly",
+        // Affirmatives the bot may advertise after presenting matches ("Reply 1 to
+        // connect…", "Would you like more information or want to proceed?"). Keeping
+        // them deterministic short-circuits the LLM, which mis-classifies short
+        // tokens — especially for users who are also listed providers.
+        // Short tokens "go" / "info" / "share" are intentionally LITERAL-only
+        // (handled in the switch below) so distance-1 fuzzy doesn't collide with
+        // adjacent English words like "got" / "into" / "shore".
+        "proceed", "continue", "details", "detail", "connect"
+    };
     private static readonly string?[] RejectTokens  = { "n", "no", "nope", "nah", "stop", "wrong", "incorrect" };
     private static readonly string?[] CancelTokens  = { "cancel", "end", "bye", "goodbye", "exit", "quit", "leave", "done" };
 
@@ -108,6 +119,24 @@ public static class QuickIntent
         ("for sure",      IntentKind.Confirmation),
         ("sure thing",    IntentKind.Confirmation),
         ("yes please",    IntentKind.Confirmation),
+        ("go ahead",      IntentKind.Confirmation),
+        ("go on",         IntentKind.Confirmation),
+        ("more info",     IntentKind.Confirmation),
+        ("more information", IntentKind.Confirmation),
+        ("more details",  IntentKind.Confirmation),
+        ("more detail",   IntentKind.Confirmation),
+        ("tell me more",  IntentKind.Confirmation),
+        ("send it",       IntentKind.Confirmation),
+        ("send contact",  IntentKind.Confirmation),
+        ("share contact", IntentKind.Confirmation),
+        ("share it",      IntentKind.Confirmation),
+        ("connect us",    IntentKind.Confirmation),
+        ("connect me",    IntentKind.Confirmation),
+        ("intro me",      IntentKind.Confirmation),
+        ("i want to proceed", IntentKind.Confirmation),
+        ("want to proceed",   IntentKind.Confirmation),
+        ("i want details",    IntentKind.Confirmation),
+        ("want details",      IntentKind.Confirmation),
         ("that's right",  IntentKind.Confirmation),
         ("thats right",   IntentKind.Confirmation),
         ("you're right",  IntentKind.Confirmation),
@@ -148,10 +177,12 @@ public static class QuickIntent
         // 1. Literal exact match (fast path; preserves all existing behaviour)
         var literal = s switch
         {
-            "y" or "yes" or "yeah" or "yep" or "yup" or "ok" or "okay" or "sure" or "confirm" or "correct" or "exactly" => IntentKind.Confirmation,
+            "y" or "yes" or "yeah" or "yep" or "yup" or "ok" or "okay" or "sure" or "confirm" or "correct" or "exactly"
+                or "proceed" or "continue" or "go" or "details" or "detail" or "info" or "share" or "connect" => IntentKind.Confirmation,
             "n" or "no" or "nope" or "nah" or "stop" or "wrong" or "incorrect" => IntentKind.Rejection,
             "cancel" or "end" or "bye" or "goodbye" or "exit" or "quit" or "leave" or "done" => IntentKind.Cancel,
             "edit" => IntentKind.Edit,
+            "new" => IntentKind.NewRequest,
             // "yo" intentionally excluded — too close to "no" for fuzzy match safety.
             "hi" or "hello" or "hey" or "hola" or "salam" or "salaam" or "howdy" => IntentKind.Greeting,
             _ => (IntentKind?)null

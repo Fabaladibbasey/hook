@@ -14,5 +14,6 @@ public enum IntentKind
     Edit,
     Cancel,
     FeedbackResponse,
-    Greeting
+    Greeting,
+    NewRequest
 }

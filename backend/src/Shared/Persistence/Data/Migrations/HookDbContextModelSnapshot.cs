@@ -559,6 +559,7 @@ namespace Hook.Shared.Persistence.Data.Migrations
 
                     b.ToTable("ambiguous_intent_drafts", (string)null);
                 });
+
 #pragma warning restore 612, 618
         }
     }

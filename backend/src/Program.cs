@@ -68,7 +68,16 @@ try
     builder.Services.AddProblemDetails();
     builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
-    builder.Host.UseWolverine();
+    builder.Host.UseWolverine(opts =>
+    {
+        // Wolverine's default 60s handler timeout preempts Ollama cold-start inference
+        // (qwen2.5:3b on CPU can take 60-90s), aborting the socket mid-read. Align with
+        // OllamaOptions.TimeoutSeconds plus a small buffer so HttpClient.Timeout governs.
+        var ollamaTimeout = builder.Configuration
+            .GetSection(OllamaOptions.SectionName)
+            .GetValue<int?>(nameof(OllamaOptions.TimeoutSeconds)) ?? 120;
+        opts.DefaultExecutionTimeout = TimeSpan.FromSeconds(ollamaTimeout + 30);
+    });
 
     var app = builder.Build();
 

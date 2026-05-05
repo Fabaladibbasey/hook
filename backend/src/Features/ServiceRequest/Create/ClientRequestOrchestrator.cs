@@ -34,6 +34,33 @@ public sealed class ClientRequestOrchestrator(
         var draft = await drafts.GetAsync(phone.Value, ct) ?? ClientRequestDraft.Start(phone.Value, now);
         draft.UpdatedAt = now;
 
+        // Slug switch mid-funnel: if the user is past the slug-confirm step and sends a
+        // strong service-request hint with a different canonical slug, reset to
+        // ConfirmService for the new slug while preserving any captured location. The
+        // hint guard avoids running an LLM extract on every location/description reply.
+        if (draft.Step is ClientRequestStep.AwaitingLocation
+                       or ClientRequestStep.ConfirmLocation
+                       or ClientRequestStep.AwaitingDescription
+            && QuickIntent.DetectIntentHint(message.Text) == IntentKind.ServiceRequest)
+        {
+            var extracted = await ai.ExtractServicesAsync(message.Text ?? string.Empty, ct);
+            if (extracted.Slugs.Count > 0)
+            {
+                var canonical = await slugResolver.ResolveAsync(extracted.Slugs[0], message.Text ?? string.Empty, ct);
+                if (!string.Equals(canonical.CanonicalSlug, draft.DraftServiceSlug, StringComparison.Ordinal))
+                {
+                    draft.DraftServiceSlug = canonical.CanonicalSlug;
+                    draft.Step = ClientRequestStep.ConfirmService;
+                    // Location fields preserved on draft so YES skips straight to AwaitingDescription.
+                    await drafts.UpsertAsync(draft, ct);
+                    logger.LogDebug("Slug switch → {Slug} for {Phone}", canonical.CanonicalSlug, phone.Mask());
+                    await whatsapp.SendTextAsync(phone,
+                        $"Switching to {canonical.CanonicalSlug.Replace('-', ' ')}. Reply YES to confirm or NO to choose another.", ct);
+                    return;
+                }
+            }
+        }
+
         switch (draft.Step)
         {
             case ClientRequestStep.AwaitingService:
@@ -83,6 +110,17 @@ public sealed class ClientRequestOrchestrator(
             : await ai.DetectIntentAsync(message.Text ?? string.Empty, ct);
         if (intent.Intent == IntentKind.Confirmation)
         {
+            // If we already have a captured location (slug-switch path), skip the
+            // location collection steps and jump straight to description.
+            if (draft.DraftLatitude is not null && draft.DraftLongitude is not null)
+            {
+                draft.Step = ClientRequestStep.AwaitingDescription;
+                await drafts.UpsertAsync(draft, ct);
+                await whatsapp.SendTextAsync(phone,
+                    $"Got it. Using your saved location: {draft.DraftFormattedAddress}. Want to add a description? Send it now or reply SKIP.", ct);
+                return;
+            }
+
             draft.Step = ClientRequestStep.AwaitingLocation;
             await drafts.UpsertAsync(draft, ct);
             await whatsapp.SendTextAsync(phone, "Send your location pin (or type your address).", ct);
