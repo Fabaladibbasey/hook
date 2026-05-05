@@ -56,13 +56,18 @@ public sealed class MatchPresenter(
         var fallbackLines = batch.Scored
             .Select((s, i) => $"{i + 1}. {Mask(s.Candidate.Phone)} — {s.Candidate.DistanceKm:F1}km away")
             .ToList();
+        // Bot owns the call-to-action verbatim — the AI presenter only writes the
+        // body. Keeping the action line deterministic guarantees the vocabulary
+        // (PICK / NEXT / NEW) matches the InboundRouter's intent detectors, so
+        // user replies always route correctly regardless of how the LLM phrases
+        // the body.
         var pickHint = batch.Scored.Count == 1
-            ? "Reply PICK 1 to share contact."
+            ? "Reply PICK 1 to share contact, NEXT for more, or NEW for a different service."
             : $"Reply PICK 1 to PICK {batch.Scored.Count} to share contact, NEXT for more, or NEW for a different service.";
-        var fallback = $"Top matches for {serviceSlug}:\n{string.Join("\n", fallbackLines)}\n{pickHint}";
+        var fallback = $"Top matches for {serviceSlug}:\n{string.Join("\n", fallbackLines)}";
 
         var reply = await AiReplyHelper.TryGenerateOrFallbackAsync(ai, ctx, "match_presenter", fallback, logger, ct);
-        await whatsapp.SendTextAsync(clientPhone, reply, ct);
+        await whatsapp.SendTextAsync(clientPhone, $"{reply}\n\n{pickHint}", ct);
 
         await BroadcastToProvidersAsync(clientPhone, batch, serviceSlug, ct);
     }
