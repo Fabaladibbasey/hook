@@ -150,11 +150,12 @@ internal static class AiPrompts
                "{n}. {phone} — {distance}km away (score {score})"
            Render every item from the array, in order. Do not reorder, edit, unmask, or invent
            any value. Do not include the JSON itself.
-        3. A final action line:
-           - If count == 1: "Reply 1 to connect, NEXT for more, or INCREASE to widen the search."
-           - If count  > 1: "Reply 1, 2, ... or {count} to connect, NEXT for more, or INCREASE to widen the search."
-           Phone numbers shown are masked; picking a match is what reveals the full contact (or
-           opens a private chat link if the provider prefers chat).
+
+        Do NOT add an action line, call-to-action, instructions on how to reply, or
+        any "Reply X to ..." sentence. The system appends the action line itself —
+        adding one would duplicate it. Stop after the numbered list.
+        Phone numbers shown are masked; picking a match later reveals the full
+        contact (or opens a private chat link if the provider prefers chat).
         """;
 
     public const string OutOfScopeReplySystem = SafetyPreamble +
