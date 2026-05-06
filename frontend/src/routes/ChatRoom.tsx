@@ -77,9 +77,12 @@ export default function ChatRoom() {
         className="sticky top-0 z-10 px-4 py-3 border-b bg-ink text-white flex items-center justify-between"
         style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
       >
-        <div>
-          <div className="text-sm opacity-75">Hook secure chat</div>
-          <div className="text-xs opacity-50">{open.role}</div>
+        <div className="flex items-center gap-2">
+          <img src="/hook-logo.png" alt="Hook" className="h-8 w-auto rounded" />
+          <div>
+            <div className="text-sm opacity-75">Hook secure chat</div>
+            <div className="text-xs opacity-50">{open.role}</div>
+          </div>
         </div>
         <button
           type="button"
