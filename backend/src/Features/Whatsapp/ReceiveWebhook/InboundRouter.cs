@@ -322,10 +322,13 @@ public sealed class InboundRouterHandler(
         if (matchOrder.Count == 0) return;
 
         var picked = PickProviderResolver.Resolve(text, matchOrder);
-        if (picked is null) return;
+        if (picked.Count == 0) return;
 
-        logger.LogDebug("Route → PhoneExchanger.TryExchange match={MatchId} for {Phone}", picked.Id, maskedPhone);
-        await phoneExchanger.TryExchangeAsync(picked.Id, ct);
+        foreach (var match in picked)
+        {
+            logger.LogDebug("Route → PhoneExchanger.TryExchange match={MatchId} for {Phone}", match.Id, maskedPhone);
+            await phoneExchanger.TryExchangeAsync(match.Id, ct);
+        }
     }
 
     private async Task ShareTopOrAskAsync(

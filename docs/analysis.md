@@ -40,8 +40,10 @@ WhatsApp-first connector. Clients describe a need in natural language. AI extrac
 
 ## 4. AI Model
 
-- **Pluggable abstraction** with **Gemini** as default.
-- Easy swap to Claude/OpenAI/other later via interface.
+- **Ollama** (mandatory). `IConversationAi` interface kept for testability; Ollama is the only production implementation — no pluggable factory registered.
+- Config section `Ollama:`: `BaseUrl` (default `http://localhost:11434`), `Model` (default `qwen2.5:3b`), `TimeoutSeconds`, `ReadinessProbeTimeoutSeconds`.
+- `/readyz` pings Ollama via `AiReadinessProbe`; returns HTTP 503 if Ollama is down or the probe times out.
+- On failure during a conversation turn: `AiReplyHelper` catches and drops the outbound — no message sent, no fallback.
 - AI handles: intent detection, service extraction, entity extraction, clarification, multilingual replies, free-form conversational messaging.
 - Deterministic system handles: matching, distance, ranking, privacy rules, chat lifecycle.
 
@@ -107,13 +109,28 @@ score = (0.6 × proximity) + (0.3 × recency) + (0.1 × success_rate)
 
 ---
 
-## 11. Mixed-Consent UX
+## 11. Bilateral Consent & Contact Sharing
 
-When one side disabled `share_contact` → both must use chat link.
+Contact sharing requires **both** parties to consent independently:
 
-- **Inform the consenting side** explicitly: "Other party prefers chat — here's the link."
-- Reveals the other party's choice to the consenting one. Honest about the constraint.
-- Other party gets the link without explanation (their choice already made).
+- **Client** answers a phone-share question during intake (`AwaitingPhoneShareConsent`). Answer stored as `ServiceRequest.SharePhoneNumber` (default `false`).
+- **Provider** sets `ShareContact` at registration.
+- Gate in `PhoneExchanger`: `request.SharePhoneNumber && provider.ShareContact`.
+  - Both `true` → direct phone exchange (client gets provider phone; provider gets client phone).
+  - Either `false` → `ChatRoutingRequested`: both sides receive a signed chat link, no raw phone shared.
+- Re-pick on an already-shared match: client gets a reminder; provider is not re-notified (idempotent).
+- Providers with `PickedAt = null` (never selected) receive **zero messages** about the request — privacy invariant.
+
+## 11a. Provider Selection (Pick)
+
+After matches are presented, clients select providers by sending:
+
+- `PICK <n>` — pick by 1-based index (e.g. `PICK 2`)
+- `PICK 1,3` — comma-separated multi-pick (deduped)
+- `PICK ALL` — select all presented providers
+- Last 4 digits of provider phone — phone-fragment match
+
+`PickProviderResolver.Resolve` handles all four forms. Out-of-range indices are silently ignored. `Match.PickedAt` (nullable `DateTimeOffset`, indexed on `(RequestId, PickedAt)`) is set on first pick; subsequent picks for the same match are idempotent on provider notification.
 
 ---
 
@@ -289,7 +306,7 @@ Why Google over OSM Nominatim: better emerging-market coverage (West Africa, Sou
 - **Privacy / data deletion** (GDPR-style erasure): deferred to v2.
 - **Phone validation:** normalize to E.164 at ingress.
 - **Service-type-aware radius:** v2.
-- **AI prompt-injection safety:** rely on Gemini's built-in safety; revisit if abuse seen.
+- **AI prompt-injection safety:** `PromptSafety` sanitizes facts dict at prompt construction time; Ollama has no built-in content filter — revisit if abuse seen.
 
 ---
 

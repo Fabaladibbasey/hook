@@ -38,8 +38,8 @@ With 3 numbers available, these scenarios — previously dev-only or impractical
 
 | Scenario | New real-mode setup |
 |---|---|
-| MA-006 fan-out share=true | Pick any 2 numbers as providers (share=true, same service). Third sends a matching client request. Both providers should receive `"Client wants <slug> (<client>). Expect a message."` |
-| MA-007 fan-out skips share=false | Same as MA-006 but mix consent — one provider share=true, one share=false. Only share=true gets fan-out. |
+| CN-007 PICK ALL share=true | Pick any 2 numbers as providers (share=true, same service). Third sends a matching client request. After `PICK ALL`, both providers should receive `"Client wants <slug> (<client>). Expect a message."` |
+| CN-008 PICK 1,3 multi-select | Same setup — client picks specific providers by index. Only picked providers receive notification. |
 | CN-001 PICK with share=true | Provider phone shown to client is a real WA number → can be messaged directly. |
 | CN-003 PICK with share=false → chat link | Both client and provider receive `/c/.../<token>` via real WA; open in two browser tabs to drive CH-* end-to-end without DB seeding. |
 | CH-004/005 SignalR key exchange + send | Open both chat-link URLs in two browser tabs (or two devices); covers full E2E crypto path with real participants. |
@@ -378,10 +378,11 @@ Log: `"Route → RegistrationOrchestrator"` on each step.
 2. `"yes"` → `"Send your location pin (or type your address)."`
 3. text address → `"Found: '<addr>'. Reply YES to confirm or send your GPS pin."`
 4. `"yes"` → `"Got your location. Want to add a description? Send it now or reply SKIP."`
-5. `"SKIP"` → `"Looking for nearby providers…"` and `service_requests` row created. `ServiceRequestCreated` event published.
+5. `"SKIP"` → `"Should we share your phone number with selected providers? Reply YES or NO."`
+6. `"NO"` → `"Looking for nearby providers…"` and `service_requests` row created. `ServiceRequestCreated` event published.
 
-DB: `service_requests` with `ClientPhone=<sender>`, `ServiceSlug="plumbing"`, `Status=Open`, `CurrentRadiusKm=5`.
-**Dev exec:** standard 5 inbound calls.
+DB: `service_requests` with `ClientPhone=<sender>`, `ServiceSlug="plumbing"`, `Status=Open`, `CurrentRadiusKm=5`, `SharePhoneNumber=false`.
+**Dev exec:** standard 6 inbound calls.
 **Non-dev exec:** same via WA Web.
 
 ### CL-002 — Reject service slug  [P1] [both]
@@ -446,6 +447,19 @@ Both finalize the request and publish `ServiceRequestCreated`.
 **Expected:** `"Couldn't find that address. Please send your GPS pin (📎 → Location)."`. Step stays at `AwaitingLocation`.
 **Dev exec / Non-dev exec:** standard.
 
+### CL-011 — Phone share YES at intake  [P1] [both]
+
+**Preconditions:** at `AwaitingPhoneShareConsent` (reached via CL-001 steps 1–5).
+**Expected:** `"YES"` → `"Looking for nearby providers…"`. DB: `service_requests.SharePhoneNumber=true`.
+**Dev exec:** POST inbound `{ text: "YES" }` at the consent step.
+**Non-dev exec:** same via WA Web.
+
+### CL-012 — Wrong-step recovery at AwaitingPhoneShareConsent  [P2] [both]
+
+**Preconditions:** at `AwaitingPhoneShareConsent`.
+**Expected:** unrecognised text (e.g. `"maybe"`) → reprompt `"Should we share your phone number with selected providers? Reply YES or NO."`. Step unchanged. No `service_requests` row created.
+**Dev exec / Non-dev exec:** standard.
+
 ---
 
 ## § 4. Matching & iteration
@@ -483,23 +497,25 @@ Both finalize the request and publish `ServiceRequestCreated`.
 **Expected:** `recency_score = exp(-hours/12)` → recent ranks substantially higher.
 **Dev exec / Non-dev exec:** seed; assert order matches manual exp computation.
 
-### MA-006 — Fan-out broadcast to share=true  [P1] [both]
+### MA-006 — Providers not notified at match-presentation time  [P1] [both]
 
-**Preconditions:** matched providers, all `ShareContact=true`.
-**Expected:** each receives outbound `"Client wants <slug> (<client-phone>). Expect a message."`. `match.ContactShared=true` for each.
-**Dev exec:** outbox stream shows N outbounds (one per provider) plus the client-side top-N message.
-**Non-dev exec:** observe in real WA on each provider account (impractical at scale — usually verified via logs).
+**Preconditions:** matched providers presented to client.
+**Expected:** `ServiceRequestCreatedHandler` calls `presenter.PresentAsync` for the client only. **No outbound to any provider at this point.** Provider notification happens in `PhoneExchanger.TryExchangeAsync` only when the client sends a PICK command (see CN-001, CN-007).
+**Dev exec:** run CL-001 through match presentation; assert outbox contains exactly 1 outbound (to the client listing matches). Assert no outbounds to provider phones.
+**Non-dev exec:** same — verify only the client receives the match list.
+**Notes:** replaces former "fan-out at match time" design. Provider privacy: they are unaware they were matched until explicitly picked.
 
-### MA-007 — Fan-out skips share=false  [P1] [both]
+### MA-007 — Match presentation includes PICK instructions  [P1] [both]
 
-**Preconditions:** mixed: 1 share=true, 1 share=false.
-**Expected:** only share=true gets fan-out outbound.
-**Dev exec / Non-dev exec:** assert by outbox count and provider phone.
+**Preconditions:** ≥1 match available.
+**Expected:** `MatchPresenter` outbound includes PICK command hint, e.g. `"Reply PICK 1 to PICK <N> to share contact, NEXT for more, or NEW for a different service."` Exact phrasing may be AI-rephrased; assert the presence of PICK keyword and index range.
+**Dev exec:** run CL-001 through to match presentation; assert outbound contains `PICK` and index numbers.
+**Non-dev exec:** same.
 
-### MA-008 — Fan-out dedup on NEXT  [P1] [both]
+### MA-008 — No PICK re-notification on NEXT  [P1] [both]
 
-**Preconditions:** MA-006 ran; client sends `"NEXT"`.
-**Expected:** new providers in second batch broadcast; previously notified providers do NOT re-broadcast (`alreadyNotified` set).
+**Preconditions:** CN-001 or CN-007 ran (at least one provider picked); client sends `"NEXT"`.
+**Expected:** new providers presented to client; already-picked providers do NOT receive another outbound. `match.PickedAt` for previously picked matches unchanged.
 **Dev exec / Non-dev exec:** standard.
 
 ### MA-009 — First exhaustion auto-expand 5→10  [P1] [both]
@@ -553,10 +569,10 @@ Both finalize the request and publish `ServiceRequestCreated`.
 
 ## § 5. Connection / contact exchange
 
-### CN-001 — PICK 1 with share=true  [P0] [both]
+### CN-001 — PICK 1 with share=true (both sides)  [P0] [both]
 
-**Preconditions:** matches presented; picked provider has `ShareContact=true`.
-**Expected:** client sends `"PICK 1"` → outbound `"Provider for <slug>: <provider-phone>. Reach out directly."`. `match.ContactShared=true`. `ContactExchanged` event published.
+**Preconditions:** matches presented; picked provider has `ShareContact=true` AND `ServiceRequest.SharePhoneNumber=true`.
+**Expected:** client sends `"PICK 1"` → outbound `"Provider for <slug>: <provider-phone>. Reach out directly."`. Provider receives `"Client wants <slug> (<client-phone>). Expect a message."`. `match.ContactShared=true`, `match.PickedAt` set. `ContactExchanged` event published.
 **Dev exec / Non-dev exec:** standard.
 
 ### CN-002 — PICK out of bounds  [P2] [both]
@@ -594,6 +610,48 @@ Both finalize the request and publish `ServiceRequestCreated`.
 **Expected:** `ContactExchanged` published exactly once on first share. Subsequent PICK on same match does NOT republish.
 **Dev exec:** Wolverine local message log (or temporary handler counting events).
 **Non-dev exec:** N/A — internal event, not user-visible.
+
+### CN-007 — PICK ALL selects all presented providers  [P1] [both]
+
+**Preconditions:** ≥2 matches presented; all `ShareContact=true`; `ServiceRequest.SharePhoneNumber=true`.
+**Expected:** `"PICK ALL"` → `PhoneExchanger.TryExchangeAsync` called for each match. Each provider receives client phone; client receives each provider phone (one message per provider). All `match.PickedAt` set.
+**Dev exec:** seed 2+ providers; run CL-001; send `"PICK ALL"`; assert N outbounds to providers + N outbounds to client.
+**Non-dev exec:** same via WA Web.
+
+### CN-008 — PICK 1,3 multi-select  [P1] [both]
+
+**Preconditions:** ≥3 matches presented.
+**Expected:** `"PICK 1,3"` → picks matches at positions 1 and 3 only. Position 2 unpicked (`PickedAt=null`). Duplicate index (e.g. `"PICK 1,1"`) results in one pick (deduped).
+**Dev exec:** seed 3 providers; run PICK 1,3; assert positions 1 and 3 have `PickedAt` set; position 2 has `PickedAt=null` and received no outbound.
+**Non-dev exec:** same.
+
+### CN-009 — Phone fragment pick (last 4 digits)  [P1] [both]
+
+**Preconditions:** match presented; provider phone ends in `1234`; `ShareContact=true`; `ServiceRequest.SharePhoneNumber=true`.
+**Expected:** client sends `"1234"` → `PickProviderResolver.MatchByPhoneFragment` returns that provider; exchange proceeds as CN-001.
+**Dev exec:** seed provider with known phone; send last-4 fragment; assert match.
+**Non-dev exec:** same.
+
+### CN-010 — Re-pick idempotency  [P1] [both]
+
+**Preconditions:** CN-001 completed; `match.ContactShared=true`.
+**Expected:** second `"PICK 1"` → client receives reminder (provider phone again); **provider NOT re-notified**; `ContactExchanged` NOT re-published; `match.ContactShared` unchanged.
+**Dev exec:** run CN-001; send `"PICK 1"` again; assert only 1 outbound (to client); assert `ContactExchanged` count unchanged.
+**Non-dev exec:** same.
+
+### CN-011 — Unpicked providers receive zero messages  [P1] [both]
+
+**Preconditions:** 3 matches presented; client picks only match 1.
+**Expected:** matches 2 and 3 have `PickedAt=null`. No outbound messages sent to providers at positions 2 and 3 from the pick flow (or from match presentation — provider notification only occurs at PICK time, not at match-presentation time).
+**Dev exec:** seed 3 providers; run CL-001; send `"PICK 1"`; assert outbox contains no messages to providers 2 and 3.
+**Non-dev exec:** same.
+
+### CN-012 — Client opted out → chat link regardless of provider consent  [P1] [both]
+
+**Preconditions:** `ServiceRequest.SharePhoneNumber=false`; picked provider has `ShareContact=true`.
+**Expected:** `"PICK 1"` → chat routing triggered (same as CN-003 path). No phone exchange. Client and provider both receive chat link.
+**Dev exec:** run CL-001 with NO at consent step; seed share=true provider; PICK 1; assert `chat_sessions` row and no phone exchange.
+**Non-dev exec:** same.
 
 ---
 

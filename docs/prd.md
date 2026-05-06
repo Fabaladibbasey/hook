@@ -26,8 +26,8 @@ Build a **WhatsApp-based multi-service matching system** that connects clients w
 
 ## Model
 
-* Use AI model (e.g. Gemini)
-* Model choice is interchangeable
+* **Ollama** (mandatory) — model `qwen2.5:3b` by default, configured via `Ollama:Model`
+* `IConversationAi` interface kept for testability; Ollama is the only production implementation
 
 ---
 
@@ -148,6 +148,7 @@ System:
 
 * Location (required)
 * Optional description
+* Phone share consent — bot asks "Should we share your phone number with selected providers? Reply YES or NO." Answer stored as `ServiceRequest.SharePhoneNumber` (default `false`).
 
 ---
 
@@ -244,26 +245,37 @@ Client can request more matches:
 
 ---
 
-# 🔗 CONNECTION RULES
+# 🔗 PROVIDER SELECTION & CONNECTION
 
-## Case A — Contact Sharing Enabled (both)
+## Selecting a Provider (PICK)
 
-* Share phone numbers both ways
+After matches are presented, the client selects one or more providers:
 
----
-
-## Case B — Contact Sharing Disabled (either)
-
-👉 Enforced rule:
-
-* BOTH must use chat link
+* `PICK 1` — select provider at position 1
+* `PICK 1,3` — select providers at positions 1 and 3 (comma-separated, duplicates ignored)
+* `PICK ALL` — select all presented providers
+* Last 4 digits of provider's phone — select the matching provider
 
 ---
 
-## 🚫 Case C — Mixed
+## Connection Rules
 
-* Not allowed
-* Never exists
+Contact sharing is **bilateral** — both the client (captured at intake) and the provider (set at registration) must independently consent.
+
+### Case A — Both consented
+
+* `ServiceRequest.SharePhoneNumber = true` AND `ProviderAvailability.ShareContact = true`
+* Direct phone exchange: client receives provider's phone; provider receives client's phone.
+
+### Case B — Either opted out
+
+* Either flag is `false`
+* Both sides receive a signed chat link (`ChatRoutingRequested`). No raw phone number shared.
+
+### Privacy invariants
+
+* Providers with `PickedAt = null` (never picked) receive **zero messages** about the request.
+* Re-picking the same provider is idempotent: client gets a reminder; provider is not re-notified.
 
 ---
 
@@ -494,6 +506,7 @@ Options:
 * service_type
 * location
 * description
+* share_phone_number (bool, default false)
 * created_at
 
 ---
@@ -508,6 +521,7 @@ Options:
 * score
 * contact_shared
 * chat_id
+* picked_at (timestamptz, nullable — set on first PICK; null = not picked)
 
 ---
 

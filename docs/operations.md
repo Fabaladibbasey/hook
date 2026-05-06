@@ -9,9 +9,11 @@ Production deploy uses Docker Compose on a single VPS, behind Caddy with auto Le
 | `caddy`     | `caddy:2-alpine`                   | TLS termination + reverse proxy        |
 | `api`       | `ghcr.io/<org>/hook:<tag>`         | ASP.NET host (API + SignalR + SPA)     |
 | `postgres`  | `postgis/postgis:16-3.4`           | Postgres 16 + PostGIS + pg_trgm        |
+| `ollama`    | `ollama/ollama:latest`             | Local LLM inference (qwen2.5:3b default) |
+| `seq`       | `datalust/seq:latest`              | Structured log aggregation (internal, via Caddy) |
 | `backup`    | `postgis/postgis:16-3.4` + cron    | Daily `pg_dump` to `hook-backups`      |
 
-All services share `hook-net`. Caddy is the only public surface (ports 80/443).
+All services share `hook-net`. Caddy is the only public surface (ports 80/443). `api` depends on both `postgres` and `ollama` being healthy before starting.
 
 ## First-time setup
 
@@ -32,8 +34,12 @@ All services share `hook-net`. Caddy is the only public surface (ports 80/443).
    docker compose -f docker-compose.prod.yml --env-file .env.prod pull
    docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
    ```
-6. **Migrations** run on container start (the API applies EF migrations against `postgres` once it's healthy).
-7. **Verify:**
+6. **Pull the AI model** (blocks until downloaded; `/readyz` returns 503 until complete):
+   ```sh
+   docker compose -f docker-compose.prod.yml exec ollama ollama pull ${OLLAMA_MODEL:-qwen2.5:3b}
+   ```
+7. **Migrations** run on container start (the API applies EF migrations against `postgres` once it's healthy).
+8. **Verify:**
    ```sh
    curl -fsS https://${HOOK_DOMAIN}/healthz
    curl -fsS https://${HOOK_DOMAIN}/metrics | head
@@ -49,9 +55,10 @@ See `.env.example` for the full list. Categories:
 | Image              | `HOOK_IMAGE`                                                           |
 | Postgres           | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`                    |
 | WhatsApp           | `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_GRAPH_API_VERSION` |
-| Gemini             | `GEMINI_API_KEY`, `GEMINI_MODEL`                                       |
+| Ollama             | `OLLAMA_BASE_URL` (default `http://ollama:11434`), `OLLAMA_MODEL` (default `qwen2.5:3b`) |
 | Google geocoding   | `GOOGLE_GEOCODING_API_KEY`                                             |
 | Chat               | `CHAT_TOKEN_SIGNING_KEY` (≥32-byte base64)                             |
+| Seq / logs         | `SEQ_FIRSTRUN_ADMINPASSWORDHASH`, `SEQ_INGEST_API_KEY` (optional), `SEQ_URL` (default `http://seq:5341`), `LOGS_DOMAIN`, `LOGS_BASIC_AUTH_USER`, `LOGS_BASIC_AUTH_HASH` |
 | Backups            | `BACKUP_RETENTION_DAYS` (default 14)                                   |
 
 `.env.prod` is git-ignored (`.env.*` glob in `.gitignore`).
@@ -120,6 +127,6 @@ For schema rollback, restore from the latest pre-deploy `pg_dump` (see Backups a
 | `/healthz` 502 from Caddy       | `docker compose ps` — `api` not healthy. Check `docker logs hook-api`. |
 | Cert acquisition fails          | DNS not pointing yet, or port 80 not reachable. Check `docker logs hook-caddy`. |
 | Webhook 403 every time          | `WHATSAPP_APP_SECRET` mismatch. Verify Meta Business Manager value.|
-| AI calls all fail               | `GEMINI_API_KEY` quota / wrong model. Check `hook.ai.calls.total` metric outcome label. |
+| AI calls all fail               | Ollama container not healthy or model not pulled. `docker compose ps ollama`; `docker logs hook-ollama`; run `docker compose exec ollama ollama pull <model>` if model missing. Check `hook.ai.calls.total` metric. |
 | `outside_window_sends` climbing | Provider check-in timing drifted out of 24h window — investigate scheduling. |
 | Backup volume filling up        | Lower `BACKUP_RETENTION_DAYS` or move off-host copy schedule. |

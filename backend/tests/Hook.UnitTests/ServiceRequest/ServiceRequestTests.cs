@@ -18,19 +18,32 @@ public class ServiceRequestTests
             "Banjul",
             "Sink leak",
             initialRadiusKm: 5,
-            now);
+            now,
+            sharePhoneNumber: false);
 
         request.Status.ShouldBe(ServiceRequestStatus.Open);
         request.CurrentRadiusKm.ShouldBe(5);
         request.Description.ShouldBe("Sink leak");
         request.Location.SRID.ShouldBe(4326);
+        request.SharePhoneNumber.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Create_WithSharePhoneTrue_ShouldPersistFlag()
+    {
+        var request = Hook.Features.ServiceRequest.RequestAggregate.ServiceRequest.Create(
+            "+12025550123", "plumbing", new Location(0, 0), "x", string.Empty, 5, DateTimeOffset.UtcNow,
+            sharePhoneNumber: true);
+
+        request.SharePhoneNumber.ShouldBeTrue();
     }
 
     [Fact]
     public void RecordShown_ShouldDeduplicate()
     {
         var request = Hook.Features.ServiceRequest.RequestAggregate.ServiceRequest.Create(
-            "+12025550123", "plumbing", new Location(0, 0), "x", string.Empty, 5, DateTimeOffset.UtcNow);
+            "+12025550123", "plumbing", new Location(0, 0), "x", string.Empty, 5, DateTimeOffset.UtcNow,
+            sharePhoneNumber: false);
 
         request.RecordShown(new[] { "+12025551111", "+12025552222" });
         request.RecordShown(new[] { "+12025551111", "+12025553333" });

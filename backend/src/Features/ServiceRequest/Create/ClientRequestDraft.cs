@@ -7,6 +7,7 @@ public enum ClientRequestStep
     AwaitingLocation,
     ConfirmLocation,
     AwaitingDescription,
+    AwaitingPhoneShareConsent,
     Done
 }
 
@@ -19,6 +20,7 @@ public class ClientRequestDraft
     public double? DraftLongitude { get; set; }
     public string DraftFormattedAddress { get; set; } = string.Empty;
     public string DraftDescription { get; set; } = string.Empty;
+    public bool? DraftSharePhoneConsent { get; set; }
     public DateTimeOffset StartedAt { get; init; }
     public DateTimeOffset UpdatedAt { get; set; }
 

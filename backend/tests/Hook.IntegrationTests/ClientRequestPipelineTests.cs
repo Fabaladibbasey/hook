@@ -96,6 +96,10 @@ public class ClientRequestPipelineTests : IClassFixture<DevPipelineFixture>
         await client.WaitForOutboundAsync(phone, m => m.Body.Contains("description", StringComparison.OrdinalIgnoreCase));
 
         (await client.InjectTextAsync(phone, "kitchen sink leak")).EnsureSuccessStatusCode();
+        await client.WaitForOutboundAsync(phone,
+            m => m.Body.Contains("share your phone number", StringComparison.OrdinalIgnoreCase));
+
+        (await client.InjectTextAsync(phone, "no")).EnsureSuccessStatusCode();
 
         var lookingFor = await client.WaitForOutboundAsync(
             phone,
@@ -129,6 +133,10 @@ public class ClientRequestPipelineTests : IClassFixture<DevPipelineFixture>
         await client.WaitForOutboundAsync(phone, m => m.Body.Contains("description", StringComparison.OrdinalIgnoreCase));
 
         (await client.InjectTextAsync(phone, "kitchen sink leak")).EnsureSuccessStatusCode();
+        await client.WaitForOutboundAsync(phone,
+            m => m.Body.Contains("share your phone number", StringComparison.OrdinalIgnoreCase));
+
+        (await client.InjectTextAsync(phone, "yes")).EnsureSuccessStatusCode();
 
         var presented = await client.WaitForOutboundAsync(
             phone,
@@ -165,7 +173,10 @@ public class ClientRequestPipelineTests : IClassFixture<DevPipelineFixture>
         using var client = _fx.Factory.CreateClient();
         var phone = "+14155551010";
 
-        var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(client, phone);
+        // Free-text "give me the contact details" implies the requester is OK with
+        // sharing — drive intake with consent=true so the bilateral-consent path
+        // can reveal phones.
+        var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(client, phone, sharePhoneConsent: true);
 
         (await client.InjectTextAsync(phone, "give me the contact details")).EnsureSuccessStatusCode();
 
@@ -208,31 +219,28 @@ public class ClientRequestPipelineTests : IClassFixture<DevPipelineFixture>
     }
 
     [Fact]
-    public async Task FanOut_NotifiesAllShareTrueProviders_AtPresentTime_NotJustOnPick()
+    public async Task PresentAsync_NotifiesNoProvider_UntilClientPicks()
     {
+        // Privacy invariant: matched providers must learn nothing until the client
+        // picks them. Earlier behaviour proactively fanned out the request to every
+        // ShareContact-true provider — that leaked the client's number to providers
+        // who were never selected.
         using var client = _fx.Factory.CreateClient();
         var phone = "+14155551007";
 
         var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(client, phone);
 
-        var first = await client.WaitForOutboundAsync(
-            "+2203000001",
-            m => m.Body.StartsWith("Client wants ", StringComparison.OrdinalIgnoreCase),
-            since: presented.At,
-            timeout: TimeSpan.FromSeconds(10));
-        var third = await client.WaitForOutboundAsync(
-            "+2203000003",
-            m => m.Body.StartsWith("Client wants ", StringComparison.OrdinalIgnoreCase),
-            since: presented.At,
-            timeout: TimeSpan.FromSeconds(10));
-
-        first.Body.ShouldContain("plumbing");
-        first.Body.ShouldContain(phone);
-        third.Body.ShouldContain("plumbing");
-        third.Body.ShouldContain(phone);
+        // Give the bus a beat to fire any (hypothetical) deferred broadcast.
+        await Task.Delay(TimeSpan.FromSeconds(1));
 
         var outbox = await client.GetOutboxAsync();
-        outbox.Where(m => m.To == "+2203000002" && m.Body.StartsWith("Client wants ")).ShouldBeEmpty();
+        var providerNotices = outbox
+            .Where(m => m.At >= presented.At
+                        && m.To.StartsWith("+220300000", StringComparison.Ordinal)
+                        && m.Body.StartsWith("Client wants ", StringComparison.OrdinalIgnoreCase)
+                        && m.Body.Contains(phone, StringComparison.Ordinal))
+            .ToList();
+        providerNotices.ShouldBeEmpty();
     }
 
     [Fact]
@@ -336,6 +344,11 @@ public class ClientRequestPipelineTests : IClassFixture<DevPipelineFixture>
 
         // Ambiguous reply that is neither SKIP nor a real description.
         (await client.InjectTextAsync(phone, "I'm good")).EnsureSuccessStatusCode();
+        await client.WaitForOutboundAsync(phone,
+            m => m.Body.Contains("share your phone number", StringComparison.OrdinalIgnoreCase),
+            since: descPrompt.At);
+
+        (await client.InjectTextAsync(phone, "no")).EnsureSuccessStatusCode();
 
         var lookingFor = await client.WaitForOutboundAsync(
             phone,

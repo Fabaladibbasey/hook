@@ -4,13 +4,10 @@ using Hook.Features.Ai.Models;
 using Hook.Features.Matching.Match;
 using Hook.Features.Matching.MatchAggregate;
 using Hook.Features.Matching.PresentMatches;
-using Hook.Features.ProviderAvailability.AvailabilityAggregate;
 using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Phone;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
-using Wolverine;
-using ProviderAvailabilityEntity = Hook.Features.ProviderAvailability.AvailabilityAggregate.ProviderAvailability;
 
 namespace Hook.UnitTests.Matching;
 
@@ -66,17 +63,58 @@ public class MatchPresenterFactsShapeTests
         await presenter.PresentAsync(PhoneNumber.Parse("+15550000001"), batch, "plumbing");
 
         capture.Facts.ShouldBeNull();   // AI never invoked
-        capture.SentText.ShouldNotBeNull();
-        capture.SentText!.ShouldContain("No providers found");
+        capture.SentMessages.Count.ShouldBe(1);
+        capture.SentMessages[0].Body.ShouldContain("No providers found");
+    }
+
+    [Fact]
+    public async Task SinglePresented_ActionLineMentionsPickAndNew()
+    {
+        var capture = new ReplyCapture();
+        var presenter = Build(capture);
+
+        var batch = MakeBatchWith(scoredCount: 1);
+        await presenter.PresentAsync(PhoneNumber.Parse("+15550000001"), batch, "plumbing");
+
+        var body = capture.SentMessages.Single().Body;
+        body.ShouldContain("PICK 1");
+        body.ShouldContain("NEW", Case.Sensitive);
+        body.ShouldNotContain("share contact", Case.Insensitive);
+    }
+
+    [Fact]
+    public async Task MultiplePresented_ActionLineMentionsCommaAndAll()
+    {
+        var capture = new ReplyCapture();
+        var presenter = Build(capture);
+
+        var batch = MakeBatchWith(scoredCount: 4);
+        await presenter.PresentAsync(PhoneNumber.Parse("+15550000001"), batch, "plumbing");
+
+        var body = capture.SentMessages.Single().Body;
+        body.ShouldContain("PICK 1,2");
+        body.ShouldContain("PICK ALL");
+        body.ShouldNotContain("Reply PICK 1 to PICK 4 to share", Case.Insensitive);
+    }
+
+    [Fact]
+    public async Task PresentAsync_DoesNotNotifyAnyProvider_EvenWhenManyMatches()
+    {
+        var capture = new ReplyCapture();
+        var presenter = Build(capture);
+
+        var batch = MakeBatchWith(scoredCount: 5);
+        await presenter.PresentAsync(PhoneNumber.Parse("+15550000001"), batch, "plumbing");
+
+        // Privacy invariant: presentation only addresses the requester, never any provider phone.
+        capture.SentMessages.Count.ShouldBe(1);
+        capture.SentMessages[0].To.Value.ShouldBe("+15550000001");
     }
 
     private static MatchPresenter Build(ReplyCapture capture) =>
         new(
             ai:        new CapturingAi(capture),
             whatsapp:  new CapturingWhatsapp(capture),
-            matches:   new EmptyMatchRepo(),
-            providers: new EmptyProviderRepo(),
-            bus:       new NoopBus(),
             logger:    NullLogger<MatchPresenter>.Instance);
 
     private static MatchBatch MakeBatchWith(int scoredCount)
@@ -95,10 +133,12 @@ public class MatchPresenterFactsShapeTests
         return new MatchBatch(Guid.NewGuid(), Array.Empty<Match>(), scored);
     }
 
+    private sealed record SentMessage(PhoneNumber To, string Body);
+
     private sealed class ReplyCapture
     {
         public IReadOnlyDictionary<string, string>? Facts;
-        public string? SentText;
+        public List<SentMessage> SentMessages { get; } = new();
     }
 
     private sealed class CapturingAi(ReplyCapture capture) : IConversationAi
@@ -122,54 +162,8 @@ public class MatchPresenterFactsShapeTests
     {
         public Task<string> SendTextAsync(PhoneNumber to, string body, CancellationToken ct = default)
         {
-            capture.SentText = body;
+            capture.SentMessages.Add(new SentMessage(to, body));
             return Task.FromResult(string.Empty);
         }
-    }
-
-    private sealed class EmptyMatchRepo : IMatchRepository
-    {
-        public Task<IReadOnlyList<Match>> GetForRequestAsync(Guid requestId, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<Match>>(Array.Empty<Match>());
-        public Task AddAsync(Match match, CancellationToken ct = default) => Task.CompletedTask;
-        public Task AddRangeAsync(IEnumerable<Match> newMatches, CancellationToken ct = default) => Task.CompletedTask;
-        public Task<Match?> GetAsync(Guid id, CancellationToken ct = default) => Task.FromResult<Match?>(null);
-        public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
-    }
-
-    private sealed class EmptyProviderRepo : IProviderAvailabilityRepository
-    {
-        public Task<ProviderAvailabilityEntity?> GetAsync(string phone, CancellationToken ct = default) =>
-            Task.FromResult<ProviderAvailabilityEntity?>(null);
-        public Task AddAsync(ProviderAvailabilityEntity availability, CancellationToken ct = default) => Task.CompletedTask;
-        public Task RemoveAsync(string phone, CancellationToken ct = default) => Task.CompletedTask;
-        public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
-    }
-
-    private sealed class NoopBus : IMessageBus
-    {
-        public string? TenantId { get; set; }
-        public ValueTask PublishAsync<T>(T message, DeliveryOptions? options = null) => ValueTask.CompletedTask;
-        public ValueTask SendAsync<T>(T message, DeliveryOptions? options = null) => ValueTask.CompletedTask;
-        public ValueTask BroadcastToTopicAsync(string topicName, object message, DeliveryOptions? options = null) => ValueTask.CompletedTask;
-        public Task InvokeAsync(object message, CancellationToken ct = default, TimeSpan? timeout = null) => Task.CompletedTask;
-        public Task InvokeAsync(object message, DeliveryOptions options, CancellationToken ct = default, TimeSpan? timeout = null) => Task.CompletedTask;
-        public Task<TResponse> InvokeAsync<TResponse>(object message, CancellationToken ct = default, TimeSpan? timeout = null) =>
-            throw new NotImplementedException();
-        public Task<TResponse> InvokeAsync<TResponse>(object message, DeliveryOptions options, CancellationToken ct = default, TimeSpan? timeout = null) =>
-            throw new NotImplementedException();
-        public IAsyncEnumerable<TResponse> StreamAsync<TResponse>(object message, CancellationToken ct = default) =>
-            throw new NotImplementedException();
-        public IAsyncEnumerable<TResponse> StreamAsync<TResponse>(object message, DeliveryOptions options, CancellationToken ct = default) =>
-            throw new NotImplementedException();
-        public Task InvokeForTenantAsync(string tenantId, object message, CancellationToken ct = default, TimeSpan? timeout = null) =>
-            throw new NotImplementedException();
-        public Task<TResponse> InvokeForTenantAsync<TResponse>(string tenantId, object message, CancellationToken ct = default, TimeSpan? timeout = null) =>
-            throw new NotImplementedException();
-        public IDestinationEndpoint EndpointFor(string endpointName) => throw new NotImplementedException();
-        public IDestinationEndpoint EndpointFor(Uri uri) => throw new NotImplementedException();
-        public IReadOnlyList<Envelope> PreviewSubscriptions(object message) => throw new NotImplementedException();
-        public IReadOnlyList<Envelope> PreviewSubscriptions(object message, DeliveryOptions options) =>
-            throw new NotImplementedException();
     }
 }

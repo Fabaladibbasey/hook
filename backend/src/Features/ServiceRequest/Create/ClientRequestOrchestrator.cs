@@ -76,7 +76,10 @@ public sealed class ClientRequestOrchestrator(
                 await ConfirmLocationAsync(draft, message, phone, ct);
                 break;
             case ClientRequestStep.AwaitingDescription:
-                await CollectDescriptionAsync(draft, message, phone, now, ct);
+                await CollectDescriptionAsync(draft, message, phone, ct);
+                break;
+            case ClientRequestStep.AwaitingPhoneShareConsent:
+                await CollectPhoneShareConsentAsync(draft, message, phone, now, ct);
                 break;
             default:
                 logger.LogWarning("Unexpected draft step {Step} for {Phone}", draft.Step, phone.Mask());
@@ -197,7 +200,7 @@ public sealed class ClientRequestOrchestrator(
         await whatsapp.SendTextAsync(phone, "Reply YES to confirm or send your GPS pin.", ct);
     }
 
-    private async Task CollectDescriptionAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
+    private async Task CollectDescriptionAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
     {
         var text = message.Text?.Trim();
         if (!IsSkipDescription(text))
@@ -230,6 +233,41 @@ public sealed class ClientRequestOrchestrator(
             return;
         }
 
+        // Description captured + guards passed. Park the draft awaiting the requester's
+        // phone-share decision; the request itself is created in CollectPhoneShareConsentAsync
+        // so SharePhoneNumber is set atomically with creation.
+        draft.Step = ClientRequestStep.AwaitingPhoneShareConsent;
+        await drafts.UpsertAsync(draft, ct);
+        await whatsapp.SendTextAsync(phone,
+            "One more thing — should we share your phone number with selected providers? Reply YES or NO.", ct);
+    }
+
+    private async Task CollectPhoneShareConsentAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
+    {
+        var quick = QuickIntent.Detect(message.Text);
+        var intent = quick is { } q
+            ? new IntentDetectionResult(q, 1.0, "en", "quick")
+            : await ai.DetectIntentAsync(message.Text ?? string.Empty, ct);
+
+        if (intent.Intent != IntentKind.Confirmation && intent.Intent != IntentKind.Rejection)
+        {
+            await whatsapp.SendTextAsync(phone,
+                "Should we share your phone number with selected providers? Reply YES or NO.", ct);
+            return;
+        }
+
+        var consent = intent.Intent == IntentKind.Confirmation;
+        draft.DraftSharePhoneConsent = consent;
+
+        if (string.IsNullOrEmpty(draft.DraftServiceSlug) || draft.DraftLatitude is null || draft.DraftLongitude is null)
+        {
+            logger.LogWarning("Consent received with incomplete draft for {Phone}", phone.Mask());
+            await drafts.DeleteAsync(phone.Value, ct);
+            await whatsapp.SendTextAsync(phone,
+                "Couldn't save your request — some details were missing. Reply with what service you need to start over.", ct);
+            return;
+        }
+
         try
         {
             var request = RequestAggregate.ServiceRequest.Create(
@@ -239,7 +277,8 @@ public sealed class ClientRequestOrchestrator(
                 draft.DraftFormattedAddress,
                 draft.DraftDescription,
                 matchingOptions.Value.DefaultRadiusKm,
-                now);
+                now,
+                sharePhoneNumber: consent);
 
             await requests.AddAsync(request, ct);
             await requests.SaveChangesAsync(ct);

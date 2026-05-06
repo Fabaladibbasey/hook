@@ -17,6 +17,7 @@ public class ServiceRequest
     public List<string> ShownProviderPhones { get; private set; } = new();
     public double CurrentRadiusKm { get; set; }
     public bool AutoExpandedOnce { get; set; }
+    public bool SharePhoneNumber { get; private set; }
 
     public static ServiceRequest Create(
         string clientPhone,
@@ -25,7 +26,8 @@ public class ServiceRequest
         string formattedAddress,
         string description,
         double initialRadiusKm,
-        DateTimeOffset now) => new()
+        DateTimeOffset now,
+        bool sharePhoneNumber) => new()
         {
             Id = Guid.NewGuid(),
             ClientPhone = clientPhone,
@@ -35,7 +37,8 @@ public class ServiceRequest
             Description = description,
             CreatedAt = now,
             Status = ServiceRequestStatus.Open,
-            CurrentRadiusKm = initialRadiusKm
+            CurrentRadiusKm = initialRadiusKm,
+            SharePhoneNumber = sharePhoneNumber
         };
 
     public void RecordShown(IEnumerable<string> providerPhones)

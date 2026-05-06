@@ -11,4 +11,5 @@ public class Match
     public bool ContactShared { get; set; }
     public Guid? ChatId { get; set; }
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? PickedAt { get; set; }
 }

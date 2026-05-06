@@ -14,5 +14,6 @@ public class MatchConfiguration : IEntityTypeConfiguration<Match>
         builder.Property(m => m.ServiceSlug).HasMaxLength(80).IsRequired();
         builder.HasIndex(m => m.RequestId).HasDatabaseName("ix_matches_request_id");
         builder.HasIndex(m => m.ProviderPhone).HasDatabaseName("ix_matches_provider_phone");
+        builder.HasIndex(m => new { m.RequestId, m.PickedAt }).HasDatabaseName("ix_matches_request_picked_at");
     }
 }

@@ -5,6 +5,7 @@ internal static class MatchPipelineHelpers
     public static async Task<OutboxMessage> ReachInitialPresentAsync(
         HttpClient client,
         string phone,
+        bool sharePhoneConsent = false,
         CancellationToken ct = default)
     {
         (await client.InjectTextAsync(phone, "I need a plumber", ct)).EnsureSuccessStatusCode();
@@ -21,6 +22,13 @@ internal static class MatchPipelineHelpers
             ct: ct);
 
         (await client.InjectTextAsync(phone, "kitchen sink leak", ct)).EnsureSuccessStatusCode();
+        await client.WaitForOutboundAsync(
+            phone,
+            m => m.Body.Contains("share your phone number", StringComparison.OrdinalIgnoreCase),
+            ct: ct);
+
+        (await client.InjectTextAsync(phone, sharePhoneConsent ? "yes" : "no", ct))
+            .EnsureSuccessStatusCode();
 
         var lookingFor = await client.WaitForOutboundAsync(
             phone,

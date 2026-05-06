@@ -1,23 +1,15 @@
 using System.Text.Json;
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
-using Hook.Features.ContactSharing.Events;
 using Hook.Features.Matching.Match;
-using Hook.Features.ProviderAvailability.AvailabilityAggregate;
 using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Phone;
-using Wolverine;
-using IMatchRepository = Hook.Features.Matching.MatchAggregate.IMatchRepository;
-using MatchEntity = Hook.Features.Matching.MatchAggregate.Match;
 
 namespace Hook.Features.Matching.PresentMatches;
 
 public sealed class MatchPresenter(
     IConversationAi ai,
     IWhatsappClient whatsapp,
-    IMatchRepository matches,
-    IProviderAvailabilityRepository providers,
-    IMessageBus bus,
     ILogger<MatchPresenter> logger)
 {
     public async Task PresentAsync(PhoneNumber clientPhone, MatchBatch batch, string serviceSlug, CancellationToken ct = default)
@@ -62,61 +54,12 @@ public sealed class MatchPresenter(
         // user replies always route correctly regardless of how the LLM phrases
         // the body.
         var pickHint = batch.Scored.Count == 1
-            ? "Reply PICK 1 to share contact, NEXT for more, or NEW for a different service."
-            : $"Reply PICK 1 to PICK {batch.Scored.Count} to share contact, NEXT for more, or NEW for a different service.";
+            ? "Reply PICK 1 to connect with this provider. NEXT for more, NEW for a different service."
+            : $"Reply PICK 1 (or e.g. PICK 1,2 or PICK ALL) to connect with one or more providers. NEXT for more, NEW for a different service.";
         var fallback = $"Top matches for {serviceSlug}:\n{string.Join("\n", fallbackLines)}";
 
         var reply = await AiReplyHelper.TryGenerateOrFallbackAsync(ai, ctx, "match_presenter", fallback, logger, ct);
         await whatsapp.SendTextAsync(clientPhone, $"{reply}\n\n{pickHint}", ct);
-
-        await BroadcastToProvidersAsync(clientPhone, batch, serviceSlug, ct);
-    }
-
-    private async Task BroadcastToProvidersAsync(PhoneNumber clientPhone, MatchBatch batch, string serviceSlug, CancellationToken ct)
-    {
-        var existing = await matches.GetForRequestAsync(batch.RequestId, ct);
-        var alreadyNotified = existing
-            .Where(m => m.ContactShared)
-            .Select(m => m.ProviderPhone)
-            .ToHashSet();
-        var anyPriorBroadcast = alreadyNotified.Count > 0;
-
-        MatchEntity? representativeMatch = null;
-        var dirty = false;
-
-        foreach (var match in batch.NewMatches)
-        {
-            if (alreadyNotified.Contains(match.ProviderPhone)) continue;
-
-            var provider = await providers.GetAsync(match.ProviderPhone, ct);
-            if (provider is null) continue;
-            if (!provider.ShareContact) continue;
-
-            if (!PhoneNumber.TryParse(match.ProviderPhone, out var providerPhone))
-            {
-                logger.LogWarning("Skipping fan-out: invalid provider phone for match {MatchId}", match.Id);
-                continue;
-            }
-
-            await whatsapp.SendTextAsync(providerPhone,
-                $"Client wants {serviceSlug} ({clientPhone.Value}). Expect a message.", ct);
-
-            match.ContactShared = true;
-            alreadyNotified.Add(match.ProviderPhone);
-            representativeMatch ??= match;
-            dirty = true;
-        }
-
-        if (dirty) await matches.SaveChangesAsync(ct);
-
-        if (!anyPriorBroadcast && representativeMatch is not null)
-        {
-            await bus.PublishAsync(new ContactExchanged(
-                representativeMatch.Id,
-                batch.RequestId,
-                clientPhone.Value,
-                representativeMatch.ProviderPhone));
-        }
     }
 
     private static string Mask(string phone) =>

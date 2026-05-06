@@ -43,11 +43,16 @@ public class DualRoleTests : IClassFixture<DevPipelineFixture>
         var descPrompt = await client.WaitForOutboundAsync(phone, m => m.Body.Contains("description", StringComparison.OrdinalIgnoreCase), since: locPrompt.At, timeout: StepTimeout);
 
         (await client.InjectTextAsync(phone, "skip")).EnsureSuccessStatusCode();
+        var consentPrompt = await client.WaitForOutboundAsync(phone,
+            m => m.Body.Contains("share your phone number", StringComparison.OrdinalIgnoreCase),
+            since: descPrompt.At, timeout: StepTimeout);
+
+        (await client.InjectTextAsync(phone, "no")).EnsureSuccessStatusCode();
 
         var lookingFor = await client.WaitForOutboundAsync(
             phone,
             m => m.Body.Contains("Looking for", StringComparison.OrdinalIgnoreCase),
-            since: descPrompt.At,
+            since: consentPrompt.At,
             timeout: StepTimeout);
 
         // Wait for matching to either present results or report none — proves the
@@ -264,10 +269,15 @@ public class DualRoleTests : IClassFixture<DevPipelineFixture>
         var descPrompt = await client.WaitForOutboundAsync(phone, m => m.Body.Contains("description", StringComparison.OrdinalIgnoreCase), since: locPrompt.At, timeout: StepTimeout);
 
         (await client.InjectTextAsync(phone, "skip")).EnsureSuccessStatusCode();
+        var consentPrompt = await client.WaitForOutboundAsync(phone,
+            m => m.Body.Contains("share your phone number", StringComparison.OrdinalIgnoreCase),
+            since: descPrompt.At, timeout: StepTimeout);
+
+        (await client.InjectTextAsync(phone, "no")).EnsureSuccessStatusCode();
         var looking = await client.WaitForOutboundAsync(
             phone,
             m => m.Body.Contains("Looking for", StringComparison.OrdinalIgnoreCase),
-            since: descPrompt.At,
+            since: consentPrompt.At,
             timeout: StepTimeout);
         return looking.At;
     }

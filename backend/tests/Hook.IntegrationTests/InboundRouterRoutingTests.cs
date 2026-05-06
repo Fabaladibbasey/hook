@@ -55,6 +55,10 @@ public class InboundRouterRoutingTests : IClassFixture<DevPipelineFixture>
             .EnsureSuccessStatusCode();
         await client.WaitForOutboundAsync(phone, m => m.Body.Contains("description", StringComparison.OrdinalIgnoreCase));
         (await client.InjectTextAsync(phone, "kitchen sink leak")).EnsureSuccessStatusCode();
+        await client.WaitForOutboundAsync(phone,
+            m => m.Body.Contains("share your phone number", StringComparison.OrdinalIgnoreCase));
+
+        (await client.InjectTextAsync(phone, "yes")).EnsureSuccessStatusCode();
 
         var presented = await client.WaitForOutboundAsync(
             phone,

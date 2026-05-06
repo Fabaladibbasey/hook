@@ -17,6 +17,7 @@ public class ServiceRequestConfiguration : IEntityTypeConfiguration<ServiceReque
         builder.Property(r => r.Description).HasMaxLength(2000);
         builder.PropertyAsStringEnum(r => r.Status, 16);
         builder.HasJsonbArray(r => r.ShownProviderPhones);
+        builder.Property(r => r.SharePhoneNumber).HasDefaultValue(false);
 
         builder.HasIndex(r => r.ClientPhone).HasDatabaseName("ix_service_requests_client_phone");
         builder.HasIndex(r => r.Status).HasDatabaseName("ix_service_requests_status");

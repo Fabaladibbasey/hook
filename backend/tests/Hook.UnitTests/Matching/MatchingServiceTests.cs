@@ -23,7 +23,8 @@ public class MatchingServiceTests
             formattedAddress: "Banjul",
             description: string.Empty,
             initialRadiusKm: 5,
-            now: DateTimeOffset.UtcNow);
+            now: DateTimeOffset.UtcNow,
+            sharePhoneNumber: false);
 
         var requests = new StubRequestRepo(request);
         var query = new CapturingQuery();
