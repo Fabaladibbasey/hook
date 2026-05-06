@@ -216,6 +216,17 @@ public static class QuickIntent
         // Short utterances handled by Detect (yes/no/edit/etc) shouldn't be re-classified here.
         if (s.Length < 4) return null;
 
+        // Bare-keyword shortcuts: single words the bot advertises ("REQUEST a service",
+        // "Reply HIRE or OFFER"). Deterministic so the LLM never sees them.
+        var lower = s.ToLowerInvariant().TrimEnd('.', '!', '?');
+        var bareIntent = lower switch
+        {
+            "request" or "hire" => (IntentKind?)IntentKind.ServiceRequest,
+            "register" or "offer" => IntentKind.ProviderRegistration,
+            _ => null
+        };
+        if (bareIntent is not null) return bareIntent;
+
         foreach (var (rx, intent) in HintRules)
             if (rx.IsMatch(s)) return intent;
 

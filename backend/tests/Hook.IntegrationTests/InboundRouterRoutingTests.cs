@@ -42,6 +42,32 @@ public class InboundRouterRoutingTests : IClassFixture<DevPipelineFixture>
     }
 
     [Fact]
+    public async Task BareWord_Request_RoutesToClientFunnel()
+    {
+        using var client = _fx.Factory.CreateClient();
+        const string phone = "+14155552003";
+
+        (await client.InjectTextAsync(phone, "request")).EnsureSuccessStatusCode();
+        var reply = await client.WaitForOutboundAsync(
+            phone, m => m.Body.Contains("service", StringComparison.OrdinalIgnoreCase));
+
+        reply.Body.ShouldContain("service");
+    }
+
+    [Fact]
+    public async Task BareWord_Register_RoutesToProviderFunnel()
+    {
+        using var client = _fx.Factory.CreateClient();
+        const string phone = "+14155552004";
+
+        (await client.InjectTextAsync(phone, "register")).EnsureSuccessStatusCode();
+        var reply = await client.WaitForOutboundAsync(
+            phone, m => m.Body.Contains("offer", StringComparison.OrdinalIgnoreCase));
+
+        reply.Body.ShouldContain("offer");
+    }
+
+    [Fact]
     public async Task PickRegex_BypassesFunnel_WhenActiveRequestPresent()
     {
         using var client = _fx.Factory.CreateClient();
