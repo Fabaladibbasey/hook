@@ -113,9 +113,9 @@ public class MatchPresenterFactsShapeTests
 
     private static MatchPresenter Build(ReplyCapture capture) =>
         new(
-            ai:        new CapturingAi(capture),
-            whatsapp:  new CapturingWhatsapp(capture),
-            logger:    NullLogger<MatchPresenter>.Instance);
+            ai: new CapturingAi(capture),
+            whatsapp: new CapturingWhatsapp(capture),
+            logger: NullLogger<MatchPresenter>.Instance);
 
     private static MatchBatch MakeBatchWith(int scoredCount)
     {

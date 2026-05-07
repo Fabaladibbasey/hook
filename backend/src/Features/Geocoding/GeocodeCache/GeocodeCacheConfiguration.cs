@@ -13,5 +13,6 @@ public class GeocodeCacheConfiguration : IEntityTypeConfiguration<GeocodeCacheEn
         builder.Property(e => e.FormattedAddress).HasMaxLength(512);
         builder.Property(e => e.Provider).HasMaxLength(32);
         builder.Property(e => e.FetchedAt).IsRequired();
+        builder.HasIndex(e => e.FetchedAt).HasDatabaseName("ix_geocode_cache_fetched_at");
     }
 }

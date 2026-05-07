@@ -22,5 +22,6 @@ public class ServiceRequestConfiguration : IEntityTypeConfiguration<ServiceReque
         builder.HasIndex(r => r.ClientPhone).HasDatabaseName("ix_service_requests_client_phone");
         builder.HasIndex(r => r.Status).HasDatabaseName("ix_service_requests_status");
         builder.HasIndex(r => r.Location).HasDatabaseName("ix_service_requests_location").HasMethod("gist");
+        builder.HasIndex(r => r.CreatedAt).HasDatabaseName("ix_service_requests_created_at");
     }
 }

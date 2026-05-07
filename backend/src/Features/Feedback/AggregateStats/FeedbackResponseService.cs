@@ -1,8 +1,10 @@
+using System.Text.RegularExpressions;
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
 using Hook.Features.Feedback.Models;
 using Hook.Features.Feedback.ProviderStatsAggregate;
 using Hook.Features.Whatsapp.Models;
+using Hook.Features.Whatsapp.Phone;
 using Wolverine;
 using IMatchRepository = Hook.Features.Matching.MatchAggregate.IMatchRepository;
 
@@ -15,6 +17,12 @@ public sealed class FeedbackResponseService(
     TimeProvider clock,
     ILogger<FeedbackResponseService> logger)
 {
+    private static readonly Regex InProgressRegex = new(
+        @"\bin\s+progress\b", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex NotInProgressRegex = new(
+        @"\bnot\s+in\s+progress\b", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     public async Task HandleAsync(
         InboundMessage msg,
         MatchFeedback pending,
@@ -59,17 +67,23 @@ public sealed class FeedbackResponseService(
             var stats = existing ?? ProviderStats.Initial(match.ProviderPhone, now);
             stats.RecordOutcome(success: answer == FeedbackAnswer.Yes, now);
             await feedback.UpsertStatsAsync(stats, ct);
-            await feedback.SaveChangesAsync(ct);
-            logger.LogInformation("Provider {Provider} stats updated: success={Success}", match.ProviderPhone, answer == FeedbackAnswer.Yes);
+            var maskedProvider = PhoneNumber.TryParse(match.ProviderPhone, out var pn)
+                ? pn.Mask()
+                : "***";
+            logger.LogInformation(
+                "Provider {Provider} stats updated: success={Success}",
+                maskedProvider,
+                answer == FeedbackAnswer.Yes);
         }
     }
 
-    private static FeedbackAnswer? ParseAnswer(string text)
+    internal static FeedbackAnswer? ParseAnswer(string text)
     {
         var lower = text.Trim().ToLowerInvariant();
         if (lower is "yes" or "y") return FeedbackAnswer.Yes;
         if (lower is "no" or "n") return FeedbackAnswer.No;
-        if (lower.Contains("in progress")) return FeedbackAnswer.InProgress;
+        if (NotInProgressRegex.IsMatch(lower)) return FeedbackAnswer.No;
+        if (InProgressRegex.IsMatch(lower)) return FeedbackAnswer.InProgress;
         return null;
     }
 }

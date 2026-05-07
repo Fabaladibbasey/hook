@@ -2,11 +2,11 @@ using Hook.Features.Matching;
 using Hook.Features.Matching.Match;
 using Hook.Features.Matching.MatchAggregate;
 using Hook.Features.ServiceRequest.RequestAggregate;
-using ServiceRequestEntity = Hook.Features.ServiceRequest.RequestAggregate.ServiceRequest;
 using Microsoft.Extensions.Options;
 using NetTopologySuite.Geometries;
 using Shouldly;
 using MatchEntity = Hook.Features.Matching.MatchAggregate.Match;
+using ServiceRequestEntity = Hook.Features.ServiceRequest.RequestAggregate.ServiceRequest;
 
 namespace Hook.UnitTests.Matching;
 

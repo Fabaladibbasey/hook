@@ -5,6 +5,7 @@ import MessageList from "../components/MessageList";
 import MessageInput from "../components/MessageInput";
 import RevokedToast from "../components/RevokedToast";
 import WaitingForPeer from "../components/WaitingForPeer";
+import LegalFooter from "../components/LegalFooter";
 import { fetchJson } from "../api/fetchJson";
 import { getOrCreateDeviceId } from "../crypto/deviceId";
 
@@ -93,6 +94,7 @@ export default function ChatRoom() {
           End chat
         </button>
       </header>
+      <LegalFooter variant="chat" />
       <MessageList messages={state.messages} myParticipantId={open.participantId} />
       {waitingForPeer && <WaitingForPeer />}
       <MessageInput onSend={send} disabled={waitingForPeer} />

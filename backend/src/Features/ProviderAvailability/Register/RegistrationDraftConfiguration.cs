@@ -14,5 +14,6 @@ public class RegistrationDraftConfiguration : IEntityTypeConfiguration<Registrat
         builder.PropertyAsStringEnum(r => r.Step, 32);
         builder.HasJsonbArray(r => r.DraftServices);
         builder.Property(r => r.DraftFormattedAddress).HasMaxLength(512);
+        builder.HasIndex(r => r.UpdatedAt).HasDatabaseName("ix_provider_registration_drafts_updated_at");
     }
 }

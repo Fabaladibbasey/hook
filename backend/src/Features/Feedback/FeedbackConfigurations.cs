@@ -1,5 +1,6 @@
 using Hook.Features.Feedback.Models;
 using Hook.Features.Feedback.ProviderStatsAggregate;
+using Hook.Features.Matching.MatchAggregate;
 using Hook.Shared.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -15,6 +16,13 @@ public class MatchFeedbackConfiguration : IEntityTypeConfiguration<MatchFeedback
         builder.PropertyAsStringEnum(f => f.Step, 20);
         builder.PropertyAsStringEnum(f => f.Answer, 16);
         builder.HasIndex(f => f.MatchId).HasDatabaseName("ix_match_feedback_match");
+        builder.HasIndex(f => f.PromptedAt).HasDatabaseName("ix_match_feedback_prompted_at");
+
+        builder
+            .HasOne<Match>()
+            .WithMany()
+            .HasForeignKey(f => f.MatchId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
 
@@ -25,5 +33,6 @@ public class ProviderStatsConfiguration : IEntityTypeConfiguration<ProviderStats
         builder.ToTable("provider_stats");
         builder.HasKey(s => s.ProviderPhone);
         builder.Property(s => s.ProviderPhone).HasMaxLength(20);
+        builder.Property(s => s.LastUpdated).IsConcurrencyToken();
     }
 }

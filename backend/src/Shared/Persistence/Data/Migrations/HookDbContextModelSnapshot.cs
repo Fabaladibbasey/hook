@@ -52,6 +52,8 @@ namespace Hook.Shared.Persistence.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ChatId");
+
                     b.HasIndex("ParticipantId")
                         .HasDatabaseName("ix_chat_access_logs_participant");
 
@@ -256,6 +258,9 @@ namespace Hook.Shared.Persistence.Data.Migrations
                     b.HasIndex("MatchId")
                         .HasDatabaseName("ix_match_feedback_match");
 
+                    b.HasIndex("PromptedAt")
+                        .HasDatabaseName("ix_match_feedback_prompted_at");
+
                     b.ToTable("match_feedback", (string)null);
                 });
 
@@ -269,6 +274,7 @@ namespace Hook.Shared.Persistence.Data.Migrations
                         .HasColumnType("integer");
 
                     b.Property<DateTimeOffset>("LastUpdated")
+                        .IsConcurrencyToken()
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("SuccessCount")
@@ -308,6 +314,9 @@ namespace Hook.Shared.Persistence.Data.Migrations
                         .HasColumnType("character varying(32)");
 
                     b.HasKey("Key");
+
+                    b.HasIndex("FetchedAt")
+                        .HasDatabaseName("ix_geocode_cache_fetched_at");
 
                     b.ToTable("geocode_cache", (string)null);
                 });
@@ -373,6 +382,9 @@ namespace Hook.Shared.Persistence.Data.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Phone");
+
+                    b.HasIndex("LastInboundAt")
+                        .HasDatabaseName("ix_whatsapp_contacts_last_inbound_at");
 
                     b.ToTable("whatsapp_contacts", (string)null);
                 });
@@ -459,6 +471,9 @@ namespace Hook.Shared.Persistence.Data.Migrations
 
                     b.HasKey("Phone");
 
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("ix_provider_registration_drafts_updated_at");
+
                     b.ToTable("provider_registration_drafts", (string)null);
                 });
 
@@ -504,6 +519,9 @@ namespace Hook.Shared.Persistence.Data.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Phone");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("ix_client_request_drafts_updated_at");
 
                     b.ToTable("client_request_drafts", (string)null);
                 });
@@ -568,6 +586,9 @@ namespace Hook.Shared.Persistence.Data.Migrations
                     b.HasIndex("ClientPhone")
                         .HasDatabaseName("ix_service_requests_client_phone");
 
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("ix_service_requests_created_at");
+
                     b.HasIndex("Location")
                         .HasDatabaseName("ix_service_requests_location");
 
@@ -627,11 +648,77 @@ namespace Hook.Shared.Persistence.Data.Migrations
                     b.ToTable("ambiguous_intent_drafts", (string)null);
                 });
 
+            modelBuilder.Entity("Hook.Features.ChatSession.AccessLog.ChatAccessLog", b =>
+                {
+                    b.HasOne("Hook.Features.ChatSession.SessionAggregate.ChatSession", null)
+                        .WithMany()
+                        .HasForeignKey("ChatId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Hook.Features.ChatSession.ParticipantAggregate.ChatParticipant", null)
+                        .WithMany()
+                        .HasForeignKey("ParticipantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Hook.Features.ChatSession.ParticipantAggregate.ChatDeviceKey", b =>
+                {
+                    b.HasOne("Hook.Features.ChatSession.SessionAggregate.ChatSession", null)
+                        .WithMany()
+                        .HasForeignKey("ChatId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Hook.Features.ChatSession.ParticipantAggregate.ChatParticipant", null)
+                        .WithMany()
+                        .HasForeignKey("ParticipantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Hook.Features.ChatSession.ParticipantAggregate.ChatParticipant", b =>
+                {
+                    b.HasOne("Hook.Features.ChatSession.SessionAggregate.ChatSession", null)
+                        .WithMany()
+                        .HasForeignKey("ChatId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Hook.Features.ChatSession.SessionAggregate.ChatMessage", b =>
+                {
+                    b.HasOne("Hook.Features.ChatSession.SessionAggregate.ChatSession", null)
+                        .WithMany()
+                        .HasForeignKey("ChatId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Hook.Features.ChatSession.SessionAggregate.ChatMessageRecipient", b =>
                 {
                     b.HasOne("Hook.Features.ChatSession.SessionAggregate.ChatMessage", null)
                         .WithMany("Recipients")
                         .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Hook.Features.Feedback.Models.MatchFeedback", b =>
+                {
+                    b.HasOne("Hook.Features.Matching.MatchAggregate.Match", null)
+                        .WithMany()
+                        .HasForeignKey("MatchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Hook.Features.Matching.MatchAggregate.Match", b =>
+                {
+                    b.HasOne("Hook.Features.ServiceRequest.RequestAggregate.ServiceRequest", null)
+                        .WithMany()
+                        .HasForeignKey("RequestId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

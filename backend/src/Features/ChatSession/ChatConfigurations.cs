@@ -30,6 +30,10 @@ public class ChatParticipantConfiguration : IEntityTypeConfiguration<ChatPartici
         builder.Property(p => p.Phone).HasMaxLength(20);
         builder.HasIndex(p => p.Token).IsUnique().HasDatabaseName("ux_chat_participants_token");
         builder.HasIndex(p => p.ChatId).HasDatabaseName("ix_chat_participants_chat_id");
+        builder.HasOne<SessionAggregate.ChatSession>()
+               .WithMany()
+               .HasForeignKey(p => p.ChatId)
+               .OnDelete(DeleteBehavior.Cascade);
     }
 }
 
@@ -45,6 +49,14 @@ public class ChatDeviceKeyConfiguration : IEntityTypeConfiguration<ChatDeviceKey
                .IsUnique()
                .HasDatabaseName("ux_chat_device_keys_participant_device");
         builder.HasIndex(k => k.ChatId).HasDatabaseName("ix_chat_device_keys_chat");
+        builder.HasOne<ChatParticipant>()
+               .WithMany()
+               .HasForeignKey(k => k.ParticipantId)
+               .OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<SessionAggregate.ChatSession>()
+               .WithMany()
+               .HasForeignKey(k => k.ChatId)
+               .OnDelete(DeleteBehavior.Cascade);
     }
 }
 
@@ -61,6 +73,10 @@ public class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMessage>
                .HasForeignKey(r => r.MessageId)
                .OnDelete(DeleteBehavior.Cascade);
         builder.HasIndex(m => new { m.ChatId, m.CreatedAt }).HasDatabaseName("ix_chat_messages_chat_created");
+        builder.HasOne<SessionAggregate.ChatSession>()
+               .WithMany()
+               .HasForeignKey(m => m.ChatId)
+               .OnDelete(DeleteBehavior.Cascade);
     }
 }
 
@@ -85,5 +101,13 @@ public class ChatAccessLogConfiguration : IEntityTypeConfiguration<ChatAccessLog
         builder.Property(l => l.IpAddress).HasMaxLength(64);
         builder.Property(l => l.DeviceInfo).HasMaxLength(512);
         builder.HasIndex(l => l.ParticipantId).HasDatabaseName("ix_chat_access_logs_participant");
+        builder.HasOne<ChatParticipant>()
+               .WithMany()
+               .HasForeignKey(l => l.ParticipantId)
+               .OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<SessionAggregate.ChatSession>()
+               .WithMany()
+               .HasForeignKey(l => l.ChatId)
+               .OnDelete(DeleteBehavior.Cascade);
     }
 }

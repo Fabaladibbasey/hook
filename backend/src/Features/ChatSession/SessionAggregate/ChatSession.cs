@@ -22,8 +22,17 @@ public class ChatSession
         LastActivityAt = now;
     }
 
-    public void End() => Status = ChatSessionStatus.Ended;
-    public void Expire() => Status = ChatSessionStatus.Expired;
+    public void End(DateTimeOffset now)
+    {
+        Status = ChatSessionStatus.Ended;
+        ExpiresAt = now;
+    }
+
+    public void Expire(DateTimeOffset now)
+    {
+        Status = ChatSessionStatus.Expired;
+        ExpiresAt = now;
+    }
 
     public bool CanSendMessage(DateTimeOffset now) =>
         Status == ChatSessionStatus.Active && now < ExpiresAt;

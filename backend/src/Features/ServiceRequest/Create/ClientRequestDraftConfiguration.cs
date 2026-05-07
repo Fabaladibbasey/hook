@@ -15,5 +15,6 @@ public class ClientRequestDraftConfiguration : IEntityTypeConfiguration<ClientRe
         builder.Property(r => r.DraftServiceSlug).HasMaxLength(80);
         builder.Property(r => r.DraftFormattedAddress).HasMaxLength(512);
         builder.Property(r => r.DraftDescription).HasMaxLength(2000);
+        builder.HasIndex(r => r.UpdatedAt).HasDatabaseName("ix_client_request_drafts_updated_at");
     }
 }

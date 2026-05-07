@@ -118,11 +118,11 @@ public class ChatRepositoryDeviceKeyTests : IClassFixture<DevPipelineFixture>
 
         var rowsForA = await chats.GetMessagesForDeviceAsync(chatId, recipientA, take: 50);
         rowsForA.Count.ShouldBe(1);
-        rowsForA[0].Envelope.Ciphertext.ShouldBe(new byte[] { 0xAA });
+        rowsForA[0].Envelope.Ciphertext.ShouldBe([0xAA]);
 
         var rowsForB = await chats.GetMessagesForDeviceAsync(chatId, recipientB, take: 50);
         rowsForB.Count.ShouldBe(1);
-        rowsForB[0].Envelope.Ciphertext.ShouldBe(new byte[] { 0xBB });
+        rowsForB[0].Envelope.Ciphertext.ShouldBe([0xBB]);
 
         var rowsForUnknown = await chats.GetMessagesForDeviceAsync(chatId, Guid.NewGuid(), take: 50);
         rowsForUnknown.Count.ShouldBe(0);

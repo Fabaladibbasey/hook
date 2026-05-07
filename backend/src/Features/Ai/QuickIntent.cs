@@ -79,7 +79,7 @@ public static class QuickIntent
         RxOpts);
 
     private static readonly (Regex Rx, IntentKind Intent)[] HintRules =
-    {
+    [
         // Pagination first — short literal tokens overlap with nothing else.
         (NextMatchesRx,             IntentKind.NextMatches),
         (IncreaseRangeRx,           IntentKind.IncreaseRange),
@@ -96,10 +96,10 @@ public static class QuickIntent
         (DisasterRx,                IntentKind.ServiceRequest),
         (AskForHelpRx,              IntentKind.ServiceRequest),
         (EmergencyRx,               IntentKind.ServiceRequest),
-    };
+    ];
 
     private static readonly string?[] ConfirmTokens =
-    {
+    [
         "y", "yes", "yeah", "yep", "yup", "ok", "okay", "sure", "confirm", "correct", "exactly",
         // Affirmatives the bot may advertise after presenting matches ("Reply 1 to
         // connect…", "Would you like more information or want to proceed?"). Keeping
@@ -109,12 +109,12 @@ public static class QuickIntent
         // (handled in the switch below) so distance-1 fuzzy doesn't collide with
         // adjacent English words like "got" / "into" / "shore".
         "proceed", "continue", "details", "detail", "connect"
-    };
-    private static readonly string?[] RejectTokens  = { "n", "no", "nope", "nah", "stop", "wrong", "incorrect" };
-    private static readonly string?[] CancelTokens  = { "cancel", "end", "bye", "goodbye", "exit", "quit", "leave", "done" };
+    ];
+    private static readonly string?[] RejectTokens = ["n", "no", "nope", "nah", "stop", "wrong", "incorrect"];
+    private static readonly string?[] CancelTokens = ["cancel", "end", "bye", "goodbye", "exit", "quit", "leave", "done"];
 
     private static readonly (string Phrase, IntentKind Intent)[] Phrases =
-    {
+    [
         ("of course",     IntentKind.Confirmation),
         ("for sure",      IntentKind.Confirmation),
         ("sure thing",    IntentKind.Confirmation),
@@ -161,7 +161,7 @@ public static class QuickIntent
         ("hi there",       IntentKind.Greeting),
         ("hey there",      IntentKind.Greeting),
         ("how are you",    IntentKind.Greeting),
-    };
+    ];
 
     public static IntentKind? Detect(string? text)
     {
@@ -197,8 +197,8 @@ public static class QuickIntent
         if (s.Length >= 3)
         {
             if (FuzzyMatch.MatchesAny(s, ConfirmTokens, 1)) return IntentKind.Confirmation;
-            if (FuzzyMatch.MatchesAny(s, RejectTokens,  1)) return IntentKind.Rejection;
-            if (FuzzyMatch.MatchesAny(s, CancelTokens,  1)) return IntentKind.Cancel;
+            if (FuzzyMatch.MatchesAny(s, RejectTokens, 1)) return IntentKind.Rejection;
+            if (FuzzyMatch.MatchesAny(s, CancelTokens, 1)) return IntentKind.Cancel;
         }
         return null;
     }

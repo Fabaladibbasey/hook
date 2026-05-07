@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
-using Xunit;
 
 namespace Hook.UnitTests.Ai;
 

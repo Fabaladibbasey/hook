@@ -27,7 +27,11 @@ public sealed class PostgresProviderQueryService(HookDbContext db) : IProviderQu
                 p.Phone,
                 p.ShareContact,
                 p.LastActiveAt,
-                DistanceMeters = p.Location.Distance(requestLocation)
+                DistanceMeters = p.Location.Distance(requestLocation),
+                Stats = db.ProviderStats
+                    .Where(s => s.ProviderPhone == p.Phone)
+                    .Select(s => new { s.CompletedCount, s.SuccessRate })
+                    .FirstOrDefault()
             })
             .ToListAsync(ct);
 
@@ -36,7 +40,7 @@ public sealed class PostgresProviderQueryService(HookDbContext db) : IProviderQu
             r.ShareContact,
             r.LastActiveAt,
             r.DistanceMeters / 1000.0,
-            CompletedJobs: 0,
-            SuccessRate: 0)).ToList();
+            CompletedJobs: r.Stats?.CompletedCount ?? 0,
+            SuccessRate: r.Stats?.SuccessRate ?? 0)).ToList();
     }
 }

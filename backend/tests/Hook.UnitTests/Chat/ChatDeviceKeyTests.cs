@@ -10,7 +10,7 @@ public class ChatDeviceKeyTests
         ChatId = Guid.NewGuid(),
         ParticipantId = Guid.NewGuid(),
         DeviceId = Guid.NewGuid(),
-        PublicKey = new byte[] { 0x01 }
+        PublicKey = [0x01]
     };
 
     [Fact]
@@ -46,11 +46,17 @@ public class ChatDeviceKeyTests
         var chatId = Guid.NewGuid();
         var deviceA = new ChatDeviceKey
         {
-            ChatId = chatId, ParticipantId = participantId, DeviceId = Guid.NewGuid(), PublicKey = new byte[] { 0xAA }
+            ChatId = chatId,
+            ParticipantId = participantId,
+            DeviceId = Guid.NewGuid(),
+            PublicKey = [0xAA]
         };
         var deviceB = new ChatDeviceKey
         {
-            ChatId = chatId, ParticipantId = participantId, DeviceId = Guid.NewGuid(), PublicKey = new byte[] { 0xBB }
+            ChatId = chatId,
+            ParticipantId = participantId,
+            DeviceId = Guid.NewGuid(),
+            PublicKey = [0xBB]
         };
 
         deviceA.TryAdvanceSequence(100).ShouldBeTrue();

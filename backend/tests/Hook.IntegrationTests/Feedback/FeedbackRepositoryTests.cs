@@ -1,0 +1,203 @@
+using Hook.Features.Feedback;
+using Hook.Features.Feedback.Models;
+using Hook.Features.Feedback.ProviderStatsAggregate;
+using Hook.Features.Geocoding.Models;
+using Hook.Features.Matching.MatchAggregate;
+using Hook.Features.ServiceRequest.RequestAggregate;
+using Hook.Shared.Persistence.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Hook.IntegrationTests.Feedback;
+
+public sealed class FeedbackRepositoryTests : IClassFixture<DevPipelineFixture>
+{
+    private readonly DevPipelineFixture _fx;
+
+    public FeedbackRepositoryTests(DevPipelineFixture fx) => _fx = fx;
+
+    private static string UniquePhone() => $"+220{Guid.NewGuid().ToString("N")[..8]}";
+
+    [Fact]
+    public async Task UpsertStatsAsync_Detached_NewRow_Inserts()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var phone = UniquePhone();
+
+        var stats = ProviderStats.Initial(phone, DateTimeOffset.UtcNow);
+        stats.RecordOutcome(success: true, DateTimeOffset.UtcNow);
+        await repo.UpsertStatsAsync(stats);
+
+        var loaded = await db.ProviderStats.AsNoTracking()
+            .FirstOrDefaultAsync(s => s.ProviderPhone == phone);
+        Assert.NotNull(loaded);
+        Assert.Equal(1, loaded!.CompletedCount);
+    }
+
+    [Fact]
+    public async Task UpsertStatsAsync_Detached_ExistingRow_UpdatesWithoutPkConflict()
+    {
+        var phone = UniquePhone();
+
+        await using (var scope = _fx.Factory.Services.CreateAsyncScope())
+        {
+            var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+            var initial = ProviderStats.Initial(phone, DateTimeOffset.UtcNow);
+            await repo.UpsertStatsAsync(initial);
+        }
+
+        await using (var scope = _fx.Factory.Services.CreateAsyncScope())
+        {
+            var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+            var brandNew = ProviderStats.Initial(phone, DateTimeOffset.UtcNow);
+            brandNew.RecordOutcome(success: true, DateTimeOffset.UtcNow);
+            brandNew.RecordOutcome(success: true, DateTimeOffset.UtcNow);
+            await repo.UpsertStatsAsync(brandNew);
+        }
+
+        await using (var scope = _fx.Factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+            var loaded = await db.ProviderStats.AsNoTracking()
+                .FirstOrDefaultAsync(s => s.ProviderPhone == phone);
+            Assert.NotNull(loaded);
+            Assert.Equal(2, loaded!.CompletedCount);
+            Assert.Equal(1.0, loaded.SuccessRate, precision: 6);
+        }
+    }
+
+    [Fact]
+    public async Task UpsertStatsAsync_StaleConcurrencyToken_Throws()
+    {
+        var phone = UniquePhone();
+        var now = DateTimeOffset.UtcNow;
+
+        await using var seedScope = _fx.Factory.Services.CreateAsyncScope();
+        var seedRepo = seedScope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        await seedRepo.UpsertStatsAsync(ProviderStats.Initial(phone, now));
+
+        // Two independent scopes load the same row, mutate, save. The second save
+        // must fail because the LastUpdated concurrency token shifts on the first.
+        await using var scopeA = _fx.Factory.Services.CreateAsyncScope();
+        await using var scopeB = _fx.Factory.Services.CreateAsyncScope();
+        var repoA = scopeA.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var repoB = scopeB.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+
+        var statsA = await repoA.GetStatsAsync(phone);
+        var statsB = await repoB.GetStatsAsync(phone);
+        Assert.NotNull(statsA);
+        Assert.NotNull(statsB);
+
+        statsA!.RecordOutcome(true, now.AddSeconds(1));
+        await repoA.UpsertStatsAsync(statsA);
+
+        statsB!.RecordOutcome(false, now.AddSeconds(2));
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(
+            () => repoB.UpsertStatsAsync(statsB));
+    }
+
+    [Fact]
+    public async Task UpsertStatsAsync_Tracked_ExistingRow_PersistsMutation()
+    {
+        var phone = UniquePhone();
+
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+
+        var stats = ProviderStats.Initial(phone, DateTimeOffset.UtcNow);
+        await repo.UpsertStatsAsync(stats);
+
+        // Re-load via the repository so it is tracked, mutate, and upsert again.
+        var tracked = await repo.GetStatsAsync(phone);
+        Assert.NotNull(tracked);
+        tracked!.RecordOutcome(success: false, DateTimeOffset.UtcNow);
+        await repo.UpsertStatsAsync(tracked);
+
+        var loaded = await db.ProviderStats.AsNoTracking()
+            .FirstOrDefaultAsync(s => s.ProviderPhone == phone);
+        Assert.NotNull(loaded);
+        Assert.Equal(1, loaded!.CompletedCount);
+        Assert.Equal(0.0, loaded.SuccessRate, precision: 6);
+    }
+
+    [Fact]
+    public async Task GetLatestPendingForClient_NoMatches_ReturnsNull()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        Assert.Null(await repo.GetLatestPendingForClientAsync(UniquePhone()));
+    }
+
+    [Fact]
+    public async Task GetLatestPendingForClient_HasMatchesButNoPending_ReturnsNull()
+    {
+        var clientPhone = UniquePhone();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+
+        var (request, match) = await SeedMatchAsync(db, clientPhone);
+        var fb = new MatchFeedback
+        {
+            MatchId = match.Id,
+            Step = FeedbackStep.DidYouFind,
+            Answer = FeedbackAnswer.Yes,
+            RepliedAt = DateTimeOffset.UtcNow
+        };
+        db.MatchFeedback.Add(fb);
+        await db.SaveChangesAsync();
+
+        Assert.Null(await repo.GetLatestPendingForClientAsync(clientPhone));
+    }
+
+    [Fact]
+    public async Task GetLatestPendingForClient_MultiplePending_ReturnsLatestPromptedAt()
+    {
+        var clientPhone = UniquePhone();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+
+        var (request, match) = await SeedMatchAsync(db, clientPhone);
+        var older = new MatchFeedback
+        {
+            MatchId = match.Id,
+            Step = FeedbackStep.DidYouFind,
+            PromptedAt = DateTimeOffset.UtcNow - TimeSpan.FromHours(2)
+        };
+        var newer = new MatchFeedback
+        {
+            MatchId = match.Id,
+            Step = FeedbackStep.DidYouFind,
+            PromptedAt = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5)
+        };
+        db.MatchFeedback.AddRange(older, newer);
+        await db.SaveChangesAsync();
+
+        var found = await repo.GetLatestPendingForClientAsync(clientPhone);
+        Assert.NotNull(found);
+        Assert.Equal(newer.Id, found!.Id);
+    }
+
+    private static async Task<(ServiceRequest Request, Match Match)> SeedMatchAsync(
+        HookDbContext db, string clientPhone)
+    {
+        var request = ServiceRequest.Create(
+            clientPhone, "plumbing",
+            new Location(13.45, -16.6), "Banjul",
+            $"req-{Guid.NewGuid()}", 5.0, DateTimeOffset.UtcNow, false);
+        var match = new Match
+        {
+            RequestId = request.Id,
+            ProviderPhone = $"+220{Guid.NewGuid().ToString("N")[..8]}",
+            ServiceSlug = "plumbing"
+        };
+        db.ServiceRequests.Add(request);
+        db.Matches.Add(match);
+        await db.SaveChangesAsync();
+        return (request, match);
+    }
+}

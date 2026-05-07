@@ -1,0 +1,379 @@
+using Hook.Features.ChatSession.AccessLog;
+using Hook.Features.ChatSession.ParticipantAggregate;
+using Hook.Features.ChatSession.SessionAggregate;
+using Hook.Features.Feedback.Models;
+using Hook.Features.Feedback.ProviderStatsAggregate;
+using Hook.Features.Geocoding.GeocodeCache;
+using Hook.Features.Geocoding.Models;
+using Hook.Features.Matching.MatchAggregate;
+using Hook.Features.MetaTemplates;
+using Hook.Features.ServiceRequest.RequestAggregate;
+using Hook.Shared.Persistence.Data;
+using Hook.Shared.Retention;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+
+namespace Hook.IntegrationTests.Retention;
+
+/// <summary>
+/// Exercises <see cref="RetentionSweeper"/> against the shared <see cref="DevPipelineFixture"/>
+/// container. The hosted service is disabled in the fixture (Retention__Enabled=false) so the
+/// sweeper only runs when these tests invoke it explicitly. Tests use unique phone numbers
+/// derived from <see cref="Guid.NewGuid"/> so concurrent test runs do not collide.
+/// </summary>
+public sealed class RetentionSweeperTests : IClassFixture<DevPipelineFixture>
+{
+    private readonly DevPipelineFixture _fx;
+
+    public RetentionSweeperTests(DevPipelineFixture fx) => _fx = fx;
+
+    private static string UniquePhone() => $"+220{Guid.NewGuid().ToString("N")[..8]}";
+
+    private static (DateTimeOffset Old, DateTimeOffset Fresh) Boundaries(RetentionOptions opts)
+    {
+        var now = DateTimeOffset.UtcNow;
+        // One full day past the retention cutoff and one hour inside the keep window.
+        return (now - TimeSpan.FromDays(opts.RetentionDays + 1), now - TimeSpan.FromHours(1));
+    }
+
+    private static IRetentionSweeper Resolve(IServiceProvider sp)
+    {
+        // Resolve the sweeper but force-enable retention regardless of the test fixture's
+        // disabled default. Mirrors what the hosted service would have done in production.
+        var db = sp.GetRequiredService<HookDbContext>();
+        var configured = sp.GetRequiredService<IOptions<RetentionOptions>>().Value;
+        var enabled = Options.Create(new RetentionOptions
+        {
+            Enabled = true,
+            RetentionDays = configured.RetentionDays,
+            SweepInterval = configured.SweepInterval,
+            StartupDelay = configured.StartupDelay
+        });
+        return new RetentionSweeper(db, enabled, TimeProvider.System,
+            NullLogger<RetentionSweeper>.Instance);
+    }
+
+    [Fact]
+    public async Task Sweep_ResultKeys_MatchEfMappedTableNames()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var sweeper = Resolve(scope.ServiceProvider);
+
+        var result = await sweeper.RunOnceAsync(CancellationToken.None);
+
+        foreach (var key in result.DeletedByTable.Keys)
+        {
+            var found = db.Model.GetEntityTypes()
+                .Any(t => string.Equals(t.GetTableName(), key, StringComparison.Ordinal));
+            Assert.True(found, $"Sweep key '{key}' has no matching EF entity table");
+        }
+    }
+
+    [Fact]
+    public async Task Sweep_DeletesRowsOlderThanCutoff_KeepsYoungerRows()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var opts = scope.ServiceProvider.GetRequiredService<IOptions<RetentionOptions>>().Value;
+        var (old, fresh) = Boundaries(opts);
+
+        var oldChat = ChatSession.Create(TimeSpan.FromDays(1), DateTimeOffset.UtcNow - TimeSpan.FromDays(opts.RetentionDays + 2));
+        var newChat = ChatSession.Create(TimeSpan.FromDays(1), fresh);
+        db.ChatSessions.AddRange(oldChat, newChat);
+
+        var oldRequest = ServiceRequest.Create(
+            UniquePhone(), "plumbing",
+            new Location(13.45, -16.6),
+            "Banjul", "old-test", 5.0, old, false);
+        oldRequest.Close();
+        var newRequest = ServiceRequest.Create(
+            UniquePhone(), "plumbing",
+            new Location(13.45, -16.6),
+            "Banjul", "fresh-test", 5.0, fresh, false);
+        db.ServiceRequests.AddRange(oldRequest, newRequest);
+
+        var oldGeoKey = $"old-{Guid.NewGuid()}";
+        var freshGeoKey = $"new-{Guid.NewGuid()}";
+        var oldGeo = new GeocodeCacheEntry
+        {
+            Key = oldGeoKey,
+            Latitude = 13.45,
+            Longitude = -16.6,
+            FormattedAddress = "Banjul",
+            Provider = "test",
+            FetchedAt = old
+        };
+        var newGeo = new GeocodeCacheEntry
+        {
+            Key = freshGeoKey,
+            Latitude = 13.45,
+            Longitude = -16.6,
+            FormattedAddress = "Banjul",
+            Provider = "test",
+            FetchedAt = fresh
+        };
+        db.GeocodeCache.AddRange(oldGeo, newGeo);
+
+        var oldContact = new WhatsappContact { Phone = UniquePhone(), LastInboundAt = old };
+        var freshContact = new WhatsappContact { Phone = UniquePhone(), LastInboundAt = fresh };
+        db.WhatsappContacts.AddRange(oldContact, freshContact);
+
+        await db.SaveChangesAsync();
+
+        var sweeper = Resolve(scope.ServiceProvider);
+        var result = await sweeper.RunOnceAsync(CancellationToken.None);
+
+        Assert.True(result.DeletedByTable[RetentionTableKeys.ChatSessions] >= 1);
+        Assert.True(result.DeletedByTable[RetentionTableKeys.ServiceRequests] >= 1);
+        Assert.True(result.DeletedByTable[RetentionTableKeys.GeocodeCache] >= 1);
+        Assert.True(result.DeletedByTable[RetentionTableKeys.WhatsappContacts] >= 1);
+        Assert.True(result.DeletedByTable.ContainsKey(RetentionTableKeys.MatchFeedback));
+        Assert.False(result.DeletedByTable.ContainsKey("provider_stats"));
+
+        // Old rows gone; fresh control rows survived.
+        Assert.False(await db.ChatSessions.AsNoTracking().AnyAsync(s => s.Id == oldChat.Id));
+        Assert.True(await db.ChatSessions.AsNoTracking().AnyAsync(s => s.Id == newChat.Id));
+        Assert.False(await db.ServiceRequests.AsNoTracking().AnyAsync(r => r.Id == oldRequest.Id));
+        Assert.True(await db.ServiceRequests.AsNoTracking().AnyAsync(r => r.Id == newRequest.Id));
+        Assert.False(await db.GeocodeCache.AsNoTracking().AnyAsync(g => g.Key == oldGeoKey));
+        Assert.True(await db.GeocodeCache.AsNoTracking().AnyAsync(g => g.Key == freshGeoKey));
+        Assert.False(await db.WhatsappContacts.AsNoTracking().AnyAsync(c => c.Phone == oldContact.Phone));
+        Assert.True(await db.WhatsappContacts.AsNoTracking().AnyAsync(c => c.Phone == freshContact.Phone));
+    }
+
+    [Fact]
+    public async Task Sweep_OldServiceRequestStillOpen_NotDeleted()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var opts = scope.ServiceProvider.GetRequiredService<IOptions<RetentionOptions>>().Value;
+        var (old, _) = Boundaries(opts);
+
+        var openOld = ServiceRequest.Create(
+            UniquePhone(), "plumbing",
+            new Location(13.45, -16.6),
+            "Banjul", "still-open", 5.0, old, false);
+        // Status defaults to Open and is *not* closed: sweeper must keep this row.
+        db.ServiceRequests.Add(openOld);
+        await db.SaveChangesAsync();
+
+        var sweeper = Resolve(scope.ServiceProvider);
+        await sweeper.RunOnceAsync(CancellationToken.None);
+
+        Assert.True(await db.ServiceRequests.AsNoTracking().AnyAsync(r => r.Id == openOld.Id));
+
+        // Cleanup so this row does not pollute later tests in the shared fixture.
+        try
+        {
+            db.ServiceRequests.Remove(openOld);
+            await db.SaveChangesAsync();
+        }
+        catch
+        {
+            // Ignore cleanup failures - the row will be reaped on test container teardown.
+        }
+    }
+
+    [Fact]
+    public async Task Sweep_DeletesOldMatchFeedback_KeepsRecent_KeepsProviderStats()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var opts = scope.ServiceProvider.GetRequiredService<IOptions<RetentionOptions>>().Value;
+        var (old, fresh) = Boundaries(opts);
+        var ancient = DateTimeOffset.UtcNow - TimeSpan.FromDays(opts.RetentionDays + 23);
+
+        var (_, oldMatch) = await SeedRequestAndMatchAsync(db, fresh);
+        var (_, freshMatch) = await SeedRequestAndMatchAsync(db, fresh);
+
+        var oldAnswered = new MatchFeedback
+        {
+            MatchId = oldMatch.Id,
+            Step = FeedbackStep.DidYouFind,
+            Answer = FeedbackAnswer.Yes,
+            PromptedAt = ancient,
+            RepliedAt = ancient + TimeSpan.FromHours(2)
+        };
+        var oldPending = new MatchFeedback
+        {
+            MatchId = oldMatch.Id,
+            Step = FeedbackStep.DidYouFind,
+            PromptedAt = old
+        };
+        var recent = new MatchFeedback
+        {
+            MatchId = freshMatch.Id,
+            Step = FeedbackStep.JobCompleted,
+            Answer = FeedbackAnswer.Yes,
+            PromptedAt = fresh,
+            RepliedAt = fresh
+        };
+        var phone = UniquePhone();
+        var stats = ProviderStats.Initial(phone, ancient);
+
+        db.MatchFeedback.AddRange(oldAnswered, oldPending, recent);
+        db.ProviderStats.Add(stats);
+        await db.SaveChangesAsync();
+
+        var sweeper = Resolve(scope.ServiceProvider);
+        var result = await sweeper.RunOnceAsync(CancellationToken.None);
+
+        Assert.True(result.DeletedByTable[RetentionTableKeys.MatchFeedback] >= 2);
+        Assert.False(await db.MatchFeedback.AsNoTracking().AnyAsync(f => f.Id == oldAnswered.Id));
+        Assert.False(await db.MatchFeedback.AsNoTracking().AnyAsync(f => f.Id == oldPending.Id));
+        Assert.True(await db.MatchFeedback.AsNoTracking().AnyAsync(f => f.Id == recent.Id));
+        Assert.True(await db.ProviderStats.AsNoTracking().AnyAsync(s => s.ProviderPhone == phone));
+    }
+
+    [Fact]
+    public async Task Sweep_DeletingServiceRequest_CascadesMatchAndFeedback()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var opts = scope.ServiceProvider.GetRequiredService<IOptions<RetentionOptions>>().Value;
+        var (old, fresh) = Boundaries(opts);
+
+        var oldRequest = ServiceRequest.Create(
+            UniquePhone(), "plumbing",
+            new Location(13.45, -16.6),
+            "Banjul", "cascade-test", 5.0, old, false);
+        oldRequest.Close();
+        var match = new Match
+        {
+            RequestId = oldRequest.Id,
+            ProviderPhone = UniquePhone(),
+            ServiceSlug = "plumbing"
+        };
+        var feedback = new MatchFeedback
+        {
+            MatchId = match.Id,
+            Step = FeedbackStep.DidYouFind,
+            Answer = FeedbackAnswer.Yes,
+            PromptedAt = fresh
+        };
+        db.ServiceRequests.Add(oldRequest);
+        db.Matches.Add(match);
+        db.MatchFeedback.Add(feedback);
+        await db.SaveChangesAsync();
+
+        var sweeper = Resolve(scope.ServiceProvider);
+        await sweeper.RunOnceAsync(CancellationToken.None);
+
+        Assert.False(await db.ServiceRequests.AsNoTracking().AnyAsync(r => r.Id == oldRequest.Id));
+        Assert.False(await db.Matches.AsNoTracking().AnyAsync(m => m.Id == match.Id));
+        Assert.False(await db.MatchFeedback.AsNoTracking().AnyAsync(f => f.Id == feedback.Id));
+    }
+
+    private static async Task<(ServiceRequest Request, Match Match)> SeedRequestAndMatchAsync(
+        HookDbContext db, DateTimeOffset createdAt)
+    {
+        var request = ServiceRequest.Create(
+            UniquePhone(), "plumbing",
+            new Location(13.45, -16.6),
+            "Banjul", $"req-{Guid.NewGuid()}", 5.0, createdAt, false);
+        var match = new Match
+        {
+            RequestId = request.Id,
+            ProviderPhone = UniquePhone(),
+            ServiceSlug = "plumbing"
+        };
+        db.ServiceRequests.Add(request);
+        db.Matches.Add(match);
+        await db.SaveChangesAsync();
+        return (request, match);
+    }
+
+    [Fact]
+    public async Task Sweep_ChatSessionDelete_CascadesToMessagesParticipantsKeysAndAccessLogs()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var opts = scope.ServiceProvider.GetRequiredService<IOptions<RetentionOptions>>().Value;
+
+        var session = ChatSession.Create(
+            TimeSpan.FromDays(1),
+            DateTimeOffset.UtcNow - TimeSpan.FromDays(opts.RetentionDays + 2));
+        var participant = ChatParticipant.Create(session.Id, ChatParticipantRole.Client, UniquePhone());
+        var deviceKey = new ChatDeviceKey
+        {
+            ChatId = session.Id,
+            ParticipantId = participant.Id,
+            DeviceId = Guid.NewGuid(),
+            PublicKey = [1, 2, 3]
+        };
+        var message = new ChatMessage
+        {
+            ChatId = session.Id,
+            ParticipantId = participant.Id,
+            SenderDeviceId = deviceKey.DeviceId,
+            Sequence = 1
+        };
+        message.Recipients.Add(new ChatMessageRecipient
+        {
+            MessageId = message.Id,
+            RecipientDeviceId = Guid.NewGuid(),
+            Ciphertext = [9],
+            Nonce = new byte[12]
+        });
+        var accessLog = new ChatAccessLog
+        {
+            ChatId = session.Id,
+            ParticipantId = participant.Id,
+            IpAddress = "127.0.0.1",
+            DeviceInfo = "test"
+        };
+
+        db.ChatSessions.Add(session);
+        db.ChatParticipants.Add(participant);
+        db.ChatDeviceKeys.Add(deviceKey);
+        db.ChatMessages.Add(message);
+        db.ChatAccessLogs.Add(accessLog);
+        await db.SaveChangesAsync();
+
+        var sweeper = Resolve(scope.ServiceProvider);
+        await sweeper.RunOnceAsync(CancellationToken.None);
+
+        Assert.False(await db.ChatSessions.AsNoTracking().AnyAsync(s => s.Id == session.Id));
+        Assert.False(await db.ChatParticipants.AsNoTracking().AnyAsync(p => p.Id == participant.Id));
+        Assert.False(await db.ChatMessages.AsNoTracking().AnyAsync(m => m.Id == message.Id));
+        Assert.False(await db.ChatAccessLogs.AsNoTracking().AnyAsync(l => l.Id == accessLog.Id));
+        Assert.False(await db.ChatDeviceKeys.AsNoTracking().AnyAsync(k => k.Id == deviceKey.Id));
+        Assert.False(await db.ChatMessageRecipients.AsNoTracking().AnyAsync(r => r.MessageId == message.Id));
+    }
+
+    [Fact]
+    public async Task Sweep_DisabledByConfig_DoesNothing()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var opts = scope.ServiceProvider.GetRequiredService<IOptions<RetentionOptions>>().Value;
+        var (old, _) = Boundaries(opts);
+
+        var phone = UniquePhone();
+        var oldContact = new WhatsappContact { Phone = phone, LastInboundAt = old };
+        db.WhatsappContacts.Add(oldContact);
+        await db.SaveChangesAsync();
+
+        try
+        {
+            var disabledOpts = Options.Create(new RetentionOptions { Enabled = false });
+            var sweeper = new RetentionSweeper(
+                db, disabledOpts, TimeProvider.System, NullLogger<RetentionSweeper>.Instance);
+
+            var result = await sweeper.RunOnceAsync(CancellationToken.None);
+
+            Assert.Empty(result.DeletedByTable);
+            Assert.True(await db.WhatsappContacts.AsNoTracking().AnyAsync(c => c.Phone == phone));
+        }
+        finally
+        {
+            // Always remove the seeded row, even if assertions throw, so later tests
+            // do not see stale data from this fixture-shared container.
+            db.WhatsappContacts.Remove(oldContact);
+            await db.SaveChangesAsync();
+        }
+    }
+}

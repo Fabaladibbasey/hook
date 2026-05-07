@@ -46,8 +46,8 @@ public sealed class OllamaConversationAi(
         var root = json.RootElement;
         var intentText = root.GetProperty("intent").GetString() ?? "";
         var confidence = root.TryGetProperty("confidence", out var c) ? Math.Clamp(c.GetDouble(), 0, 1) : 0;
-        var language   = root.TryGetProperty("language",   out var l) ? l.GetString() ?? "en" : "en";
-        var notes      = root.TryGetProperty("notes",      out var n) ? n.GetString() : null;
+        var language = root.TryGetProperty("language", out var l) ? l.GetString() ?? "en" : "en";
+        var notes = root.TryGetProperty("notes", out var n) ? n.GetString() : null;
 
         // Strict ordinal match against the enum's named members. No ignoreCase fuzz, no
         // fallback for unknown labels — anything we don't recognise lands as Unknown,
@@ -118,7 +118,7 @@ public sealed class OllamaConversationAi(
         var root = json.RootElement;
 
         var matched = root.TryGetProperty("matchedSlug", out var m) ? m.GetString() : null;
-        var isNew   = root.TryGetProperty("isNew", out var n) && n.GetBoolean();
+        var isNew = root.TryGetProperty("isNew", out var n) && n.GetBoolean();
 
         // The DB is the only ground truth for the slug taxonomy. If the LLM returns a slug
         // outside the candidate list we passed in, treat the proposal as new and let the

@@ -8,6 +8,7 @@ namespace Hook.Features.ChatLifecycle.ExpireChat;
 public sealed class HardExpireHandler(
     IChatRepository chats,
     IHubContext<ChatHub> hub,
+    TimeProvider clock,
     ILogger<HardExpireHandler> logger)
 {
     public async Task Handle(HardExpireCheck evt, CancellationToken ct)
@@ -17,7 +18,7 @@ public sealed class HardExpireHandler(
 
         if (session.Status == ChatSessionStatus.Active)
         {
-            session.Expire();
+            session.Expire(clock.GetUtcNow());
             await chats.SaveChangesAsync(ct);
         }
 

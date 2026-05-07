@@ -10,5 +10,6 @@ public interface IFeedbackRepository
     Task AddAsync(MatchFeedback feedback, CancellationToken ct = default);
     Task<ProviderStats?> GetStatsAsync(string providerPhone, CancellationToken ct = default);
     Task UpsertStatsAsync(ProviderStats stats, CancellationToken ct = default);
+    Task DeleteStatsAsync(string providerPhone, CancellationToken ct = default);
     Task SaveChangesAsync(CancellationToken ct = default);
 }

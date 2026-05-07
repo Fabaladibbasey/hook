@@ -5,6 +5,7 @@ using Hook.TestHelpers;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Testcontainers.PostgreSql;
@@ -38,7 +39,8 @@ public sealed class DevPipelineFixture : IAsyncLifetime
         "Dev__Providers__AutoSeed",
         "Dev__Providers__ReferenceLat",
         "Dev__Providers__ReferenceLng",
-        "Dev__Providers__TtlHours"
+        "Dev__Providers__TtlHours",
+        "Retention__Enabled"
     ];
 
     public async Task InitializeAsync()
@@ -62,6 +64,7 @@ public sealed class DevPipelineFixture : IAsyncLifetime
         Environment.SetEnvironmentVariable(
             "Dev__Providers__ReferenceLng", SeedRefLng.ToString(System.Globalization.CultureInfo.InvariantCulture));
         Environment.SetEnvironmentVariable("Dev__Providers__TtlHours", "24");
+        Environment.SetEnvironmentVariable("Retention__Enabled", "false");
 
         Factory = new WebApplicationFactory<global::Hook.Program>()
             .WithWebHostBuilder(b =>
@@ -76,7 +79,7 @@ public sealed class DevPipelineFixture : IAsyncLifetime
 
         using var scope = Factory.Services.CreateScope();
         var ctx = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-        await ctx.Database.EnsureCreatedAsync();
+        await ctx.Database.MigrateAsync();
 
         var seeder = scope.ServiceProvider.GetRequiredService<DevProviderSeeder>();
         await seeder.SeedAsync();

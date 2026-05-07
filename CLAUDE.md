@@ -83,6 +83,14 @@ Wolverine messaging runs in-process. `Wolverine.DefaultExecutionTimeout` (defaul
 - **Multi-device E2E chat**: SignalR chat ships per-recipient envelopes; server only sees ciphertext.
 - **Cross-flow routing**: providers may register against multiple services; routing is flexible.
 - **Geocoding**: dev coordinates are Banjul; integration test fixtures are San Francisco.
+- **Retention sweep**: `Shared/Retention/` runs a `RetentionHostedService` daily. Configured via `Retention:*` in `appsettings.json`. Disabled by default in tests (`Retention__Enabled=false` env var set in `DevPipelineFixture`); tests that exercise the sweeper construct it directly with explicit options.
+
+## Frontend routes
+
+- `/` — landing page (post-WhatsApp link target).
+- `/c/:chatId/:token` — ephemeral E2E chat room.
+- `/dev` — dev console (WhatsApp simulation).
+- `/terms`, `/privacy` — legal pages, lazy-loaded; `RETENTION_DAYS` literal lives in `frontend/src/legal/RetentionDays.ts` and `SUPPORT_EMAIL` is driven by `VITE_SUPPORT_EMAIL`.
 
 ## Naming Conventions
 

@@ -363,15 +363,15 @@ public sealed class InboundRouterHandler(
     {
         // No locking around Get→Delete — drafts are short-lived and duplicate inbound delivery is rare.
         // Revisit if horizontal scaling is introduced.
-        var hadRegDraft       = await registrationDrafts.GetAsync(phone, ct) is not null;
-        var hadClientDraft    = await clientDrafts.GetAsync(phone, ct) is not null;
+        var hadRegDraft = await registrationDrafts.GetAsync(phone, ct) is not null;
+        var hadClientDraft = await clientDrafts.GetAsync(phone, ct) is not null;
         var hadAmbiguousDraft = await ambiguousDrafts.GetAsync(phone, ct) is not null;
         if (!hadRegDraft && !hadClientDraft && !hadAmbiguousDraft) return false;
 
         await whatsapp.SendTextAsync(from, "Session ended. Send a new message to start over.", ct);
 
-        if (hadRegDraft)       await registrationDrafts.DeleteAsync(phone, ct);
-        if (hadClientDraft)    await clientDrafts.DeleteAsync(phone, ct);
+        if (hadRegDraft) await registrationDrafts.DeleteAsync(phone, ct);
+        if (hadClientDraft) await clientDrafts.DeleteAsync(phone, ct);
         if (hadAmbiguousDraft) await ambiguousDrafts.DeleteAsync(phone, ct);
 
         logger.LogDebug("Abandoned active draft for {Phone} (reg={Reg}, client={Client}, ambig={Ambig})",

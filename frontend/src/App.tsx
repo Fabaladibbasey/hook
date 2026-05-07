@@ -1,7 +1,9 @@
+import LegalFooter from "./components/LegalFooter";
+
 export default function App() {
   return (
-    <div className="min-h-screen flex items-center justify-center p-6">
-      <div className="text-center max-w-md">
+    <div className="min-h-screen grid grid-rows-[1fr_auto] p-6">
+      <div className="text-center max-w-md justify-self-center self-center">
         <img
           src="/hook-logo.png"
           alt="Hook"
@@ -11,6 +13,7 @@ export default function App() {
           This page hosts secure chat sessions. Open the link sent to you on WhatsApp to start.
         </p>
       </div>
+      <LegalFooter />
     </div>
   );
 }

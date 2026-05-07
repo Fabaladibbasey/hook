@@ -43,7 +43,7 @@ public static class PromptSafety
     public static string Fence(string userText, int maxChars = 1000)
     {
         var safe = (userText ?? string.Empty)
-            .Replace(Open,  "<user input>",  StringComparison.OrdinalIgnoreCase)
+            .Replace(Open, "<user input>", StringComparison.OrdinalIgnoreCase)
             .Replace(Close, "</user input>", StringComparison.OrdinalIgnoreCase);
         safe = ControlTokensRx.Replace(safe, m => "<" + m.Value[2..^2] + ">");
         if (safe.Length > maxChars) safe = safe[..maxChars] + "…";

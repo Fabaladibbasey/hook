@@ -1,8 +1,8 @@
 using Hook.Features.Observability;
 using Hook.Features.ServiceRequest.RequestAggregate;
 using Microsoft.Extensions.Options;
-using MatchEntity = Hook.Features.Matching.MatchAggregate.Match;
 using IMatchRepository = Hook.Features.Matching.MatchAggregate.IMatchRepository;
+using MatchEntity = Hook.Features.Matching.MatchAggregate.Match;
 
 namespace Hook.Features.Matching.Match;
 

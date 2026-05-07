@@ -382,14 +382,14 @@ public class ClientRequestPipelineTests : IClassFixture<DevPipelineFixture>
     // "Proceed" / "Detail" — these must route to ShareTopOrAskAsync (same as
     // "yes"), NOT fall through to the LLM where they'd mis-classify.
     [Theory]
-    [InlineData("proceed",  "+220700000201")]
-    [InlineData("Proceed",  "+220700000202")]
-    [InlineData("PROCEED",  "+220700000203")]
-    [InlineData("Detail",   "+220700000204")]
-    [InlineData("details",  "+220700000205")]
-    [InlineData("more info","+220700000206")]
+    [InlineData("proceed", "+220700000201")]
+    [InlineData("Proceed", "+220700000202")]
+    [InlineData("PROCEED", "+220700000203")]
+    [InlineData("Detail", "+220700000204")]
+    [InlineData("details", "+220700000205")]
+    [InlineData("more info", "+220700000206")]
     [InlineData("continue", "+220700000207")]
-    [InlineData("connect",  "+220700000208")]
+    [InlineData("connect", "+220700000208")]
     [InlineData("go ahead", "+220700000209")]
     public async Task ServiceRequest_NaturalConfirmAfterPresent_RoutesToShareTopOrAsk(string reply, string phone)
     {

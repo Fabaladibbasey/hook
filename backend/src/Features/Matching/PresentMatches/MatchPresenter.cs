@@ -25,10 +25,10 @@ public sealed class MatchPresenter(
         var presented = batch.Scored.Take(MaxPresented)
             .Select((s, i) => new
             {
-                n        = i + 1,
-                phone    = Mask(s.Candidate.Phone),
+                n = i + 1,
+                phone = Mask(s.Candidate.Phone),
                 distance = Math.Round(s.Candidate.DistanceKm, 1),
-                score    = Math.Round(s.Score, 2)
+                score = Math.Round(s.Score, 2)
             })
             .ToArray();
 
@@ -36,7 +36,7 @@ public sealed class MatchPresenter(
         {
             ["service"] = serviceSlug,
             ["matches"] = JsonSerializer.Serialize(presented),
-            ["count"]   = presented.Length.ToString()
+            ["count"] = presented.Length.ToString()
         };
 
         var ctx = new ReplyContext(

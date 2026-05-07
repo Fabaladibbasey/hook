@@ -23,15 +23,15 @@ public sealed class HookAppFixture : IAsyncLifetime
 
     public WebApplicationFactory<global::Hook.Program> Factory { get; private set; } = default!;
 
-    private static readonly string[] EnvKeys = new[]
-    {
+    private static readonly string[] EnvKeys =
+    [
         "ConnectionStrings__HookDb",
         "Whatsapp__VerifyToken",
         "Whatsapp__AppSecret",
         "Whatsapp__PhoneNumberId",
         "Whatsapp__AccessToken",
         "GoogleGeocoding__ApiKey"
-    };
+    ];
 
     public async Task InitializeAsync()
     {

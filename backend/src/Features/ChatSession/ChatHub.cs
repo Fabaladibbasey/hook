@@ -231,7 +231,7 @@ public sealed class ChatHub(IChatRepository chats, ChatScheduler scheduler, ILog
             return;
         }
 
-        session.End();
+        session.End(clock.GetUtcNow());
         await chats.SaveChangesAsync();
 
         await Clients.Group(ChatGroup(chatId)).SendAsync("ChatEnded", new { reason = "user", endedBy = role });

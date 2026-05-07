@@ -7,21 +7,13 @@ namespace Hook.Features.Feedback;
 
 public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
 {
-    public async Task<MatchFeedback?> GetLatestPendingForClientAsync(string clientPhone, CancellationToken ct = default)
-    {
-        var matchIds = await (
-            from r in db.ServiceRequests
-            join m in db.Matches on r.Id equals m.RequestId
-            where r.ClientPhone == clientPhone
-            select m.Id).ToListAsync(ct);
-
-        if (matchIds.Count == 0) return null;
-
-        return await db.MatchFeedback
-            .Where(f => matchIds.Contains(f.MatchId) && f.Answer == FeedbackAnswer.Pending)
+    public Task<MatchFeedback?> GetLatestPendingForClientAsync(string clientPhone, CancellationToken ct = default) =>
+        db.MatchFeedback
+            .Where(f => f.Answer == FeedbackAnswer.Pending
+                && db.Matches.Any(m => m.Id == f.MatchId
+                    && db.ServiceRequests.Any(r => r.Id == m.RequestId && r.ClientPhone == clientPhone)))
             .OrderByDescending(f => f.PromptedAt)
             .FirstOrDefaultAsync(ct);
-    }
 
     public Task<MatchFeedback?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
         db.MatchFeedback.FirstOrDefaultAsync(f => f.Id == id, ct);
@@ -34,17 +26,24 @@ public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
 
     public async Task UpsertStatsAsync(ProviderStats stats, CancellationToken ct = default)
     {
-        var existing = await db.ProviderStats.FindAsync([stats.ProviderPhone], ct);
-        if (existing is null)
+        var entry = db.Entry(stats);
+        if (entry.State == EntityState.Detached)
         {
-            await db.ProviderStats.AddAsync(stats, ct);
-        }
-        else if (!ReferenceEquals(existing, stats))
-        {
-            db.Entry(existing).CurrentValues.SetValues(stats);
+            var existing = await db.ProviderStats.FindAsync([stats.ProviderPhone], ct);
+            if (existing is null)
+            {
+                db.ProviderStats.Add(stats);
+            }
+            else if (!ReferenceEquals(existing, stats))
+            {
+                db.Entry(existing).CurrentValues.SetValues(stats);
+            }
         }
         await db.SaveChangesAsync(ct);
     }
+
+    public Task DeleteStatsAsync(string providerPhone, CancellationToken ct = default) =>
+        db.ProviderStats.Where(s => s.ProviderPhone == providerPhone).ExecuteDeleteAsync(ct);
 
     public Task SaveChangesAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
 }

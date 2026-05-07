@@ -34,4 +34,13 @@ public static class HookMetrics
 
     public static readonly Counter<long> RateLimitBlocks =
         Meter.CreateCounter<long>("hook.ratelimit.blocks");
+
+    public static readonly Counter<long> RetentionDeleted =
+        Meter.CreateCounter<long>("hook.retention.deleted.total");
+
+    public static readonly Histogram<double> RetentionSweepDuration =
+        Meter.CreateHistogram<double>("hook.retention.sweep.duration_ms");
+
+    public static readonly Counter<long> RetentionSweepErrors =
+        Meter.CreateCounter<long>("hook.retention.sweep.errors");
 }

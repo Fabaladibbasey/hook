@@ -20,6 +20,7 @@ using Hook.Features.Whatsapp.Dev;
 using Hook.Features.Whatsapp.ReceiveWebhook;
 using Hook.Shared.Core;
 using Hook.Shared.Persistence.Data;
+using Hook.Shared.Retention;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Serilog;
@@ -56,6 +57,7 @@ try
     builder.Services.AddServiceRequest();
     builder.Services.AddValidatedOptions<MatchingOptions>(builder.Configuration);
     builder.Services.AddMatching();
+    builder.Services.AddRetentionSweeper(builder.Configuration);
     builder.Services.AddContactSharing();
     builder.Services.AddChat(builder.Configuration);
     builder.Services.AddChatLifecycle();

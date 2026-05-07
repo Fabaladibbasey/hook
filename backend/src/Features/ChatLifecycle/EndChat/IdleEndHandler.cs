@@ -8,6 +8,7 @@ namespace Hook.Features.ChatLifecycle.EndChat;
 public sealed class IdleEndHandler(
     IChatRepository chats,
     IHubContext<ChatHub> hub,
+    TimeProvider clock,
     ILogger<IdleEndHandler> logger)
 {
     public async Task Handle(IdleEndCheck evt, CancellationToken ct)
@@ -21,7 +22,7 @@ public sealed class IdleEndHandler(
             return;
         }
 
-        session.End();
+        session.End(clock.GetUtcNow());
         await chats.SaveChangesAsync(ct);
 
         await hub.Clients.Group(ChatHub.ChatGroup(evt.ChatId)).SendAsync("ChatEnded",

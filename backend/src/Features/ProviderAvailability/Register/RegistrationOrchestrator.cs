@@ -1,5 +1,6 @@
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
+using Hook.Features.Feedback;
 using Hook.Features.Geocoding.Geocode;
 using Hook.Features.Geocoding.Models;
 using Hook.Features.ProviderAvailability.AvailabilityAggregate;
@@ -17,6 +18,7 @@ public sealed class RegistrationOrchestrator(
     IRegistrationDraftRepository drafts,
     IProviderAvailabilityRepository availability,
     IServiceRequestRepository requests,
+    IFeedbackRepository feedback,
     IConversationAi ai,
     SlugResolver slugResolver,
     GeocodingService geocoding,
@@ -43,6 +45,7 @@ public sealed class RegistrationOrchestrator(
             {
                 await availability.RemoveAsync(phone.Value, ct);
                 await availability.SaveChangesAsync(ct);
+                await feedback.DeleteStatsAsync(phone.Value, ct);
                 logger.LogDebug("Unlisted provider {Phone}", phone.Mask());
                 await whatsapp.SendTextAsync(phone,
                     "You are unlisted. Reply 'I offer …' to list again, or 'I need …' to request a service.", ct);

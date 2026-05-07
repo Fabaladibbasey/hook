@@ -25,7 +25,7 @@ public static class PickProviderResolver
         if (indices.Count > 0) return indices.Select(i => matches[i]).ToList();
 
         var fragmentHit = MatchByPhoneFragment(text, matches);
-        return fragmentHit is null ? Array.Empty<MatchEntity>() : new[] { fragmentHit };
+        return fragmentHit is null ? Array.Empty<MatchEntity>() : [fragmentHit];
     }
 
     private static IReadOnlyList<int> ParseIndices(string text, int count)
