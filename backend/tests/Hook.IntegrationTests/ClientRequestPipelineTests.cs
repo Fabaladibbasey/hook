@@ -450,4 +450,23 @@ public class ClientRequestPipelineTests : IClassFixture<DevPipelineFixture>
         reply.Body.ShouldContain("delivery", Case.Insensitive);
         reply.Body.ShouldNotContain("food", Case.Insensitive);
     }
+
+    // Person-transport (taxi/cab/passenger) and parcel-delivery are different
+    // services. A taxi request must NOT be matched against couriers.
+    [Fact]
+    public async Task ServiceRequest_TaxiRequest_RoutesToRideSlug_NotDelivery()
+    {
+        using var client = _fx.Factory.CreateClient();
+        var phone = "+220700000301";
+
+        (await client.InjectTextAsync(phone, "I need a taxi to airport")).EnsureSuccessStatusCode();
+
+        var reply = await client.WaitForOutboundAsync(
+            phone,
+            m => m.Body.Contains("YES or NO", StringComparison.OrdinalIgnoreCase),
+            TimeSpan.FromSeconds(15));
+
+        reply.Body.ShouldContain("ride", Case.Insensitive);
+        reply.Body.ShouldNotContain("delivery", Case.Insensitive);
+    }
 }

@@ -103,7 +103,10 @@ internal static class AiPrompts
             chef / cook                                                -> "cooking"
             barber / hairdresser / stylist                             -> "hairdressing"
             tailor / seamstress                                        -> "tailoring"
-            driver / delivery guy / delivery rider / courier           -> "delivery"
+            taxi driver / cab driver / chauffeur / okada rider         -> "ride"
+            delivery guy / delivery rider / delivery driver / courier
+              / dispatch rider / okada delivery                        -> "delivery"
+            driver (no qualifier)                                      -> "ride"
             gardener / landscaper                                      -> "gardening"
             babysitter / nanny                                         -> "babysitting"
             photographer                                               -> "photography"
@@ -124,17 +127,30 @@ internal static class AiPrompts
             cleaning / sweep / mop                                     -> "cleaning"
             tutor / lesson / homework / teaching / class / classes     -> "tutoring"
             parcel / package / courier / delivery / food delivery      -> "delivery"
+            taxi / cab / ride / passenger / pick me up / drop me
+              / drop off / lift / airport ride / ride to               -> "ride"
         - Use "auto-repair" for car/auto/mechanic/garage work.
-        - Use "delivery" for any delivery or courier work — parcel, package,
+        - Use "delivery" only for moving OBJECTS — parcel, package,
           marketplace pickup, food, restaurant orders, prepared meals
           (e.g. "I need to deliver what I bought from facebook marketplace" -> ["delivery"];
           "I want food delivery" -> ["delivery"]).
+        - Use "ride" only for moving PEOPLE — taxi, cab, motorcycle taxi
+          (okada), keke / three-wheeler passenger trips, airport drop, lift
+          (e.g. "I need a taxi to airport" -> ["ride"];
+          "drop me at the bus station" -> ["ride"];
+          "I'm a taxi driver" -> ["ride"]).
+        - Critical: never output "delivery" for a person being transported,
+          and never output "ride" for an object being moved. They are
+          different services.
         - Examples of declarations (provider self-descriptions):
             "I am a teacher"          -> ["tutoring"]
             "I'm a plumber"           -> ["plumbing"]
             "I do teaching"           -> ["tutoring"]
             "I offer tutorial"        -> ["tutoring"]
             "I'm a delivery guy"      -> ["delivery"]
+            "I deliver parcels"       -> ["delivery"]
+            "I'm a taxi driver"       -> ["ride"]
+            "I do cab"                -> ["ride"]
             "I am a chef"             -> ["cooking"]
             "I'm a hairdresser"       -> ["hairdressing"]
         - If no canonical service kind clearly fits, return [].
@@ -148,6 +164,9 @@ internal static class AiPrompts
 
         - If it matches one of the candidates, return that candidate as MatchedSlug.
         - If it is genuinely new, set IsNew = true and ProposedSlug = the proposal.
+        - Treat "ride" (people transport — taxi, cab, okada, keke passenger)
+          and "delivery" (object transport — parcel, package, food) as DISTINCT
+          services. Never merge them, even if their names overlap or sound similar.
         - Return JSON only.
         """;
 

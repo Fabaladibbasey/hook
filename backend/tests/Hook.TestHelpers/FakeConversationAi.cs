@@ -54,6 +54,7 @@ public sealed class FakeConversationAi : IConversationAi
         if (lower.Contains("carpent") || lower.Contains("door") || lower.Contains("wood")) slugs.Add("carpentry");
         if (lower.Contains("computer") || lower.Contains("laptop") || lower.Contains("pc")) slugs.Add("computer-repair");
         if (lower.Contains("delivery")) slugs.Add("delivery");
+        if (lower.Contains("taxi") || lower.Contains("cab") || lower.Contains("passenger") || Regex.IsMatch(lower, @"\bride\b")) slugs.Add("ride");
         if (lower.Contains("paint")) slugs.Add("painting");
         if (lower.Contains("electric")) slugs.Add("electrical");
         if (lower.Contains("mechanic") || lower.Contains("auto") || lower.Contains("car repair")) slugs.Add("auto-repair");

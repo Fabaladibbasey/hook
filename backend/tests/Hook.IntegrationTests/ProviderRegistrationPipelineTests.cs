@@ -162,6 +162,26 @@ public class ProviderRegistrationPipelineTests : IClassFixture<DevPipelineFixtur
         (await drafts.GetAsync(phone, default)).ShouldBeNull();
     }
 
+    // A provider offering passenger transport ("I offer taxi", "I do cab")
+    // must be registered under the ride slug, not delivery — otherwise their
+    // listing surfaces for parcel-courier requests.
+    [Fact]
+    public async Task Registration_TaxiOffer_RegistersUnderRideSlug_NotDelivery()
+    {
+        using var client = _fx.Factory.CreateClient();
+        var phone = "+2207000401";
+
+        (await client.InjectTextAsync(phone, "I offer taxi")).EnsureSuccessStatusCode();
+
+        var detected = await client.WaitForOutboundAsync(
+            phone,
+            m => m.Body.StartsWith("I detected:", StringComparison.OrdinalIgnoreCase),
+            TimeSpan.FromSeconds(15));
+
+        detected.Body.ShouldContain("ride", Case.Insensitive);
+        detected.Body.ShouldNotContain("delivery", Case.Insensitive);
+    }
+
     [Fact]
     public async Task ListedProvider_Greeting_GetsAcknowledgementWithServicesAndLeaveOption()
     {
