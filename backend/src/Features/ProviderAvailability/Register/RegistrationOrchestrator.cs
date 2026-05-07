@@ -123,7 +123,10 @@ public sealed class RegistrationOrchestrator(
         var extracted = await ai.ExtractServicesAsync(text, ct);
         if (extracted.Slugs.Count == 0)
         {
-            await whatsapp.SendTextAsync(phone, "Tell me what services you offer (e.g. plumbing, carpentry, computer repair).", ct);
+            // Symmetric to ClientRequestOrchestrator: keep the REQUEST exit open in
+            // case the user landed in registration on a borderline classification.
+            await whatsapp.SendTextAsync(phone,
+                "Tell me what services you offer (e.g. plumbing, carpentry, computer repair) — or reply REQUEST if you need a service instead.", ct);
             await drafts.UpsertAsync(draft, ct);
             return;
         }

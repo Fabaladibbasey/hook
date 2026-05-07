@@ -56,17 +56,27 @@ public static class QuickIntent
 
     // "I'm a plumber/electrician/mechanic/carpenter/tutor/painter/cleaner/driver/..."
     private static readonly Regex IAmTradeRx = new(
-        @"\b(i'?m|i am)\s+(a\s+|an\s+)?(plumber|electrician|mechanic|carpenter|tutor|painter|cleaner|driver|barber|tailor|welder|mason|builder|contractor|handyman|handywoman|delivery\s+(guy|man|woman|person|driver|rider))\b",
+        @"\b(i'?m|i am)\s+(a\s+|an\s+)?(plumber|electrician|mechanic|carpenter|tutor|painter|cleaner|driver|barber|tailor|welder|mason|builder|contractor|handyman|handywoman|teacher|professor|instructor|trainer|coach|nurse|chef|cook|gardener|baker|fisherman|babysitter|photographer|designer|writer|dancer|singer|musician|farmer|hairdresser|stylist|technician|locksmith|delivery\s+(guy|man|woman|person|driver|rider))\b",
         RxOpts);
 
-    // "doing/offering/providing/available for/open for X" where X is a known service noun
+    // Profession-suffix catchall: "I'm a/an X" where X ends in a common
+    // occupational suffix. \w{3,} prefix avoids "I am her/over" matches and
+    // covers the long tail (translator, locksmith, dancer, designer) without
+    // enumerating every noun.
+    private static readonly Regex IAmRoleSuffixRx = new(
+        @"\b(i'?m|i am)\s+(a\s+|an\s+)?(\w+\s+){0,2}\w{3,}(er|or|ist|ician|smith)\b",
+        RxOpts);
+
+    // "doing/offering/providing/available for/open for X" — verb is the strong
+    // provider-intent signal in this funnel domain. Service taxonomy is dynamic
+    // (SlugResolver canonicalises any noun), so we don't enumerate nouns.
     private static readonly Regex BareOfferRx = new(
-        @"\b(doing|offering|providing|available\s+for|open\s+for|taking\s+on)\b\s+(plumbing|carpentry|delivery|deliveries|cleaning|tutoring|painting|electrical|electrical\s+work|car\s+repair|auto\s+repair|mechanic\s+work|garage\s+work|door\s+repair|appliance\s+repair|computer\s+repair|laptop\s+repair|phone\s+repair)\b",
+        @"\b(doing|offering|providing|available\s+for|open\s+for|taking\s+on)\b\s+\w{3,30}",
         RxOpts);
 
-    // "I do/offer/provide/fix/repair X" — covered by LLM prompt too, but cheap to short-circuit.
+    // "I do/offer/provide/fix/repair/run/handle X" — same verb-anchored pattern.
     private static readonly Regex IDoTradeRx = new(
-        @"\b(i)\s+(do|offer|provide|fix|repair|run|handle)\b\s+(plumbing|carpentry|delivery|deliveries|cleaning|tutoring|painting|electrical|car\s+repair|auto\s+repair|mechanic|garage|door\s+repair|appliance\s+repair|computer\s+repair|laptop\s+repair|phone\s+repair|cars|doors|windows|roofs|pipes|wiring|appliances|computers|laptops|phones)\b",
+        @"\b(i)\s+(do|offer|provide|fix|repair|run|handle)\b\s+\w{3,30}",
         RxOpts);
 
     // Pagination hints — short tokens that the LLM tends to mis-classify as ServiceRequest.
@@ -85,6 +95,7 @@ public static class QuickIntent
         (IncreaseRangeRx,           IntentKind.IncreaseRange),
         // Provider hints — "I'm a plumber" must beat any incidental possessive match.
         (IAmTradeRx,                IntentKind.ProviderRegistration),
+        (IAmRoleSuffixRx,           IntentKind.ProviderRegistration),
         (BareOfferRx,               IntentKind.ProviderRegistration),
         (IDoTradeRx,                IntentKind.ProviderRegistration),
         // Then problem-statement hints.

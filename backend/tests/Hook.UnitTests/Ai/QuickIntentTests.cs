@@ -167,6 +167,32 @@ public class QuickIntentTests
     [InlineData("I do plumbing")]
     [InlineData("I fix cars")]
     [InlineData("I repair laptops")]
+    // Expanded profession list — common roles users self-describe with.
+    [InlineData("I am teacher")]
+    [InlineData("I'm a teacher")]
+    [InlineData("im a chef")]
+    [InlineData("I am a nurse")]
+    [InlineData("I'm a baker")]
+    [InlineData("I am a designer")]
+    // Profession-suffix catchall (-er/-or/-ist/-ician/-smith) for the long tail.
+    [InlineData("I'm a locksmith")]
+    [InlineData("I am a photographer")]
+    [InlineData("I am a dentist")]
+    [InlineData("I am a translator")]
+    // Verb-anchored offers — service taxonomy is dynamic, noun can be anything.
+    [InlineData("I offer tutorial")]
+    [InlineData("I offer taxi")]
+    [InlineData("I offer hauling")]
+    [InlineData("I do hauling")]
+    [InlineData("I do babysitting")]
+    [InlineData("doing taxi")]
+    [InlineData("offering lessons")]
+    [InlineData("available for hauling")]
+    [InlineData("open for tutoring")]
+    // "no I am a teacher" — provider hint embedded after a leading rejection
+    // must still be detected so the router can cross-flow switch.
+    [InlineData("no I am a teacher")]
+    [InlineData("no I'm a plumber")]
     public void DetectIntentHint_ReturnsProviderRegistration(string input)
         => Assert.Equal(IntentKind.ProviderRegistration, QuickIntent.DetectIntentHint(input));
 
@@ -208,6 +234,11 @@ public class QuickIntentTests
     [InlineData("door work")]                                 // bare service noun + work — still ambiguous
     [InlineData("I need a plumber")]                          // covered by IntentSystem prompt, not the hint
     [InlineData("looking for a carpenter")]                   // covered by IntentSystem prompt, not the hint
+    // Suffix catchall must NOT match adjectives or non-profession words.
+    [InlineData("I am happy")]
+    [InlineData("I am Bob")]
+    [InlineData("I am tired")]
+    [InlineData("I want to be rich")]                         // post-greeting noise — must stay ambiguous
     public void DetectIntentHint_ReturnsNullForAmbiguousOrUnrelated(string? input)
         => Assert.Null(QuickIntent.DetectIntentHint(input));
 }

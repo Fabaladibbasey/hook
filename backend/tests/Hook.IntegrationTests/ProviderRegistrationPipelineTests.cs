@@ -191,6 +191,6 @@ public class ProviderRegistrationPipelineTests : IClassFixture<DevPipelineFixtur
         ack.Body.ShouldContain("carpentry", Case.Insensitive);
         ack.Body.ShouldContain("LEAVE", Case.Insensitive);
         ack.Body.ShouldNotContain("YES or NO", Case.Insensitive);
-        ack.Body.ShouldNotContain("HIRE or OFFER", Case.Insensitive);
+        ack.Body.ShouldNotContain("REQUEST or REGISTER", Case.Insensitive);
     }
 }

@@ -7,10 +7,10 @@ using Shouldly;
 namespace Hook.IntegrationTests;
 
 // Verifies the "always confirm when not sure" guardrail: if the LLM returns
-// ServiceRequest or ProviderRegistration with confidence < 0.6, the router asks
-// the user to disambiguate (HIRE = client, OFFER = provider) instead of silently
-// committing them to the wrong orchestrator. Numeric 1/2 still accepted for
-// back-compat with users mid-flow.
+// ServiceRequest or ProviderRegistration with sub-threshold confidence, the
+// router asks the user to disambiguate (REQUEST = client, REGISTER = provider)
+// instead of silently committing them to the wrong orchestrator. Numeric 1/2
+// and the legacy HIRE/OFFER tokens stay accepted for back-compat.
 public class AmbiguousIntentTests : IClassFixture<DevPipelineFixture>
 {
     private readonly DevPipelineFixture _fx;
@@ -40,11 +40,11 @@ public class AmbiguousIntentTests : IClassFixture<DevPipelineFixture>
 
             var disambig = await client.WaitForOutboundAsync(
                 phone,
-                m => m.Body.Contains("Reply HIRE or OFFER", StringComparison.OrdinalIgnoreCase),
+                m => m.Body.Contains("REQUEST or REGISTER", StringComparison.OrdinalIgnoreCase),
                 timeout: TimeSpan.FromSeconds(8));
 
-            disambig.Body.ShouldContain("HIRE", Case.Sensitive);
-            disambig.Body.ShouldContain("OFFER", Case.Sensitive);
+            disambig.Body.ShouldContain("REQUEST", Case.Sensitive);
+            disambig.Body.ShouldContain("REGISTER", Case.Sensitive);
         }
         finally
         {
@@ -67,12 +67,12 @@ public class AmbiguousIntentTests : IClassFixture<DevPipelineFixture>
             (await client.InjectTextAsync(phone, text)).EnsureSuccessStatusCode();
             var disambig = await client.WaitForOutboundAsync(
                 phone,
-                m => m.Body.Contains("Reply HIRE or OFFER", StringComparison.OrdinalIgnoreCase),
+                m => m.Body.Contains("REQUEST or REGISTER", StringComparison.OrdinalIgnoreCase),
                 timeout: TimeSpan.FromSeconds(8));
 
-            (await client.InjectTextAsync(phone, "HIRE")).EnsureSuccessStatusCode();
+            (await client.InjectTextAsync(phone, "REQUEST")).EnsureSuccessStatusCode();
 
-            // After "1", the router replays the original text into the ClientRequest
+            // After REQUEST, the router replays the original text into the ClientRequest
             // orchestrator. The fake AI doesn't extract any service from the dummy
             // text so we expect the "What service do you need?" reply.
             var clientReply = await client.WaitForOutboundAsync(
@@ -103,12 +103,12 @@ public class AmbiguousIntentTests : IClassFixture<DevPipelineFixture>
             (await client.InjectTextAsync(phone, text)).EnsureSuccessStatusCode();
             var disambig = await client.WaitForOutboundAsync(
                 phone,
-                m => m.Body.Contains("Reply HIRE or OFFER", StringComparison.OrdinalIgnoreCase),
+                m => m.Body.Contains("REQUEST or REGISTER", StringComparison.OrdinalIgnoreCase),
                 timeout: TimeSpan.FromSeconds(8));
 
-            (await client.InjectTextAsync(phone, "OFFER")).EnsureSuccessStatusCode();
+            (await client.InjectTextAsync(phone, "REGISTER")).EnsureSuccessStatusCode();
 
-            // After "2", the router replays the original text into the Registration
+            // After REGISTER, the router replays the original text into the Registration
             // orchestrator. The fake AI extracts no services from the dummy text so
             // we expect the "Tell me what services you offer" reply.
             var providerReply = await client.WaitForOutboundAsync(
@@ -139,19 +139,19 @@ public class AmbiguousIntentTests : IClassFixture<DevPipelineFixture>
             (await client.InjectTextAsync(phone, text)).EnsureSuccessStatusCode();
             var disambig = await client.WaitForOutboundAsync(
                 phone,
-                m => m.Body.Contains("Reply HIRE or OFFER", StringComparison.OrdinalIgnoreCase),
+                m => m.Body.Contains("REQUEST or REGISTER", StringComparison.OrdinalIgnoreCase),
                 timeout: TimeSpan.FromSeconds(8));
 
             (await client.InjectTextAsync(phone, "maybe")).EnsureSuccessStatusCode();
 
             var reprompt = await client.WaitForOutboundAsync(
                 phone,
-                m => m.Body.Contains("Reply HIRE", StringComparison.OrdinalIgnoreCase),
+                m => m.Body.Contains("Reply REQUEST", StringComparison.OrdinalIgnoreCase),
                 since: disambig.At,
                 timeout: TimeSpan.FromSeconds(8));
 
-            reprompt.Body.ShouldContain("HIRE", Case.Sensitive);
-            reprompt.Body.ShouldContain("OFFER", Case.Sensitive);
+            reprompt.Body.ShouldContain("REQUEST", Case.Sensitive);
+            reprompt.Body.ShouldContain("REGISTER", Case.Sensitive);
         }
         finally
         {

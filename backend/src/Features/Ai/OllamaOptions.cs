@@ -19,7 +19,7 @@ public class OllamaOptions
     // Minimum confidence the LLM must report on a classified intent before the router
     // will act on it; below this we route to the existing disambiguation flow. Matches
     // InboundRouterHandler.AmbiguityConfidenceThreshold.
-    public double IntentMinConfidence { get; init; } = 0.6;
+    public double IntentMinConfidence { get; init; } = 0.75;
 
     // Hard cap on user-supplied text passed into a fenced LLM prompt. Defends against
     // prompt-stuffing / context-padding attacks.

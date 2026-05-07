@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
 using Hook.Features.Geocoding.Geocode;
@@ -93,7 +94,12 @@ public sealed class ClientRequestOrchestrator(
         var extracted = await ai.ExtractServicesAsync(text, ct);
         if (extracted.Slugs.Count == 0)
         {
-            await whatsapp.SendTextAsync(phone, "What service do you need? (e.g. plumber, carpenter, computer repair)", ct);
+            // Don't assume the user wants to REQUEST — they may have meant to REGISTER
+            // and only landed here because the LLM-classified intent edged over the
+            // confidence threshold. The REGISTER hint keeps the door open without
+            // restarting the conversation.
+            await whatsapp.SendTextAsync(phone,
+                "What service do you need? (e.g. plumber, carpenter, computer repair) — or reply REGISTER if you're offering services instead.", ct);
             await drafts.UpsertAsync(draft, ct);
             return;
         }
@@ -105,8 +111,32 @@ public sealed class ClientRequestOrchestrator(
         await whatsapp.SendTextAsync(phone, $"Do you need {canonical.CanonicalSlug.Replace('-', ' ')}? Reply YES or NO — YES to confirm, NO to choose another service.", ct);
     }
 
+    // "no I want carpentry", "no actually plumbing" — the leading "no" rejects
+    // the proposed slug, but the trailing text describes a NEW service. Replay
+    // the trailing text through StartAsync so the user gets a fresh ConfirmService
+    // in one turn instead of "What service?" → user-retypes → ConfirmService.
+    // Provider-intent rephrases ("no I am a teacher") are handled upstream by
+    // the router's cross-flow switch on ProviderRegistration hints.
+    private static readonly Regex LeadingNoRx = new(
+        @"^\s*(no|nope|nah)\b[\s,.:;!?-]*(?<rest>.+)$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private async Task ConfirmServiceAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
     {
+        var leadingNo = LeadingNoRx.Match(message.Text ?? string.Empty);
+        if (leadingNo.Success)
+        {
+            var rest = leadingNo.Groups["rest"].Value.Trim();
+            if (rest.Length > 0 && QuickIntent.Detect(rest) is null)
+            {
+                draft.DraftServiceSlug = string.Empty;
+                draft.Step = ClientRequestStep.AwaitingService;
+                var replay = message with { Text = rest };
+                await StartAsync(draft, replay, phone, ct);
+                return;
+            }
+        }
+
         var quick = QuickIntent.Detect(message.Text);
         var intent = quick is { } q
             ? new IntentDetectionResult(q, 1.0, "en", "quick")
@@ -134,7 +164,8 @@ public sealed class ClientRequestOrchestrator(
             draft.DraftServiceSlug = string.Empty;
             draft.Step = ClientRequestStep.AwaitingService;
             await drafts.UpsertAsync(draft, ct);
-            await whatsapp.SendTextAsync(phone, "What service do you need?", ct);
+            await whatsapp.SendTextAsync(phone,
+                "What service do you need? Or reply REGISTER if you're offering services instead.", ct);
             return;
         }
         await whatsapp.SendTextAsync(phone, $"Please reply YES or NO — YES to confirm {draft.DraftServiceSlug.Replace('-', ' ')}, NO to choose another service.", ct);

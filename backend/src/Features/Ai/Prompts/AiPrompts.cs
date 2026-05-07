@@ -80,6 +80,10 @@ internal static class AiPrompts
 
         - One slug per distinct service.
         - Strip generic suffixes ("services").
+        - Strip declarative prefixes before extraction. "I am a/I'm a/I do/I offer/I provide/
+          I fix/I repair/I run/I handle/doing/offering/providing/available for/open for/
+          looking for/I need/I want" are FRAMING — never block extraction. Look at what
+          comes after the prefix.
         - Treat declarative messages as declarations even if they end with "?"
           (e.g. "I do car mechanic?" -> ["auto-repair"]).
         - Output ONLY canonical service kinds. Never output adjectives, problem
@@ -88,6 +92,26 @@ internal static class AiPrompts
             * "My door is broken"     -> ["carpentry"], NOT ["door","broken"].
             * "my pipes are leaking"  -> ["plumbing"], NOT ["pipes","leaking"].
             * "fridge stopped working" -> ["electrical"], NOT ["fridge","stopped"].
+        - Map profession nouns to the service they perform:
+            plumber                                                    -> "plumbing"
+            carpenter                                                  -> "carpentry"
+            electrician                                                -> "electrical"
+            mechanic / auto mechanic                                   -> "auto-repair"
+            painter                                                    -> "painting"
+            cleaner / housekeeper                                      -> "cleaning"
+            teacher / professor / instructor / trainer / coach / tutor -> "tutoring"
+            chef / cook                                                -> "cooking"
+            barber / hairdresser / stylist                             -> "hairdressing"
+            tailor / seamstress                                        -> "tailoring"
+            driver / delivery guy / delivery rider / courier           -> "delivery"
+            gardener / landscaper                                      -> "gardening"
+            babysitter / nanny                                         -> "babysitting"
+            photographer                                               -> "photography"
+            mason / builder / contractor                               -> "construction"
+            welder                                                     -> "welding"
+            locksmith                                                  -> "locksmith"
+            handyman / handywoman                                      -> "handyman"
+            translator                                                 -> "translation"
         - When the message is a problem statement, infer the implied service from
           this canonical mapping:
             door / lock / window / cabinet / shelf / wood / furniture -> "carpentry"
@@ -98,13 +122,21 @@ internal static class AiPrompts
             phone / laptop / computer / pc                             -> "computer-repair"
             wall / paint / paintwork                                   -> "painting"
             cleaning / sweep / mop                                     -> "cleaning"
-            tutor / lesson / homework                                  -> "tutoring"
+            tutor / lesson / homework / teaching / class / classes     -> "tutoring"
             parcel / package / courier / delivery / food delivery      -> "delivery"
         - Use "auto-repair" for car/auto/mechanic/garage work.
         - Use "delivery" for any delivery or courier work — parcel, package,
           marketplace pickup, food, restaurant orders, prepared meals
           (e.g. "I need to deliver what I bought from facebook marketplace" -> ["delivery"];
           "I want food delivery" -> ["delivery"]).
+        - Examples of declarations (provider self-descriptions):
+            "I am a teacher"          -> ["tutoring"]
+            "I'm a plumber"           -> ["plumbing"]
+            "I do teaching"           -> ["tutoring"]
+            "I offer tutorial"        -> ["tutoring"]
+            "I'm a delivery guy"      -> ["delivery"]
+            "I am a chef"             -> ["cooking"]
+            "I'm a hairdresser"       -> ["hairdressing"]
         - If no canonical service kind clearly fits, return [].
         - Output strictly an array of strings, no commentary.
         """;

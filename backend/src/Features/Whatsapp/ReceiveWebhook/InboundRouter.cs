@@ -35,12 +35,18 @@ public sealed class InboundRouterHandler(
     ILogger<InboundRouterHandler> logger)
 {
     // Below this confidence we send a disambiguation prompt instead of routing
-    // straight to ClientRequestOrchestrator or RegistrationOrchestrator.
-    private const double AmbiguityConfidenceThreshold = 0.6;
+    // straight to ClientRequestOrchestrator or RegistrationOrchestrator. Tightened
+    // from 0.6: post-greeting noise like "I want to be rich" used to pass at 0.6
+    // and lock the contact into REQUEST. After the cold greeting, we keep intent
+    // unclassified until a stronger signal arrives.
+    private const double AmbiguityConfidenceThreshold = 0.75;
     private static readonly TimeSpan AmbiguousDraftTtl = TimeSpan.FromMinutes(5);
 
+    // Vocabulary mirrors the cold greeting ("REQUEST a service or REGISTER as a
+    // provider?") so users see one consistent ask. ParseDisambiguation accepts
+    // both REQUEST/REGISTER and the legacy HIRE/OFFER tokens.
     internal const string DisambiguationPrompt =
-        "Quick check: do you want to HIRE someone (you need a service) or OFFER your services (you provide one)? Reply HIRE or OFFER.";
+        "Quick check — do you want to REQUEST a service (you need help) or REGISTER as a provider (you offer one)? Reply REQUEST or REGISTER.";
 
     public async Task Handle(InboundMessageReceived evt, CancellationToken ct)
     {
@@ -272,7 +278,7 @@ public sealed class InboundRouterHandler(
         if (choice is null)
         {
             logger.LogDebug("Unrecognised disambiguation reply '{Text}' from {Phone}", text, masked);
-            await whatsapp.SendTextAsync(msg.From, "Reply HIRE if you need a service, or OFFER if you provide one.", ct);
+            await whatsapp.SendTextAsync(msg.From, "Reply REQUEST if you need a service, or REGISTER if you provide one.", ct);
             return true;
         }
 
@@ -298,9 +304,9 @@ public sealed class InboundRouterHandler(
         return t switch
         {
             "1" or "1." or "client" or "need help" or "help" or "looking"
-                or "hire" or "need service" or "need provider" or "i need" => IntentKind.ServiceRequest,
-            "2" or "2." or "provider" or "offer" or "offering" or "i offer"
-                or "list" or "register" or "i'm a provider" or "im a provider" => IntentKind.ProviderRegistration,
+                or "request" or "hire" or "need service" or "need provider" or "i need" => IntentKind.ServiceRequest,
+            "2" or "2." or "provider" or "register" or "offer" or "offering" or "i offer"
+                or "list" or "i'm a provider" or "im a provider" => IntentKind.ProviderRegistration,
             _ => null
         };
     }
@@ -316,8 +322,8 @@ public sealed class InboundRouterHandler(
                 ["intent"] = detected.Intent.ToString()
             });
         var fallback = purpose == "greeting-reply"
-            ? "Hi! I connect people with local service providers. Reply 'I need …' to hire someone, or 'I offer …' to list a service."
-            : "I help connect people who need services with providers. Reply 'I need …' if you need help, or 'I offer …' to list a service.";
+            ? "Hi! I connect people with local service providers. REQUEST a service if you need help, or REGISTER as a provider if you offer one."
+            : "I help connect people who need services with providers. Reply REQUEST if you need help, or REGISTER if you offer a service.";
         var reply = await AiReplyHelper.TryGenerateOrFallbackAsync(ai, ctx, purpose, fallback, logger, ct);
         await whatsapp.SendTextAsync(from, reply, ct);
     }
