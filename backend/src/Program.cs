@@ -62,7 +62,7 @@ try
     builder.Services.AddChat(builder.Configuration);
     builder.Services.AddChatLifecycle();
     builder.Services.AddChatPrivacyRouting();
-    builder.Services.AddFeedback();
+    builder.Services.AddFeedback(builder.Configuration);
     builder.Services.AddRateLimiting(builder.Configuration);
     builder.Services.AddMetaTemplates();
     builder.Services.AddObservability();

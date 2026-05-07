@@ -4,8 +4,9 @@ namespace Hook.Features.Feedback;
 
 public static class FeedbackServiceCollectionExtensions
 {
-    public static IServiceCollection AddFeedback(this IServiceCollection services)
+    public static IServiceCollection AddFeedback(this IServiceCollection services, IConfiguration configuration)
     {
+        services.AddValidatedOptions<FeedbackOptions>(configuration);
         services.AddScoped<IFeedbackRepository, FeedbackRepository>();
         services.AddScoped<FeedbackResponseService>();
         return services;

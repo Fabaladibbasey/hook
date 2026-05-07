@@ -84,6 +84,10 @@ Wolverine messaging runs in-process. `Wolverine.DefaultExecutionTimeout` (defaul
 - **Cross-flow routing**: providers may register against multiple services; routing is flexible.
 - **Geocoding**: dev coordinates are Banjul; integration test fixtures are San Francisco.
 - **Retention sweep**: `Shared/Retention/` runs a `RetentionHostedService` daily. Configured via `Retention:*` in `appsettings.json`. Disabled by default in tests (`Retention__Enabled=false` env var set in `DevPipelineFixture`); tests that exercise the sweeper construct it directly with explicit options.
+- **`ExchangeOutcome` contract**: nine values split by terminal vs transient failure mode. `Exchanged`/`RoutedToChat` are fresh successes; `AlreadyShared`/`AlreadyRouted` are idempotent re-picks (per-match notice already sent); `RaceLost` is "lost the atomic claim" (covers consent revocation between read and claim); `ProviderExpired`/`ProviderMissing`/`RequestMissing` are terminal for that match; `InvalidData` is a phone-parse failure. Switch consumers must include a `default` arm.
+- **Partial unique index + 23505 catch idiom**: `DbSetExtensions.TryInsertUniqueAsync(db, entity, constraintName, ct)` wraps the insert + Postgres `23505` catch by constraint name, returning `false` on the unique race. Constraint names live in per-feature constants (`FeedbackConstants.PendingUniqueIndexName`, `MatchConstants.RequestProviderUniqueIndexName`) so the entity config, the migration, and the catch site all reference one source of truth.
+- **`TimeProvider` injection**: services that need current time (`MatchingService`, `FeedbackResponseService`, `PhoneExchanger`) accept `TimeProvider` via DI. Tests inject a fixed-time provider; production uses `TimeProvider.System`.
+- **`WhatsappContact.UpsertInboundAsync`**: every routed inbound writes the contact's `LastInboundAt` AFTER the cancel/abandon detection — a CANCEL message that tears down a draft must not extend the contact's last-inbound timestamp.
 
 ## Frontend routes
 

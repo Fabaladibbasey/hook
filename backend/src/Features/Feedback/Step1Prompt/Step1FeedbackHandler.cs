@@ -25,9 +25,11 @@ public sealed class Step1FeedbackHandler(
         if (request is null) return;
         if (!PhoneNumber.TryParse(request.ClientPhone, out var clientPhone)) return;
 
+        // Reserve the pending row first so a concurrent invocation (Wolverine retry,
+        // scheduler double-fire) loses the partial unique-index race and exits silently.
+        // No precheck — TryAddPendingAsync's 23505 catch is the sole guard, saving a SELECT.
         var entry = new MatchFeedback { MatchId = match.Id, Step = FeedbackStep.DidYouFind };
-        await feedback.AddAsync(entry, ct);
-        await feedback.SaveChangesAsync(ct);
+        if (!await feedback.TryAddPendingAsync(entry, ct)) return;
 
         var ctx = new ReplyContext(
             Purpose: "feedback-step-1-did-you-find",
@@ -41,7 +43,19 @@ public sealed class Step1FeedbackHandler(
         var reply = await AiReplyHelper.TryGenerateAsync(ai, ctx, "step1_feedback", logger, ct);
         if (reply is null) return;
 
-        await whatsapp.SendTextAsync(clientPhone, reply, ct);
+        try
+        {
+            await whatsapp.SendTextAsync(clientPhone, reply, ct);
+        }
+        catch
+        {
+            // Drop the orphan pending row so a Wolverine retry can re-prompt cleanly;
+            // otherwise the partial unique index would lock out future Step1 prompts
+            // for this match forever.
+            await feedback.DeletePendingAsync(entry.Id, ct);
+            throw;
+        }
+
         logger.LogInformation("Step1 feedback prompted for match {MatchId}", evt.MatchId);
     }
 }

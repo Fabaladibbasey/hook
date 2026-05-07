@@ -1,4 +1,3 @@
-using Hook.Shared.Persistence;
 using Hook.Shared.Persistence.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,11 +13,15 @@ public sealed class WhatsappContactRepository(HookDbContext db) : IWhatsappConta
 
     public async Task UpsertInboundAsync(string phone, DateTimeOffset at, CancellationToken ct = default)
     {
-        var incoming = new WhatsappContact { Phone = phone, LastInboundAt = at };
-        await db.WhatsappContacts.UpsertAsync([phone], incoming, (e, d) =>
-        {
-            if (d.LastInboundAt > e.LastInboundAt) e.LastInboundAt = d.LastInboundAt;
-        }, ct);
-        await db.SaveChangesAsync(ct);
+        // Single-roundtrip upsert: ON CONFLICT keeps the greater LastInboundAt so an
+        // out-of-order delivery from WhatsApp cannot move the timestamp backwards.
+        // Bypasses the change tracker (the alternative was FindAsync + SaveChanges,
+        // two roundtrips on every inbound).
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+            INSERT INTO whatsapp_contacts ("Phone", "LastInboundAt") VALUES ({phone}, {at})
+            ON CONFLICT ("Phone") DO UPDATE
+              SET "LastInboundAt" = GREATEST(EXCLUDED."LastInboundAt", whatsapp_contacts."LastInboundAt");
+            """, ct);
     }
 }

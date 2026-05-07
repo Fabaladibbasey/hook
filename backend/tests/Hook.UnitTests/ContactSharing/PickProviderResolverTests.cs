@@ -82,10 +82,19 @@ public class PickProviderResolverTests
     }
 
     [Fact]
-    public void Resolve_NoIndex_FallsBackToPhoneFragment()
+    public void Resolve_FullPhone_AlwaysWinsRegardlessOfPickKeyword()
     {
         var matches = Five();
         var picked = PickProviderResolver.Resolve("call +2203000003", matches);
+        Assert.Single(picked);
+        Assert.Equal(matches[3].Id, picked[0].Id);
+    }
+
+    [Fact]
+    public void Resolve_FullPhoneAmongDigits_StillMatches()
+    {
+        var matches = Five();
+        var picked = PickProviderResolver.Resolve("call me at +2203000003 plumber", matches);
         Assert.Single(picked);
         Assert.Equal(matches[3].Id, picked[0].Id);
     }
@@ -102,6 +111,84 @@ public class PickProviderResolverTests
     public void Resolve_EmptyMatchList_ReturnsEmpty()
     {
         var picked = PickProviderResolver.Resolve("PICK ALL", Array.Empty<Match>());
+        Assert.Empty(picked);
+    }
+
+    [Fact]
+    public void Resolve_PhoneFragmentCollision_TwoProviders_ReturnsEmpty()
+    {
+        var matches = new[]
+        {
+            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2203331234", ServiceSlug = "plumbing" },
+            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2207771234", ServiceSlug = "plumbing" },
+        };
+        var picked = PickProviderResolver.Resolve("pick 1234", matches);
+        Assert.Empty(picked);
+    }
+
+    [Fact]
+    public void Resolve_PhoneFragmentCollision_ThreeProviders_ReturnsEmpty()
+    {
+        var matches = new[]
+        {
+            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2203331234", ServiceSlug = "plumbing" },
+            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2207771234", ServiceSlug = "plumbing" },
+            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2204441234", ServiceSlug = "plumbing" },
+        };
+        var picked = PickProviderResolver.Resolve("pick 1234", matches);
+        Assert.Empty(picked);
+    }
+
+    [Fact]
+    public void Resolve_PhoneFragmentSingleHit_WithPickKeyword_Picks()
+    {
+        var matches = new[]
+        {
+            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2203331234", ServiceSlug = "plumbing" },
+            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2207775678", ServiceSlug = "plumbing" },
+        };
+        var picked = PickProviderResolver.Resolve("pick 1234", matches);
+        Assert.Single(picked);
+        Assert.Equal(matches[0].Id, picked[0].Id);
+    }
+
+    [Fact]
+    public void Resolve_PhoneFragmentSingleHit_NoPickKeyword_ReturnsEmpty()
+    {
+        // "1234 main st" has no `pick` keyword, so the last-4 fragment fallback is
+        // skipped and the resolver returns empty — preventing accidental picks from
+        // conversational digits.
+        var matches = new[]
+        {
+            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2203331234", ServiceSlug = "plumbing" },
+            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2207775678", ServiceSlug = "plumbing" },
+        };
+        var picked = PickProviderResolver.Resolve("1234 main st", matches);
+        Assert.Empty(picked);
+    }
+
+    [Fact]
+    public void Resolve_PhoneFragmentDigitBounded_NotMatchedInsideLongerDigits()
+    {
+        // "pick 12340" should NOT fragment-match the provider ending in "1234" because
+        // "1234" appears inside the digit run "12340" — the bounded match requires the
+        // edges to be non-digit (or string boundary).
+        var matches = new[]
+        {
+            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2203331234", ServiceSlug = "plumbing" },
+        };
+        var picked = PickProviderResolver.Resolve("pick 12340", matches);
+        Assert.Empty(picked);
+    }
+
+    [Fact]
+    public void Resolve_Pick100_NoMatchesOfThatSize_ReturnsEmpty()
+    {
+        // Gate accepts via \bpick\b. Parser truncates "100" to "10" via [1-9]\d?,
+        // tries index 10 against 5 matches → out of range → indices empty. No full
+        // phone, no last-4 fragment match → resolver returns empty.
+        var matches = Five();
+        var picked = PickProviderResolver.Resolve("PICK 100", matches);
         Assert.Empty(picked);
     }
 }

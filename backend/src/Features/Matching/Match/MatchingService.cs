@@ -64,6 +64,9 @@ public sealed class MatchingService(
         request.RecordShown(scored.Select(s => s.Candidate.Phone));
         if (scored.Count > 0) request.MarkMatched();
 
+        // Two saves on the shared scoped HookDbContext: the second is a cheap no-op
+        // today, but keeps the contract on each repository explicit so a future split
+        // of the persistence scope cannot silently lose request mutations.
         await matches.SaveChangesAsync(ct);
         await requests.SaveChangesAsync(ct);
 

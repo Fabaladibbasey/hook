@@ -154,6 +154,88 @@ public sealed class FeedbackRepositoryTests : IClassFixture<DevPipelineFixture>
     }
 
     [Fact]
+    public async Task TryAddPendingAsync_DuplicatePending_ReturnsFalse()
+    {
+        var clientPhone = UniquePhone();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var (_, match) = await SeedMatchAsync(db, clientPhone);
+
+        var first = await repo.TryAddPendingAsync(
+            new MatchFeedback { MatchId = match.Id, Step = FeedbackStep.DidYouFind });
+        Assert.True(first);
+
+        await using var scope2 = _fx.Factory.Services.CreateAsyncScope();
+        var repo2 = scope2.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var second = await repo2.TryAddPendingAsync(
+            new MatchFeedback { MatchId = match.Id, Step = FeedbackStep.DidYouFind });
+        Assert.False(second);
+    }
+
+    [Fact]
+    public async Task TryAddPendingAsync_AfterAnswered_AllowsNewPending()
+    {
+        // The partial unique index applies only to Answer = 'Pending'. Once the first
+        // row transitions out of Pending (claimed), a second Pending insert must succeed.
+        var clientPhone = UniquePhone();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var (_, match) = await SeedMatchAsync(db, clientPhone);
+
+        var entry = new MatchFeedback { MatchId = match.Id, Step = FeedbackStep.DidYouFind };
+        Assert.True(await repo.TryAddPendingAsync(entry));
+        Assert.True(await repo.TryClaimPendingAsync(entry.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow));
+
+        await using var scope2 = _fx.Factory.Services.CreateAsyncScope();
+        var repo2 = scope2.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var again = await repo2.TryAddPendingAsync(
+            new MatchFeedback { MatchId = match.Id, Step = FeedbackStep.DidYouFind });
+        Assert.True(again);
+    }
+
+    [Fact]
+    public async Task TryClaimPendingAsync_SecondCall_ReturnsFalse()
+    {
+        var clientPhone = UniquePhone();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var (_, match) = await SeedMatchAsync(db, clientPhone);
+
+        var entry = new MatchFeedback { MatchId = match.Id, Step = FeedbackStep.DidYouFind };
+        await repo.TryAddPendingAsync(entry);
+
+        Assert.True(await repo.TryClaimPendingAsync(entry.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow));
+        Assert.False(await repo.TryClaimPendingAsync(entry.Id, FeedbackAnswer.No, DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public async Task DeletePendingAsync_OnlyDeletesPending_LeavesAnsweredRow()
+    {
+        var clientPhone = UniquePhone();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var (_, match) = await SeedMatchAsync(db, clientPhone);
+
+        var pending = new MatchFeedback { MatchId = match.Id, Step = FeedbackStep.DidYouFind };
+        await repo.TryAddPendingAsync(pending);
+        Assert.True(await repo.DeletePendingAsync(pending.Id));
+
+        // Re-create + claim, then DeletePendingAsync should NOT remove the now-answered row.
+        var answered = new MatchFeedback { MatchId = match.Id, Step = FeedbackStep.DidYouFind };
+        await repo.TryAddPendingAsync(answered);
+        await repo.TryClaimPendingAsync(answered.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow);
+        Assert.False(await repo.DeletePendingAsync(answered.Id));
+
+        await using var verifyScope = _fx.Factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<HookDbContext>();
+        Assert.NotNull(await verifyDb.MatchFeedback.AsNoTracking().FirstOrDefaultAsync(f => f.Id == answered.Id));
+    }
+
+    [Fact]
     public async Task GetLatestPendingForClient_MultiplePending_ReturnsLatestPromptedAt()
     {
         var clientPhone = UniquePhone();
@@ -161,16 +243,17 @@ public sealed class FeedbackRepositoryTests : IClassFixture<DevPipelineFixture>
         var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
         var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
 
-        var (request, match) = await SeedMatchAsync(db, clientPhone);
+        var (_, olderMatch) = await SeedMatchAsync(db, clientPhone);
+        var (_, newerMatch) = await SeedMatchAsync(db, clientPhone);
         var older = new MatchFeedback
         {
-            MatchId = match.Id,
+            MatchId = olderMatch.Id,
             Step = FeedbackStep.DidYouFind,
             PromptedAt = DateTimeOffset.UtcNow - TimeSpan.FromHours(2)
         };
         var newer = new MatchFeedback
         {
-            MatchId = match.Id,
+            MatchId = newerMatch.Id,
             Step = FeedbackStep.DidYouFind,
             PromptedAt = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5)
         };

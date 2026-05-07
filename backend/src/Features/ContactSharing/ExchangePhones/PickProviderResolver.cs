@@ -5,15 +5,28 @@ namespace Hook.Features.ContactSharing.ExchangePhones;
 
 public static class PickProviderResolver
 {
-    public static readonly Regex PickRegex = new(
-        @"\bpick\b|\ball\b|^\s*#?\s*\d",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
     private static readonly Regex IndexListRegex = new(
         @"([1-9]\d?(?:\s*,\s*[1-9]\d?)*)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex AllRegex = new(@"\ball\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex PickKeywordRegex = new(@"\bpick\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // Whole-message pick syntax: "1", "ALL", "1,2", "#1", " 2 ". Mirrors the digit
+    // cap from IndexListRegex ([1-9]\d?) so out-of-range tokens like "100" don't
+    // pass the gate via the bare-index branch — only via the explicit \bpick\b path.
+    private static readonly Regex BareIndexSyntaxRegex = new(
+        @"^\s*(?:all|#?[1-9]\d?(?:\s*,\s*#?[1-9]\d?)*)\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Gate for InboundRouter. Returns true when the message looks like a pick command
+    /// (explicit "pick" anywhere or a whole-message bare-index syntax). Conversational
+    /// digits like "ok 1 sec" or "best of all worlds" do NOT match.
+    /// </summary>
+    public static bool IsPickIntent(string text) =>
+        PickKeywordRegex.IsMatch(text) || BareIndexSyntaxRegex.IsMatch(text);
 
     public static IReadOnlyList<MatchEntity> Resolve(string text, IReadOnlyList<MatchEntity> matches)
     {
@@ -24,7 +37,17 @@ public static class PickProviderResolver
         var indices = ParseIndices(text, matches.Count);
         if (indices.Count > 0) return indices.Select(i => matches[i]).ToList();
 
-        var fragmentHit = MatchByPhoneFragment(text, matches);
+        // Full-phone match wins over last-4 — if the user typed the full E.164 we
+        // accept it as an unambiguous pick regardless of the pick keyword.
+        var full = matches.FirstOrDefault(m => text.Contains(m.ProviderPhone, StringComparison.Ordinal));
+        if (full is not null) return [full];
+
+        // Last-4 fragment fallback runs only when the user explicitly typed "pick".
+        // Without the keyword, an incidental digit run ("1234 main st") could
+        // exchange contact info without intent.
+        if (!PickKeywordRegex.IsMatch(text)) return Array.Empty<MatchEntity>();
+
+        var fragmentHit = MatchByLastFourFragment(text, matches);
         return fragmentHit is null ? Array.Empty<MatchEntity>() : [fragmentHit];
     }
 
@@ -45,13 +68,32 @@ public static class PickProviderResolver
         return ordered;
     }
 
-    private static MatchEntity? MatchByPhoneFragment(string text, IReadOnlyList<MatchEntity> matches)
+    /// <summary>
+    /// Match against the last 4 digits of any provider phone, requiring digit-bounded
+    /// edges so "1234 main st" does not match a phone ending in 1234. On collision
+    /// (two or more providers share the trailing 4) returns null; the caller drops the
+    /// inbound silently and the user can retry with an explicit index.
+    /// </summary>
+    private static MatchEntity? MatchByLastFourFragment(string text, IReadOnlyList<MatchEntity> matches)
     {
-        // Prefer a full-phone hit before falling back to last-4 — otherwise an earlier
-        // entry's "0000" suffix would shadow a later entry whose full number is in the text.
-        var full = matches.FirstOrDefault(m => text.Contains(m.ProviderPhone, StringComparison.Ordinal));
-        if (full is not null) return full;
-        return matches.FirstOrDefault(m =>
-            m.ProviderPhone.Length >= 4 && text.Contains(m.ProviderPhone[^4..], StringComparison.Ordinal));
+        var lastFourHits = matches
+            .Where(m => m.ProviderPhone.Length >= 4 && HasDigitBoundedFragment(text, m.ProviderPhone[^4..]))
+            .Take(2)
+            .ToList();
+        return lastFourHits.Count == 1 ? lastFourHits[0] : null;
+    }
+
+    private static bool HasDigitBoundedFragment(string text, string fragment)
+    {
+        var idx = text.IndexOf(fragment, StringComparison.Ordinal);
+        while (idx >= 0)
+        {
+            var leftClear = idx == 0 || !char.IsDigit(text[idx - 1]);
+            var rightIdx = idx + fragment.Length;
+            var rightClear = rightIdx >= text.Length || !char.IsDigit(text[rightIdx]);
+            if (leftClear && rightClear) return true;
+            idx = text.IndexOf(fragment, idx + 1, StringComparison.Ordinal);
+        }
+        return false;
     }
 }

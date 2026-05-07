@@ -3,6 +3,7 @@ using Hook.Features.Ai.Models;
 using Hook.Features.ContactSharing.ExchangePhones;
 using Hook.Features.Feedback;
 using Hook.Features.Feedback.AggregateStats;
+using Hook.Features.MetaTemplates;
 using Hook.Features.ProviderAvailability.AvailabilityAggregate;
 using Hook.Features.ProviderAvailability.Register;
 using Hook.Features.ServiceRequest.Create;
@@ -29,6 +30,7 @@ public sealed class InboundRouterHandler(
     IterationCoordinator iterationCoordinator,
     PhoneExchanger phoneExchanger,
     FeedbackResponseService feedbackService,
+    IWhatsappContactRepository contacts,
     TimeProvider clock,
     ILogger<InboundRouterHandler> logger)
 {
@@ -53,6 +55,10 @@ public sealed class InboundRouterHandler(
         {
             if (await AbandonAsync(phone, msg.From, ct)) return;
         }
+
+        // Persist contact AFTER the cancel/abandon detection so a CANCEL inbound that
+        // tears down a draft does not extend the contact's last-inbound timestamp.
+        await contacts.UpsertInboundAsync(phone, clock.GetUtcNow(), ct);
 
         // Compute hint up front so we can detect cross-flow intent switches before
         // dispatching into an active draft. Hint is deterministic regex; LLM intent
@@ -109,7 +115,7 @@ public sealed class InboundRouterHandler(
 
         var activeRequest = await requests.GetActiveByClientAsync(phone, ct);
 
-        if (activeRequest is not null && PickProviderResolver.PickRegex.IsMatch(text))
+        if (activeRequest is not null && PickProviderResolver.IsPickIntent(text))
         {
             await TryPickAsync(activeRequest, text, masked, ct);
             return;
@@ -324,12 +330,87 @@ public sealed class InboundRouterHandler(
         var picked = PickProviderResolver.Resolve(text, matchOrder);
         if (picked.Count == 0) return;
 
+        var freshSuccess = 0;
+        var returningSuccess = 0;
+        var raceLost = 0;
+        var unavailable = 0;
+        var invalidData = 0;
+        var transientFail = 0;
+
         foreach (var match in picked)
         {
-            logger.LogDebug("Route → PhoneExchanger.TryExchange match={MatchId} for {Phone}", match.Id, maskedPhone);
-            await phoneExchanger.TryExchangeAsync(match.Id, ct);
+            try
+            {
+                logger.LogDebug("Route → PhoneExchanger.TryExchange match={MatchId} for {Phone}", match.Id, maskedPhone);
+                var outcome = await phoneExchanger.TryExchangeAsync(match.Id, ct);
+                switch (outcome)
+                {
+                    case ExchangeOutcome.Exchanged:
+                    case ExchangeOutcome.RoutedToChat:
+                        freshSuccess++;
+                        break;
+                    case ExchangeOutcome.AlreadyShared:
+                    case ExchangeOutcome.AlreadyRouted:
+                        returningSuccess++;
+                        break;
+                    case ExchangeOutcome.RaceLost:
+                        raceLost++;
+                        break;
+                    case ExchangeOutcome.ProviderExpired:
+                    case ExchangeOutcome.ProviderMissing:
+                    case ExchangeOutcome.RequestMissing:
+                        unavailable++;
+                        break;
+                    case ExchangeOutcome.InvalidData:
+                        invalidData++;
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException(
+                            nameof(outcome), outcome, "Unhandled ExchangeOutcome — extend the switch.");
+                }
+            }
+            catch (Npgsql.PostgresException ex) when (IsTransientPostgres(ex.SqlState))
+            {
+                logger.LogWarning(ex, "Transient Postgres failure during PhoneExchanger for match {MatchId}", match.Id);
+                transientFail++;
+            }
         }
+
+        // Re-picks (AlreadyShared/AlreadyRouted) already got a per-match notice from
+        // PhoneExchanger, so they should not inflate the partial-success count or
+        // appear in the summary's denominator.
+        var failedTotal = raceLost + unavailable + invalidData + transientFail;
+        var consideredTotal = freshSuccess + failedTotal;
+        if (failedTotal == 0) return;
+
+        if (!PhoneNumber.TryParse(request.ClientPhone, out var clientPhone)) return;
+
+        string reply;
+        if (consideredTotal == failedTotal)
+        {
+            if (unavailable == failedTotal)
+                reply = "Those providers are no longer available. Reply NEXT for more.";
+            else if (raceLost == failedTotal)
+                reply = "That match was just taken. Reply NEXT for more.";
+            else
+                reply = "Couldn't connect right now — please try again in a moment.";
+        }
+        else
+        {
+            reply = $"Connected you with {freshSuccess} of {consideredTotal} providers. Reply PICK <#> or NEXT for more.";
+        }
+        await whatsapp.SendTextAsync(clientPhone, reply, ct);
     }
+
+    private static bool IsTransientPostgres(string sqlState) => sqlState switch
+    {
+        "40001" => true,  // serialization_failure
+        "40P01" => true,  // deadlock_detected
+        "53300" => true,  // too_many_connections
+        "08000" => true,  // connection_exception
+        "08006" => true,  // connection_failure
+        _ => false
+    };
 
     private async Task ShareTopOrAskAsync(
         ServiceRequest.RequestAggregate.ServiceRequest request,

@@ -17,6 +17,10 @@ public class MatchFeedbackConfiguration : IEntityTypeConfiguration<MatchFeedback
         builder.PropertyAsStringEnum(f => f.Answer, 16);
         builder.HasIndex(f => f.MatchId).HasDatabaseName("ix_match_feedback_match");
         builder.HasIndex(f => f.PromptedAt).HasDatabaseName("ix_match_feedback_prompted_at");
+        builder.HasIndex(f => new { f.MatchId, f.Step })
+               .HasDatabaseName(FeedbackConstants.PendingUniqueIndexName)
+               .IsUnique()
+               .HasFilter($"\"Answer\" = '{nameof(FeedbackAnswer.Pending)}'");
 
         builder
             .HasOne<Match>()

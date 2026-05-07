@@ -4,7 +4,7 @@ using Hook.Features.ProviderAvailability.AvailabilityAggregate;
 using Hook.Features.ServiceRequest.RequestAggregate;
 using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Phone;
-using Wolverine;
+using Hook.Shared.Core;
 
 namespace Hook.Features.ContactSharing.ExchangePhones;
 
@@ -13,64 +13,73 @@ public sealed class PhoneExchanger(
     IServiceRequestRepository requests,
     IProviderAvailabilityRepository providers,
     IWhatsappClient whatsapp,
-    IMessageBus bus,
+    IEventPublisher events,
+    TimeProvider clock,
     ILogger<PhoneExchanger> logger)
 {
-    public async Task<bool> TryExchangeAsync(Guid matchId, CancellationToken ct = default)
+    public async Task<ExchangeOutcome> TryExchangeAsync(Guid matchId, CancellationToken ct = default)
     {
         var match = await matches.GetAsync(matchId, ct);
         if (match is null)
         {
             logger.LogWarning("Match {MatchId} not found", matchId);
-            return false;
+            return ExchangeOutcome.InvalidData;
         }
 
         var request = await requests.GetAsync(match.RequestId, ct);
+        if (request is null) return ExchangeOutcome.RequestMissing;
+
         var provider = await providers.GetAsync(match.ProviderPhone, ct);
-        if (request is null || provider is null) return false;
+        if (provider is null) return ExchangeOutcome.ProviderMissing;
 
-        match.PickedAt ??= DateTimeOffset.UtcNow;
-
-        // Phones are revealed iff BOTH parties consented: the requester chose to
-        // share at intake AND the provider opted in at registration.
-        var bothConsent = request.SharePhoneNumber && provider.ShareContact;
-
-        if (!bothConsent)
-        {
-            await matches.SaveChangesAsync(ct);
-            await bus.PublishAsync(new ChatRoutingRequested(match.Id, request.Id, request.ClientPhone, provider.Phone));
-            return false;
-        }
+        var now = clock.GetUtcNow();
+        if (provider.ExpiresAt <= now) return ExchangeOutcome.ProviderExpired;
 
         if (!PhoneNumber.TryParse(request.ClientPhone, out var clientPhone) ||
             !PhoneNumber.TryParse(provider.Phone, out var providerPhone))
         {
-            await matches.SaveChangesAsync(ct);
-            return false;
+            return ExchangeOutcome.InvalidData;
         }
 
-        if (!match.ContactShared)
+        if (match.ContactShared)
         {
-            // First pick on this match: reveal phones to both parties. The provider
-            // is only notified here, never proactively at match-presentation time.
-            await whatsapp.SendTextAsync(clientPhone,
-                $"Provider for {match.ServiceSlug}: {providerPhone.Value}. Reach out directly.", ct);
-            await whatsapp.SendTextAsync(providerPhone,
-                $"Client wants {match.ServiceSlug} ({clientPhone.Value}). Expect a message.", ct);
-
-            match.ContactShared = true;
-            await matches.SaveChangesAsync(ct);
-            await bus.PublishAsync(new ContactExchanged(match.Id, request.Id, request.ClientPhone, provider.Phone));
+            await whatsapp.SendTextAsync(clientPhone, FormatProviderResend(match.ServiceSlug, providerPhone), ct);
+            return ExchangeOutcome.AlreadyShared;
         }
-        else
+
+        if (match.PickedAt is not null)
         {
-            // Re-pick: remind the client of the provider phone but do not re-notify
-            // the provider — keep the per-pick provider message idempotent.
+            // Re-pick of a chat-routed match: ChatRoutingRequestedHandler is idempotent
+            // on ChatId, so re-publishing wouldn't re-deliver the link. Send a brief
+            // notice pointing the client at the existing chat thread instead.
             await whatsapp.SendTextAsync(clientPhone,
-                $"Provider for {match.ServiceSlug}: {providerPhone.Value}. Reach out directly.", ct);
-            await matches.SaveChangesAsync(ct);
+                $"Already connected to chat with the provider for {match.ServiceSlug}. Check your earlier messages for the chat link.", ct);
+            return ExchangeOutcome.AlreadyRouted;
         }
 
-        return true;
+        var bothConsent = request.SharePhoneNumber && provider.ShareContact;
+        var claim = new PickClaim(matchId, request.ClientPhone, bothConsent, now);
+        if (!await matches.TryClaimPickAsync(claim, ct))
+        {
+            // Atomic claim folds the consent + TTL re-check, so this also fires when a
+            // provider revokes ShareContact between our read and the UPDATE — closing
+            // the TOCTOU window that would otherwise leak phones.
+            return ExchangeOutcome.RaceLost;
+        }
+
+        if (!bothConsent)
+        {
+            await events.PublishAsync(new ChatRoutingRequested(match.Id, request.Id, request.ClientPhone, provider.Phone), ct);
+            return ExchangeOutcome.RoutedToChat;
+        }
+
+        await whatsapp.SendTextAsync(clientPhone, FormatProviderResend(match.ServiceSlug, providerPhone), ct);
+        await whatsapp.SendTextAsync(providerPhone,
+            $"Client wants {match.ServiceSlug} ({clientPhone.Value}). Expect a message.", ct);
+        await events.PublishAsync(new ContactExchanged(match.Id, request.Id, request.ClientPhone, provider.Phone), ct);
+        return ExchangeOutcome.Exchanged;
     }
+
+    private static string FormatProviderResend(string serviceSlug, PhoneNumber providerPhone) =>
+        $"Provider for {serviceSlug}: {providerPhone.Value}. Reach out directly.";
 }

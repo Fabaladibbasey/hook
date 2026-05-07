@@ -28,9 +28,11 @@ public sealed class Step2FeedbackHandler(
         if (request is null) return;
         if (!PhoneNumber.TryParse(request.ClientPhone, out var clientPhone)) return;
 
+        // Mirror Step1: reserve the pending row first so concurrent fires can't
+        // double-prompt the client. Build context + AI + send only after the claim.
+        // No precheck — TryAddPendingAsync's 23505 catch is the sole guard.
         var entry = new MatchFeedback { MatchId = match.Id, Step = FeedbackStep.JobCompleted };
-        await feedback.AddAsync(entry, ct);
-        await feedback.SaveChangesAsync(ct);
+        if (!await feedback.TryAddPendingAsync(entry, ct)) return;
 
         var ctx = new ReplyContext(
             Purpose: "feedback-step-2-job-completed",
@@ -44,7 +46,16 @@ public sealed class Step2FeedbackHandler(
         var reply = await AiReplyHelper.TryGenerateAsync(ai, ctx, "step2_feedback", logger, ct);
         if (reply is null) return;
 
-        await whatsapp.SendTextAsync(clientPhone, reply, ct);
+        try
+        {
+            await whatsapp.SendTextAsync(clientPhone, reply, ct);
+        }
+        catch
+        {
+            await feedback.DeletePendingAsync(entry.Id, ct);
+            throw;
+        }
+
         logger.LogInformation("Step2 feedback prompted for match {MatchId}", match.Id);
     }
 }

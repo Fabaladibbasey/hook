@@ -4,12 +4,14 @@ using Hook.Features.Ai.Models;
 using Hook.Features.Matching.Match;
 using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Phone;
+using Microsoft.Extensions.Options;
 
 namespace Hook.Features.Matching.PresentMatches;
 
 public sealed class MatchPresenter(
     IConversationAi ai,
     IWhatsappClient whatsapp,
+    IOptions<MatchingOptions> options,
     ILogger<MatchPresenter> logger)
 {
     public async Task PresentAsync(PhoneNumber clientPhone, MatchBatch batch, string serviceSlug, CancellationToken ct = default)
@@ -21,8 +23,12 @@ public sealed class MatchPresenter(
             return;
         }
 
-        const int MaxPresented = 5;
-        var presented = batch.Scored.Take(MaxPresented)
+        // Defense-in-depth: even though MatchingService is expected to truncate, we
+        // re-apply the cap here so a regression upstream can't leak extra phones.
+        var cap = options.Value.TopMatchesPerBatch;
+        var capped = batch.Scored.Take(cap).ToList();
+
+        var presented = capped
             .Select((s, i) => new
             {
                 n = i + 1,
@@ -45,7 +51,7 @@ public sealed class MatchPresenter(
             LanguageHint: "en",
             Facts: facts);
 
-        var fallbackLines = batch.Scored
+        var fallbackLines = capped
             .Select((s, i) => $"{i + 1}. {Mask(s.Candidate.Phone)} — {s.Candidate.DistanceKm:F1}km away")
             .ToList();
         // Bot owns the call-to-action verbatim — the AI presenter only writes the
@@ -53,7 +59,7 @@ public sealed class MatchPresenter(
         // (PICK / NEXT / NEW) matches the InboundRouter's intent detectors, so
         // user replies always route correctly regardless of how the LLM phrases
         // the body.
-        var pickHint = batch.Scored.Count == 1
+        var pickHint = capped.Count == 1
             ? "Reply PICK 1 to connect with this provider. NEXT for more, NEW for a different service."
             : $"Reply PICK 1 (or e.g. PICK 1,2 or PICK ALL) to connect with one or more providers. NEXT for more, NEW for a different service.";
         var fallback = $"Top matches for {serviceSlug}:\n{string.Join("\n", fallbackLines)}";

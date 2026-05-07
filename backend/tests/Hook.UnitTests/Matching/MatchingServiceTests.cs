@@ -80,6 +80,8 @@ public class MatchingServiceTests
             Task.FromResult<IReadOnlyList<MatchEntity>>(Array.Empty<MatchEntity>());
         public Task AddAsync(MatchEntity match, CancellationToken ct = default) => Task.CompletedTask;
         public Task AddRangeAsync(IEnumerable<MatchEntity> matches, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<bool> TryClaimPickAsync(PickClaim claim, CancellationToken ct = default) =>
+            Task.FromResult(true);
         public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 }

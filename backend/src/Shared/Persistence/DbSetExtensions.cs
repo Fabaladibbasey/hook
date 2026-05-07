@@ -32,4 +32,30 @@ public static class DbSetExtensions
         set.Remove(existing);
         return true;
     }
+
+    /// <summary>
+    /// Insert <paramref name="entity"/> and SaveChanges; return false if a 23505
+    /// (unique violation) on <paramref name="constraintName"/> raced us. Wraps the
+    /// "partial unique index + 23505 catch" idiom so call sites stay one-line.
+    /// </summary>
+    public static async Task<bool> TryInsertUniqueAsync<T>(
+        this DbContext db,
+        T entity,
+        string constraintName,
+        CancellationToken ct = default) where T : class
+    {
+        await db.AddAsync(entity, ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateException ex) when (
+            ex.InnerException is Npgsql.PostgresException { SqlState: "23505" } pg
+            && pg.ConstraintName == constraintName)
+        {
+            db.Entry(entity).State = EntityState.Detached;
+            return false;
+        }
+    }
 }

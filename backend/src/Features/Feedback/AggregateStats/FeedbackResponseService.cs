@@ -3,8 +3,10 @@ using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
 using Hook.Features.Feedback.Models;
 using Hook.Features.Feedback.ProviderStatsAggregate;
+using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Models;
 using Hook.Features.Whatsapp.Phone;
+using Microsoft.Extensions.Options;
 using Wolverine;
 using IMatchRepository = Hook.Features.Matching.MatchAggregate.IMatchRepository;
 
@@ -14,6 +16,8 @@ public sealed class FeedbackResponseService(
     IFeedbackRepository feedback,
     IMatchRepository matches,
     IMessageBus bus,
+    IWhatsappClient whatsapp,
+    IOptions<FeedbackOptions> options,
     TimeProvider clock,
     ILogger<FeedbackResponseService> logger)
 {
@@ -29,6 +33,9 @@ public sealed class FeedbackResponseService(
         LazyIntent intent,
         CancellationToken ct)
     {
+        var now = clock.GetUtcNow();
+        var opts = options.Value;
+
         var answer = ParseAnswer(msg.Text ?? string.Empty);
         if (answer is null)
         {
@@ -40,23 +47,42 @@ public sealed class FeedbackResponseService(
                 _ => null
             };
         }
-        if (answer is null) return;
+        if (answer is null)
+        {
+            // Bound the spammy retry prompt to ParseRetryWindow so a forgotten Pending row
+            // can't re-arm "didn't catch that" replies indefinitely on every inbound.
+            if (now - pending.PromptedAt > opts.ParseRetryWindow) return;
 
-        var now = clock.GetUtcNow();
-        pending.Answer = answer.Value;
-        pending.RepliedAt = now;
-        await feedback.SaveChangesAsync(ct);
+            var hint = pending.Step == FeedbackStep.DidYouFind
+                ? "Reply YES if you found a provider, or NO if you didn't."
+                : "Reply YES if the job is done, NO if it didn't happen, or IN PROGRESS if you're still working on it.";
+            await whatsapp.SendTextAsync(msg.From, $"Sorry, didn't catch that. {hint}", ct);
+            return;
+        }
+
+        if (!await feedback.TryClaimPendingAsync(pending.Id, answer.Value, now, ct))
+        {
+            return;
+        }
 
         if (pending.Step == FeedbackStep.DidYouFind && answer == FeedbackAnswer.Yes)
         {
-            await bus.ScheduleAsync(new Step2FeedbackCheck(pending.Id), TimeSpan.FromHours(20));
+            await bus.ScheduleAsync(new Step2FeedbackCheck(pending.Id), opts.Step2InitialDelay);
         }
 
         if (pending.Step == FeedbackStep.JobCompleted)
         {
             if (answer == FeedbackAnswer.InProgress)
             {
-                await bus.ScheduleAsync(new Step2FeedbackCheck(pending.Id), TimeSpan.FromHours(48));
+                // Step2FeedbackCheck.FeedbackId points at the Step1 (DidYouFind) row;
+                // passing the just-claimed JobCompleted id would fail the handler's
+                // Step==DidYouFind guard and the recheck would silently no-op.
+                var step1 = await feedback.GetLatestByMatchAndStepAsync(
+                    pending.MatchId, FeedbackStep.DidYouFind, ct);
+                if (step1 is not null)
+                {
+                    await bus.ScheduleAsync(new Step2FeedbackCheck(step1.Id), opts.Step2InProgressRecheckDelay);
+                }
                 return;
             }
 

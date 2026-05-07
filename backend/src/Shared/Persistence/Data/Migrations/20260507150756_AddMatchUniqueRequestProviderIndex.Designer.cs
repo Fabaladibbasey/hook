@@ -3,6 +3,7 @@ using System;
 using Hook.Shared.Persistence.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NetTopologySuite.Geometries;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Hook.Shared.Persistence.Data.Migrations
 {
     [DbContext(typeof(HookDbContext))]
-    partial class HookDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260507150756_AddMatchUniqueRequestProviderIndex")]
+    partial class AddMatchUniqueRequestProviderIndex
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -377,10 +380,6 @@ namespace Hook.Shared.Persistence.Data.Migrations
                     b.HasIndex("RequestId", "ProviderPhone")
                         .IsUnique()
                         .HasDatabaseName("ux_matches_request_provider");
-
-                    b.HasIndex("RequestId", "Score", "DistanceKm", "CreatedAt", "Id")
-                        .IsDescending(false, true, false, false, false)
-                        .HasDatabaseName("ix_matches_request_score_distance_created_id");
 
                     b.ToTable("matches", (string)null);
                 });

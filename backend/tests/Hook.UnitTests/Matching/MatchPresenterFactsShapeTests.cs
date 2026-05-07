@@ -1,12 +1,14 @@
 using System.Text.Json;
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
+using Hook.Features.Matching;
 using Hook.Features.Matching.Match;
 using Hook.Features.Matching.MatchAggregate;
 using Hook.Features.Matching.PresentMatches;
 using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Phone;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Shouldly;
 
 namespace Hook.UnitTests.Matching;
@@ -14,10 +16,10 @@ namespace Hook.UnitTests.Matching;
 public class MatchPresenterFactsShapeTests
 {
     [Fact]
-    public async Task Facts_matches_value_is_json_array_capped_at_5_when_more_scored()
+    public async Task Facts_matches_value_is_json_array_of_all_scored_items()
     {
         var capture = new ReplyCapture();
-        var presenter = Build(capture);
+        var presenter = Build(capture, cap: 100);
 
         var batch = MakeBatchWith(scoredCount: 8);
         await presenter.PresentAsync(PhoneNumber.Parse("+15550000001"), batch, "plumbing");
@@ -27,7 +29,7 @@ public class MatchPresenterFactsShapeTests
 
         using var doc = JsonDocument.Parse(matchesFact);
         doc.RootElement.ValueKind.ShouldBe(JsonValueKind.Array);
-        doc.RootElement.GetArrayLength().ShouldBe(5);
+        doc.RootElement.GetArrayLength().ShouldBe(8);
 
         var first = doc.RootElement[0];
         first.GetProperty("n").GetInt32().ShouldBe(1);
@@ -35,7 +37,7 @@ public class MatchPresenterFactsShapeTests
         first.TryGetProperty("distance", out _).ShouldBeTrue();
         first.TryGetProperty("score", out _).ShouldBeTrue();
 
-        capture.Facts!["count"].ShouldBe("5");
+        capture.Facts!["count"].ShouldBe("8");
         capture.Facts!["service"].ShouldBe("plumbing");
     }
 
@@ -43,7 +45,7 @@ public class MatchPresenterFactsShapeTests
     public async Task Facts_matches_preserves_count_when_below_cap()
     {
         var capture = new ReplyCapture();
-        var presenter = Build(capture);
+        var presenter = Build(capture, cap: 100);
 
         var batch = MakeBatchWith(scoredCount: 3);
         await presenter.PresentAsync(PhoneNumber.Parse("+15550000001"), batch, "carpentry");
@@ -54,10 +56,24 @@ public class MatchPresenterFactsShapeTests
     }
 
     [Fact]
+    public async Task PresentAsync_BatchExceedsCap_TruncatesToCap()
+    {
+        var capture = new ReplyCapture();
+        var presenter = Build(capture, cap: 3);
+
+        var batch = MakeBatchWith(scoredCount: 8);
+        await presenter.PresentAsync(PhoneNumber.Parse("+15550000001"), batch, "plumbing");
+
+        capture.Facts!["count"].ShouldBe("3");
+        using var doc = JsonDocument.Parse(capture.Facts!["matches"]);
+        doc.RootElement.GetArrayLength().ShouldBe(3);
+    }
+
+    [Fact]
     public async Task Empty_batch_falls_back_to_no_providers_text_and_does_not_call_ai()
     {
         var capture = new ReplyCapture();
-        var presenter = Build(capture);
+        var presenter = Build(capture, cap: 100);
 
         var batch = MakeBatchWith(scoredCount: 0);
         await presenter.PresentAsync(PhoneNumber.Parse("+15550000001"), batch, "plumbing");
@@ -71,7 +87,7 @@ public class MatchPresenterFactsShapeTests
     public async Task SinglePresented_ActionLineMentionsPickAndNew()
     {
         var capture = new ReplyCapture();
-        var presenter = Build(capture);
+        var presenter = Build(capture, cap: 100);
 
         var batch = MakeBatchWith(scoredCount: 1);
         await presenter.PresentAsync(PhoneNumber.Parse("+15550000001"), batch, "plumbing");
@@ -86,7 +102,7 @@ public class MatchPresenterFactsShapeTests
     public async Task MultiplePresented_ActionLineMentionsCommaAndAll()
     {
         var capture = new ReplyCapture();
-        var presenter = Build(capture);
+        var presenter = Build(capture, cap: 100);
 
         var batch = MakeBatchWith(scoredCount: 4);
         await presenter.PresentAsync(PhoneNumber.Parse("+15550000001"), batch, "plumbing");
@@ -101,7 +117,7 @@ public class MatchPresenterFactsShapeTests
     public async Task PresentAsync_DoesNotNotifyAnyProvider_EvenWhenManyMatches()
     {
         var capture = new ReplyCapture();
-        var presenter = Build(capture);
+        var presenter = Build(capture, cap: 100);
 
         var batch = MakeBatchWith(scoredCount: 5);
         await presenter.PresentAsync(PhoneNumber.Parse("+15550000001"), batch, "plumbing");
@@ -111,10 +127,11 @@ public class MatchPresenterFactsShapeTests
         capture.SentMessages[0].To.Value.ShouldBe("+15550000001");
     }
 
-    private static MatchPresenter Build(ReplyCapture capture) =>
+    private static MatchPresenter Build(ReplyCapture capture, int cap) =>
         new(
             ai: new CapturingAi(capture),
             whatsapp: new CapturingWhatsapp(capture),
+            options: Options.Create(new MatchingOptions { TopMatchesPerBatch = cap }),
             logger: NullLogger<MatchPresenter>.Instance);
 
     private static MatchBatch MakeBatchWith(int scoredCount)
