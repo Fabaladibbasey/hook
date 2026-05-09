@@ -3,21 +3,31 @@ import type { ChatMessage } from "../signalr/useChatHub";
 
 export default function MessageList({
   messages,
-  myParticipantId
+  myParticipantId,
+  chatId
 }: {
   messages: ChatMessage[];
   myParticipantId: string;
+  chatId: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const initialScrollChatId = useRef<string | null>(null);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+
+    if (initialScrollChatId.current !== chatId && messages.length > 0) {
+      el.scrollTop = el.scrollHeight;
+      initialScrollChatId.current = chatId;
+      return;
+    }
+
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (distFromBottom < 120) {
       el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
     }
-  }, [messages]);
+  }, [messages, chatId]);
 
   return (
     <div ref={ref} className="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50">

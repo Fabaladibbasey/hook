@@ -11,7 +11,7 @@ public class ServiceRequestTests
     {
         var now = DateTimeOffset.Parse("2026-05-01T10:00:00Z");
 
-        var request = Hook.Features.ServiceRequest.RequestAggregate.ServiceRequest.Create(
+        var request = Features.ServiceRequest.RequestAggregate.ServiceRequest.Create(
             "+12025550123",
             "plumbing",
             new Location(13.4549, -16.5790),
@@ -31,7 +31,7 @@ public class ServiceRequestTests
     [Fact]
     public void Create_WithSharePhoneTrue_ShouldPersistFlag()
     {
-        var request = Hook.Features.ServiceRequest.RequestAggregate.ServiceRequest.Create(
+        var request = Features.ServiceRequest.RequestAggregate.ServiceRequest.Create(
             "+12025550123", "plumbing", new Location(0, 0), "x", string.Empty, 5, DateTimeOffset.UtcNow,
             sharePhoneNumber: true);
 
@@ -41,7 +41,7 @@ public class ServiceRequestTests
     [Fact]
     public void RecordShown_ShouldDeduplicate()
     {
-        var request = Hook.Features.ServiceRequest.RequestAggregate.ServiceRequest.Create(
+        var request = Features.ServiceRequest.RequestAggregate.ServiceRequest.Create(
             "+12025550123", "plumbing", new Location(0, 0), "x", string.Empty, 5, DateTimeOffset.UtcNow,
             sharePhoneNumber: false);
 

@@ -39,10 +39,11 @@ export default function Privacy() {
           phone-share consent flag, last-active time, and aggregated interaction stats.
         </li>
         <li>
-          <strong>Chat data</strong> — your device’s P-256 public key, the ciphertext and nonce of
-          each message addressed to or from you (one per-recipient envelope row in
-          {" "}<code>chat_message_recipients</code> for every device the message is fanned out to),
-          and a chat access log containing IP address and basic device information.
+          <strong>Chat data</strong> — your participant’s P-256 public key (one row in
+          {" "}<code>chat_participants</code>) and the ciphertext + nonce of each message (one row
+          in <code>chat_messages</code>). All chat data is encrypted on your device with
+          AES-256-GCM under a key derived from ECDH; we cannot read message contents. We also keep
+          a chat access log containing IP address and basic device information.
         </li>
         <li>
           <strong>Feedback</strong> — prompts shown to you, your replies, and timestamps.
@@ -54,7 +55,7 @@ export default function Privacy() {
         <li>
           <strong>Plaintext chat content.</strong> Real-time chat is end-to-end encrypted using
           P-256 ECDH + HKDF-SHA-256 + AES-256-GCM. Encryption keys never leave your device. Hook
-          stores only ciphertext and a nonce per recipient.
+          stores one ciphertext + nonce per message; the keys to decrypt it never reach our servers.
         </li>
         <li>Passwords — Hook has no password system.</li>
         <li>Payment data — Hook does not process payments.</li>
@@ -129,10 +130,9 @@ export default function Privacy() {
           the aggregated provider statistics tied to that phone).
         </li>
         <li>
-          <strong>Chat sessions, messages (ciphertext and nonce), per-recipient envelopes, device
-          public keys, participants, and chat access logs</strong> (IP + basic device info) —
-          flag-expire 24 hours after the chat is created; all related rows, including the
-          per-recipient envelope rows in <code>chat_message_recipients</code>, are hard-deleted{" "}
+          <strong>Chat sessions, messages (ciphertext and nonce), participant public keys,
+          participants, and chat access logs</strong> (IP + basic device info) — flag-expire 24
+          hours after the chat is created; all related rows are hard-deleted{" "}
           {RETENTION_DAYS_LABEL} after expiry. After that point the messages are permanently
           unrecoverable, even by you.
         </li>
@@ -211,8 +211,8 @@ export default function Privacy() {
           for a copy of your data or to correct an inaccuracy.
         </li>
         <li>
-          <strong>Local data</strong> — clearing your browser storage deletes your chat keypair
-          and device identifier; you will lose access to past chat content.
+          <strong>Local data</strong> — clearing your browser storage deletes your chat keypair;
+          you will lose access to past chat content.
         </li>
       </ul>
 
@@ -236,8 +236,7 @@ export default function Privacy() {
       <p>
         Hook does not set tracking cookies. The chat client uses browser{" "}
         <code>localStorage</code> to keep your chat encryption keypair (key like{" "}
-        <code>hook:chat:&lt;chatId&gt;:keypair:v1</code>) and a device identifier (
-        <code>hook:device:id:v1</code>). Clearing browser storage deletes these.
+        <code>hook:chat:&lt;chatId&gt;:keypair:v2</code>). Clearing browser storage deletes it.
       </p>
 
       <h2 id="section-12">12. Changes to this policy</h2>

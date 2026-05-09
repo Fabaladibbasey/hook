@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Hook.UnitTests" />
+    <InternalsVisibleTo Include="Hook.IntegrationTests" />
   </ItemGroup>
 
   <PropertyGroup>

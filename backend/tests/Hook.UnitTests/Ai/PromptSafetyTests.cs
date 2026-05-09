@@ -138,7 +138,7 @@ public class PromptSafetyTests
     private static int CountOccurrences(string haystack, string needle)
     {
         var n = 0; var i = 0;
-        while ((i = haystack.IndexOf(needle, i, System.StringComparison.Ordinal)) >= 0) { n++; i += needle.Length; }
+        while ((i = haystack.IndexOf(needle, i, StringComparison.Ordinal)) >= 0) { n++; i += needle.Length; }
         return n;
     }
 }

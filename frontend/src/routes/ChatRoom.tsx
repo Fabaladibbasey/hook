@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useChatHub } from "../signalr/useChatHub";
 import MessageList from "../components/MessageList";
@@ -7,7 +7,6 @@ import RevokedToast from "../components/RevokedToast";
 import WaitingForPeer from "../components/WaitingForPeer";
 import LegalFooter from "../components/LegalFooter";
 import { fetchJson } from "../api/fetchJson";
-import { getOrCreateDeviceId } from "../crypto/deviceId";
 
 type OpenResponse = {
   chatId: string;
@@ -30,13 +29,11 @@ export default function ChatRoom() {
       .catch((err) => setOpenError(err instanceof Error ? err.message : String(err)));
   }, [token]);
 
-  const deviceId = useMemo(() => getOrCreateDeviceId(), []);
   const { state, send, endChat } = useChatHub(
     open?.chatId ?? "",
     open?.participantId ?? "",
     token ?? "",
-    open?.sessionId ?? "",
-    deviceId
+    open?.sessionId ?? ""
   );
   const [ending, setEnding] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
@@ -95,7 +92,7 @@ export default function ChatRoom() {
         </button>
       </header>
       <LegalFooter variant="chat" />
-      <MessageList messages={state.messages} myParticipantId={open.participantId} />
+      <MessageList messages={state.messages} myParticipantId={open.participantId} chatId={open.chatId} />
       {waitingForPeer && <WaitingForPeer />}
       <MessageInput onSend={send} disabled={waitingForPeer} />
 

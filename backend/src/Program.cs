@@ -1,3 +1,4 @@
+using System.Threading.RateLimiting;
 using Hook;
 using Hook.Features.Ai;
 using Hook.Features.ChatLifecycle;
@@ -67,6 +68,23 @@ try
     builder.Services.AddMetaTemplates();
     builder.Services.AddObservability();
 
+    builder.Services.AddRateLimiter(opts =>
+    {
+        opts.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+        opts.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+        {
+            var token = ctx.Request.Query["token"].ToString();
+            var key = !string.IsNullOrEmpty(token) ? $"t:{token}" : $"ip:{ctx.Connection.RemoteIpAddress}";
+            return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
+            {
+                Window = TimeSpan.FromSeconds(5),
+                PermitLimit = 3,
+                QueueLimit = 5,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+            });
+        });
+    });
+
     builder.Services.AddProblemDetails();
     builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
@@ -100,7 +118,19 @@ try
 
     app.UseExceptionHandler();
     app.UseObservability();
-    app.UseSerilogRequestLogging();
+    app.UseRateLimiter();
+    app.UseSerilogRequestLogging(opts =>
+    {
+        opts.EnrichDiagnosticContext = (diagnosticContext, httpContext) =>
+        {
+            // Scrub `?token=` and `?sessionId=` from any request-log query-string property.
+            var qs = httpContext.Request.QueryString.ToString();
+            if (!string.IsNullOrEmpty(qs))
+            {
+                diagnosticContext.Set("QueryString", RequestLogScrub.Scrub(qs));
+            }
+        };
+    });
 
     app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
     app.MapGet("/readyz", async (AiReadinessProbe probe, CancellationToken ct) =>
@@ -143,4 +173,23 @@ finally
 namespace Hook
 {
     public partial class Program;
+
+    internal static class RequestLogScrub
+    {
+        private static readonly HashSet<string> SensitiveKeys = new(StringComparer.OrdinalIgnoreCase) { "token", "sessionId" };
+
+        public static string Scrub(string queryString)
+        {
+            if (string.IsNullOrEmpty(queryString)) return queryString;
+            var qs = queryString.StartsWith('?') ? queryString[1..] : queryString;
+            var rewritten = string.Join('&', qs.Split('&').Select(part =>
+            {
+                var eq = part.IndexOf('=');
+                if (eq < 0) return part;
+                var name = part[..eq];
+                return SensitiveKeys.Contains(name) ? $"{name}=***" : part;
+            }));
+            return queryString.StartsWith('?') ? "?" + rewritten : rewritten;
+        }
+    }
 }

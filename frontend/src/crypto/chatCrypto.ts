@@ -1,9 +1,10 @@
 const STORAGE_PREFIX = "hook:chat:";
-const STORAGE_SUFFIX = ":keypair:v1";
+const STORAGE_SUFFIX = ":keypair:v2";
 
 const ECDH_PARAMS: EcKeyGenParams & EcKeyImportParams = { name: "ECDH", namedCurve: "P-256" };
 const HKDF_HASH = "SHA-256";
-const HKDF_INFO_TEXT = "hook-chat-v2";
+// v3 binds recipientParticipantId + messageId into AAD. Old keypairs are evicted by the STORAGE_SUFFIX bump.
+const HKDF_INFO_TEXT = "hook-chat-v3";
 const AES_KEY_LENGTH = 256;
 const NONCE_BYTES = 12;
 const TAG_BITS = 128;
@@ -16,8 +17,8 @@ type StoredKeypair = {
 export type AadParts = {
   chatId: string;
   senderParticipantId: string;
-  senderDeviceId: string;
-  recipientDeviceId: string;
+  recipientParticipantId: string;
+  messageId: string;
   sequence: number;
 };
 
@@ -106,12 +107,12 @@ export async function deriveSharedKey(privateKey: CryptoKey, peerSpkiB64: string
 
 const buildAad = (parts: AadParts): Uint8Array => {
   const chatBytes = guidToBytes(parts.chatId);
-  const senderParticipantBytes = guidToBytes(parts.senderParticipantId);
-  const senderDeviceBytes = guidToBytes(parts.senderDeviceId);
-  const recipientDeviceBytes = guidToBytes(parts.recipientDeviceId);
+  const senderBytes = guidToBytes(parts.senderParticipantId);
+  const recipientBytes = guidToBytes(parts.recipientParticipantId);
+  const messageBytes = guidToBytes(parts.messageId);
   const seqBytes = new Uint8Array(8);
   new DataView(seqBytes.buffer).setBigUint64(0, BigInt(parts.sequence), false);
-  return concatBytes(chatBytes, senderParticipantBytes, senderDeviceBytes, recipientDeviceBytes, seqBytes);
+  return concatBytes(chatBytes, senderBytes, recipientBytes, messageBytes, seqBytes);
 };
 
 export async function encrypt(

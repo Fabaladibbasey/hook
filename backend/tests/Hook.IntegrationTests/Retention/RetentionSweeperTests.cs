@@ -287,7 +287,7 @@ public sealed class RetentionSweeperTests : IClassFixture<DevPipelineFixture>
     }
 
     [Fact]
-    public async Task Sweep_ChatSessionDelete_CascadesToMessagesParticipantsKeysAndAccessLogs()
+    public async Task Sweep_ChatSessionDelete_CascadesToMessagesParticipantsAndAccessLogs()
     {
         await using var scope = _fx.Factory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
@@ -297,27 +297,17 @@ public sealed class RetentionSweeperTests : IClassFixture<DevPipelineFixture>
             TimeSpan.FromDays(1),
             DateTimeOffset.UtcNow - TimeSpan.FromDays(opts.RetentionDays + 2));
         var participant = ChatParticipant.Create(session.Id, ChatParticipantRole.Client, UniquePhone());
-        var deviceKey = new ChatDeviceKey
-        {
-            ChatId = session.Id,
-            ParticipantId = participant.Id,
-            DeviceId = Guid.NewGuid(),
-            PublicKey = [1, 2, 3]
-        };
+        // Seed the post-multi-device columns so cascade has to clear them too.
+        participant.SetPublicKey([0x01, 0x02]);
+        participant.TryAdvanceSequence(5);
         var message = new ChatMessage
         {
             ChatId = session.Id,
             ParticipantId = participant.Id,
-            SenderDeviceId = deviceKey.DeviceId,
-            Sequence = 1
-        };
-        message.Recipients.Add(new ChatMessageRecipient
-        {
-            MessageId = message.Id,
-            RecipientDeviceId = Guid.NewGuid(),
+            Sequence = 1,
             Ciphertext = [9],
             Nonce = new byte[12]
-        });
+        };
         var accessLog = new ChatAccessLog
         {
             ChatId = session.Id,
@@ -328,20 +318,26 @@ public sealed class RetentionSweeperTests : IClassFixture<DevPipelineFixture>
 
         db.ChatSessions.Add(session);
         db.ChatParticipants.Add(participant);
-        db.ChatDeviceKeys.Add(deviceKey);
         db.ChatMessages.Add(message);
         db.ChatAccessLogs.Add(accessLog);
         await db.SaveChangesAsync();
 
-        var sweeper = Resolve(scope.ServiceProvider);
-        await sweeper.RunOnceAsync(CancellationToken.None);
+        try
+        {
+            var sweeper = Resolve(scope.ServiceProvider);
+            await sweeper.RunOnceAsync(CancellationToken.None);
 
-        Assert.False(await db.ChatSessions.AsNoTracking().AnyAsync(s => s.Id == session.Id));
-        Assert.False(await db.ChatParticipants.AsNoTracking().AnyAsync(p => p.Id == participant.Id));
-        Assert.False(await db.ChatMessages.AsNoTracking().AnyAsync(m => m.Id == message.Id));
-        Assert.False(await db.ChatAccessLogs.AsNoTracking().AnyAsync(l => l.Id == accessLog.Id));
-        Assert.False(await db.ChatDeviceKeys.AsNoTracking().AnyAsync(k => k.Id == deviceKey.Id));
-        Assert.False(await db.ChatMessageRecipients.AsNoTracking().AnyAsync(r => r.MessageId == message.Id));
+            Assert.False(await db.ChatSessions.AsNoTracking().AnyAsync(s => s.Id == session.Id));
+            Assert.False(await db.ChatParticipants.AsNoTracking().AnyAsync(p => p.Id == participant.Id));
+            Assert.False(await db.ChatMessages.AsNoTracking().AnyAsync(m => m.Id == message.Id));
+            Assert.False(await db.ChatAccessLogs.AsNoTracking().AnyAsync(l => l.Id == accessLog.Id));
+        }
+        finally
+        {
+            // If the cascade sweeper failed mid-test, force-delete the seeded session so
+            // the shared fixture container does not leak rows into later tests.
+            await db.ChatSessions.Where(s => s.Id == session.Id).ExecuteDeleteAsync();
+        }
     }
 
     [Fact]

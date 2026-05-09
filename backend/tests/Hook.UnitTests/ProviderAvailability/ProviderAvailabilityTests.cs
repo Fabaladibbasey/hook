@@ -11,7 +11,7 @@ public class ProviderAvailabilityTests
         var now = DateTimeOffset.Parse("2026-05-01T12:00:00Z");
         var ttl = TimeSpan.FromHours(24);
 
-        var availability = Hook.Features.ProviderAvailability.AvailabilityAggregate.ProviderAvailability.Register(
+        var availability = Features.ProviderAvailability.AvailabilityAggregate.ProviderAvailability.Register(
             "+12025550123",
             new[] { "plumbing" },
             new Location(13.4549, -16.5790),
@@ -34,7 +34,7 @@ public class ProviderAvailabilityTests
     {
         var start = DateTimeOffset.Parse("2026-05-01T12:00:00Z");
         var ttl = TimeSpan.FromHours(24);
-        var availability = Hook.Features.ProviderAvailability.AvailabilityAggregate.ProviderAvailability.Register(
+        var availability = Features.ProviderAvailability.AvailabilityAggregate.ProviderAvailability.Register(
             "+12025550123", new[] { "plumbing" }, new Location(0, 0), "x", true, ttl, start);
 
         var later = start.AddHours(20);

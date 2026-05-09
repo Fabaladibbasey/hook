@@ -6,7 +6,7 @@ WhatsApp-funnel + real-time chat platform that connects clients with nearby serv
 - **Distance-aware matching** — PostGIS, ranked by proximity and provider proactiveness.
 - **Privacy-controlled handoff** — phone exchange or anonymous chat link.
 - **End-to-end encrypted chat** — P-256 ECDH + HKDF-SHA-256 + AES-256-GCM. Server stores ciphertext only.
-- **Multi-device E2E** — SignalR ships per-recipient envelopes.
+- **Single-device E2E** — one ECDH-derived AES-GCM key per chat between the two participants; server stores a single ciphertext per message. Opening the chat URL on a new device rotates the participant's `CurrentSessionId`, revoking the prior tab/device on its next hub interaction.
 
 Platform is designed to exit after connecting both parties.
 

@@ -1,4 +1,5 @@
 using Hook.Features.ChatLifecycle;
+using Hook.Features.ChatSession.ParticipantAggregate;
 using Hook.Features.ChatSession.SessionAggregate;
 using Microsoft.AspNetCore.SignalR;
 
@@ -6,241 +7,217 @@ namespace Hook.Features.ChatSession;
 
 public sealed class ChatHub(IChatRepository chats, ChatScheduler scheduler, ILogger<ChatHub> logger, TimeProvider clock) : Hub
 {
-    private const int MaxCiphertextBytes = 5000;
-    private const int NonceBytes = 12;
-    private const int MaxPublicKeyBytes = 200;
-    private const int MaxRecipients = 16;
-
     public override async Task OnConnectedAsync()
     {
         var http = Context.GetHttpContext();
         var token = http?.Request.Query["token"].ToString();
         var sessionIdRaw = http?.Request.Query["sessionId"].ToString();
-        var deviceIdRaw = http?.Request.Query["deviceId"].ToString();
         if (string.IsNullOrEmpty(token)
             || !Guid.TryParse(sessionIdRaw, out var sessionId)
-            || !Guid.TryParse(deviceIdRaw, out var deviceId))
+            || sessionId == Guid.Empty)
         {
             Context.Abort();
             return;
         }
 
         var participant = await chats.GetByTokenAsync(token);
-        if (participant is null || !participant.IsCurrentSession(sessionId))
-        {
-            await Clients.Caller.SendAsync("SessionRevoked");
-            Context.Abort();
-            return;
-        }
+        if (participant is null) { Context.Abort(); return; }
+
+        Context.Items[ChatHubConstants.Items.ChatId] = participant.ChatId;
+        Context.Items[ChatHubConstants.Items.ParticipantId] = participant.Id;
+        Context.Items[ChatHubConstants.Items.SessionId] = sessionId;
+        Context.Items[ChatHubConstants.Items.Role] = participant.Role.ToString();
+
+        // Long-polling can drop a SendAsync queued during OnConnectedAsync, so revocation/end is
+        // surfaced on the next hub invocation (matches "revoking the prior tab on its next hub
+        // interaction" in CLAUDE.md). Skip group join + HistoryLoaded for a stale session so the
+        // tab sees nothing until it triggers the explicit reject.
+        if (!participant.IsCurrentSession(sessionId)) return;
 
         var session = await chats.GetSessionAsync(participant.ChatId);
-        if (session is null || !session.CanSendMessage(clock.GetUtcNow()))
-        {
-            await Clients.Caller.SendAsync("SessionEnded");
-            Context.Abort();
-            return;
-        }
+        if (session is null || !session.CanSendMessage(clock.GetUtcNow())) return;
 
         await Groups.AddToGroupAsync(Context.ConnectionId, ChatGroup(participant.ChatId));
-        await Groups.AddToGroupAsync(Context.ConnectionId, DeviceGroup(participant.ChatId, deviceId));
-        Context.Items["chatId"] = participant.ChatId;
-        Context.Items["participantId"] = participant.Id;
-        Context.Items["sessionId"] = sessionId;
-        Context.Items["deviceId"] = deviceId;
-        Context.Items["role"] = participant.Role.ToString();
 
-        var deviceKeys = await chats.GetDeviceKeysAsync(participant.ChatId);
-        await Clients.Caller.SendAsync("DeviceKeysSnapshot", new
-        {
-            devices = deviceKeys.Select(k => new
-            {
-                participantId = k.ParticipantId,
-                deviceId = k.DeviceId,
-                publicKeyB64 = Convert.ToBase64String(k.PublicKey)
-            })
-        });
-
-        var history = await chats.GetMessagesForDeviceAsync(participant.ChatId, deviceId, take: 50);
-        await Clients.Caller.SendAsync("HistoryLoaded", history.Select(row => new
-        {
-            id = row.Header.Id,
-            participantId = row.Header.ParticipantId,
-            senderDeviceId = row.Header.SenderDeviceId,
-            ciphertextB64 = Convert.ToBase64String(row.Envelope.Ciphertext),
-            nonceB64 = Convert.ToBase64String(row.Envelope.Nonce),
-            sequence = row.Header.Sequence,
-            createdAt = row.Header.CreatedAt
-        }));
+        var history = await chats.GetMessagesAsync(participant.ChatId, ChatHubConstants.InitialHistoryTake);
+        await Clients.Caller.SendAsync(ChatHubConstants.Events.HistoryLoaded, history.Select(ToWire));
 
         await base.OnConnectedAsync();
     }
 
     public async Task PublishKey(string publicKeyB64)
     {
-        if (string.IsNullOrEmpty(publicKeyB64) || publicKeyB64.Length > MaxPublicKeyBytes * 2)
+        if (!TryDecodeBytes(publicKeyB64, minLen: 1, maxLen: ChatHubConstants.MaxPublicKeyBytes, out var spki))
         {
             Context.Abort();
             return;
         }
 
-        byte[] spki;
-        try { spki = Convert.FromBase64String(publicKeyB64); }
-        catch (FormatException) { Context.Abort(); return; }
-
-        if (spki.Length is 0 or > MaxPublicKeyBytes) { Context.Abort(); return; }
-
-        if (Context.Items["chatId"] is not Guid chatId
-            || Context.Items["participantId"] is not Guid participantId
-            || Context.Items["deviceId"] is not Guid deviceId)
+        if (Context.Items[ChatHubConstants.Items.ChatId] is not Guid chatId
+            || Context.Items[ChatHubConstants.Items.ParticipantId] is not Guid participantId
+            || Context.Items[ChatHubConstants.Items.SessionId] is not Guid sessionId)
         {
             Context.Abort();
             return;
         }
 
-        await chats.UpsertDeviceKeyAsync(chatId, participantId, deviceId, spki, clock.GetUtcNow());
+        var participant = await EnsureCurrentSessionAsync(sessionId);
+        if (participant is null) return;
+
+        participant.SetPublicKey(spki);
         await chats.SaveChangesAsync();
 
-        await Clients.Group(ChatGroup(chatId)).SendAsync("PeerDeviceKeyAvailable", new
+        var peer = await chats.GetPeerAsync(chatId, participantId);
+        if (peer?.PublicKey is { Length: > 0 } peerKey)
         {
-            participantId,
-            deviceId,
-            publicKeyB64
+            await Clients.Caller.SendAsync(ChatHubConstants.Events.PeerKeyAvailable, new
+            {
+                peerParticipantId = peer.Id,
+                peerPublicKeyB64 = Convert.ToBase64String(peerKey)
+            });
+        }
+
+        await Clients.OthersInGroup(ChatGroup(chatId)).SendAsync(ChatHubConstants.Events.PeerKeyAvailable, new
+        {
+            peerParticipantId = participantId,
+            peerPublicKeyB64 = publicKeyB64
         });
 
-        logger.LogDebug("Device key published chat={ChatId} participant={ParticipantId} device={DeviceId}",
-            chatId, participantId, deviceId);
+        logger.LogDebug("Public key published chat={ChatId} participant={ParticipantId}", chatId, participantId);
     }
 
     public async Task SendMessage(SendMessageDto dto)
     {
-        if (dto?.Recipients is null || dto.Recipients.Count is 0 or > MaxRecipients) return;
+        if (dto is null || dto.MessageId == Guid.Empty)
+        {
+            await RejectAsync(dto?.MessageId ?? Guid.Empty, MessageRejectReason.InvalidPayload);
+            return;
+        }
 
-        if (Context.Items["chatId"] is not Guid chatId
-            || Context.Items["participantId"] is not Guid participantId
-            || Context.Items["deviceId"] is not Guid senderDeviceId
-            || Context.Items["sessionId"] is not Guid sessionId)
+        if (Context.Items[ChatHubConstants.Items.ChatId] is not Guid chatId
+            || Context.Items[ChatHubConstants.Items.ParticipantId] is not Guid participantId
+            || Context.Items[ChatHubConstants.Items.SessionId] is not Guid sessionId)
         {
             Context.Abort();
             return;
         }
 
-        var senderKey = await chats.GetDeviceKeyAsync(participantId, senderDeviceId);
-        if (senderKey is null) { Context.Abort(); return; }
-
-        var participant = await chats.GetByTokenAsync(GetTokenFromQuery());
-        if (participant is null || !participant.IsCurrentSession(sessionId))
-        {
-            await Clients.Caller.SendAsync("SessionRevoked");
-            Context.Abort();
-            return;
-        }
-
-        if (!senderKey.TryAdvanceSequence(dto.Sequence))
-        {
-            logger.LogWarning("Replayed/out-of-order seq rejected chat={ChatId} device={DeviceId} seq={Seq}",
-                chatId, senderDeviceId, dto.Sequence);
-            return;
-        }
+        var participant = await EnsureCurrentSessionAsync(sessionId);
+        if (participant is null) return;
 
         var session = await chats.GetSessionAsync(chatId);
         if (session is null || !session.CanSendMessage(clock.GetUtcNow()))
         {
-            await Clients.Caller.SendAsync("SessionEnded");
+            await RejectAsync(dto.MessageId, MessageRejectReason.SessionEnded);
             return;
         }
 
-        var allDeviceKeys = await chats.GetDeviceKeysAsync(chatId);
-        var validDeviceIds = allDeviceKeys.Select(k => k.DeviceId).ToHashSet();
-
-        var recipients = new List<ChatMessageRecipient>();
-        var messageId = Guid.NewGuid();
-        foreach (var r in dto.Recipients)
+        if (!TryDecodeBytes(dto.CiphertextB64, minLen: 17, maxLen: ChatHubConstants.MaxCiphertextBytes, out var ciphertext)
+            || !TryDecodeBytes(dto.NonceB64, minLen: ChatHubConstants.NonceBytes, maxLen: ChatHubConstants.NonceBytes, out var nonce))
         {
-            if (!validDeviceIds.Contains(r.DeviceId)) return;
-            byte[] ciphertext, nonce;
-            try
-            {
-                ciphertext = Convert.FromBase64String(r.CiphertextB64);
-                nonce = Convert.FromBase64String(r.NonceB64);
-            }
-            catch (FormatException) { return; }
-            if (ciphertext.Length is 0 or > MaxCiphertextBytes) return;
-            if (nonce.Length != NonceBytes) return;
-            recipients.Add(new ChatMessageRecipient
-            {
-                MessageId = messageId,
-                RecipientDeviceId = r.DeviceId,
-                Ciphertext = ciphertext,
-                Nonce = nonce
-            });
+            await RejectAsync(dto.MessageId, MessageRejectReason.DecodeFailed);
+            return;
+        }
+
+        if (!participant.TryAdvanceSequence(dto.Sequence))
+        {
+            logger.LogWarning("Replayed/out-of-order seq rejected chat={ChatId} participant={ParticipantId} seq={Seq}",
+                chatId, participantId, dto.Sequence);
+            await RejectAsync(dto.MessageId, MessageRejectReason.Replay);
+            return;
         }
 
         var msg = new ChatMessage
         {
-            Id = messageId,
+            Id = dto.MessageId,
             ChatId = chatId,
             ParticipantId = participantId,
-            SenderDeviceId = senderDeviceId,
             Sequence = dto.Sequence,
-            Recipients = recipients
+            Ciphertext = ciphertext,
+            Nonce = nonce
         };
 
-        await chats.AddMessageAsync(msg);
+        var inserted = await chats.TryAddMessageAsync(msg);
+        if (!inserted)
+        {
+            await RejectAsync(dto.MessageId, MessageRejectReason.Duplicate);
+            return;
+        }
+
         var now = clock.GetUtcNow();
         session.Touch(now);
         await chats.SaveChangesAsync();
         await scheduler.ScheduleIdleChecksAsync(chatId, now);
 
-        foreach (var rcp in recipients)
-        {
-            await Clients.Group(DeviceGroup(chatId, rcp.RecipientDeviceId)).SendAsync("MessageReceived", new
-            {
-                id = msg.Id,
-                participantId = msg.ParticipantId,
-                senderDeviceId = msg.SenderDeviceId,
-                ciphertextB64 = Convert.ToBase64String(rcp.Ciphertext),
-                nonceB64 = Convert.ToBase64String(rcp.Nonce),
-                sequence = msg.Sequence,
-                createdAt = msg.CreatedAt
-            });
-        }
+        await Clients.OthersInGroup(ChatGroup(chatId)).SendAsync(ChatHubConstants.Events.MessageReceived, ToWire(msg));
 
-        logger.LogDebug("ChatMessage stored chat={ChatId} sender={ParticipantId}/{DeviceId} recipients={N}",
-            chatId, participantId, senderDeviceId, recipients.Count);
+        logger.LogDebug("ChatMessage stored chat={ChatId} sender={ParticipantId} seq={Seq}",
+            chatId, participantId, dto.Sequence);
     }
 
     public async Task EndChat()
     {
-        if (Context.Items["chatId"] is not Guid chatId) { Context.Abort(); return; }
-        var role = Context.Items["role"] as string ?? "Unknown";
-
-        var participant = await chats.GetByTokenAsync(GetTokenFromQuery());
-        if (participant is null) { Context.Abort(); return; }
-        if (!participant.IsCurrentSession((Guid)Context.Items["sessionId"]!))
+        if (Context.Items[ChatHubConstants.Items.ChatId] is not Guid chatId
+            || Context.Items[ChatHubConstants.Items.SessionId] is not Guid sessionId)
         {
-            await Clients.Caller.SendAsync("SessionRevoked");
             Context.Abort();
             return;
         }
+
+        var participant = await EnsureCurrentSessionAsync(sessionId);
+        if (participant is null) return;
+        var role = (Context.Items[ChatHubConstants.Items.Role] as string) ?? participant.Role.ToString();
 
         var session = await chats.GetSessionAsync(chatId);
         if (session is null) return;
         if (session.Status != ChatSessionStatus.Active)
         {
-            await Clients.Caller.SendAsync("ChatEnded", new { reason = "already-ended", endedBy = (string?)null });
+            await Clients.Caller.SendAsync(ChatHubConstants.Events.ChatEnded, new { reason = "already-ended", endedBy = (string?)null });
             return;
         }
 
         session.End(clock.GetUtcNow());
         await chats.SaveChangesAsync();
 
-        await Clients.Group(ChatGroup(chatId)).SendAsync("ChatEnded", new { reason = "user", endedBy = role });
+        await Clients.Group(ChatGroup(chatId)).SendAsync(ChatHubConstants.Events.ChatEnded, new { reason = "user", endedBy = role });
         logger.LogInformation("Chat {ChatId} ended by {Role} ({ParticipantId})", chatId, role, participant.Id);
     }
 
-    private string GetTokenFromQuery() =>
-        Context.GetHttpContext()?.Request.Query["token"].ToString() ?? string.Empty;
+    private async Task<ChatParticipant?> EnsureCurrentSessionAsync(Guid sessionId)
+    {
+        var token = Context.GetHttpContext()?.Request.Query["token"].ToString() ?? string.Empty;
+        var participant = await chats.GetByTokenAsync(token);
+        if (participant is null || !participant.IsCurrentSession(sessionId))
+        {
+            await Clients.Caller.SendAsync(ChatHubConstants.Events.SessionRevoked);
+            Context.Abort();
+            return null;
+        }
+        return participant;
+    }
+
+    private Task RejectAsync(Guid messageId, MessageRejectReason reason) =>
+        Clients.Caller.SendAsync(ChatHubConstants.Events.MessageSendRejected, new MessageSendRejectedDto(messageId, reason));
+
+    private static bool TryDecodeBytes(string? b64, int minLen, int maxLen, out byte[] bytes)
+    {
+        bytes = [];
+        if (string.IsNullOrEmpty(b64)) return false;
+        if (b64.Length > (maxLen / 3 + 1) * 4 + 4) return false;
+        try { bytes = Convert.FromBase64String(b64); }
+        catch (FormatException) { return false; }
+        return bytes.Length >= minLen && bytes.Length <= maxLen;
+    }
+
+    private static object ToWire(ChatMessage msg) => new
+    {
+        id = msg.Id,
+        participantId = msg.ParticipantId,
+        ciphertextB64 = Convert.ToBase64String(msg.Ciphertext),
+        nonceB64 = Convert.ToBase64String(msg.Nonce),
+        sequence = msg.Sequence,
+        createdAt = msg.CreatedAt
+    };
 
     public static string ChatGroup(Guid chatId) => $"chat:{chatId:N}";
-    public static string DeviceGroup(Guid chatId, Guid deviceId) => $"chat:{chatId:N}:device:{deviceId:N}";
 }

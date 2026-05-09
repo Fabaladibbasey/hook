@@ -46,6 +46,7 @@ backend/src/wwwroot/
 
 ## Local Claude settings
 .claude/
+.claude-test-evidence/
 
 ## Local scratch / log dumps
 /logs-*.txt
