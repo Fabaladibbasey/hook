@@ -69,7 +69,16 @@ public sealed class PhoneExchanger(
 
         if (!bothConsent)
         {
-            await events.PublishAsync(new ChatRoutingRequested(match.Id, request.Id, request.ClientPhone, provider.Phone), ct);
+            await events.PublishAsync(new ChatRoutingRequested(
+                match.Id,
+                request.Id,
+                request.ClientPhone,
+                provider.Phone,
+                request.SharePhoneNumber,
+                provider.ShareContact,
+                request.FormattedAddress,
+                request.Location.Y,
+                request.Location.X), ct);
             return ExchangeOutcome.RoutedToChat;
         }
 

@@ -25,6 +25,7 @@ public class ChatPrivacyRoutingPipelineTests : IClassFixture<DevPipelineFixture>
         using var client = _fx.Factory.CreateClient();
         var phone = "+14155553001";
 
+        // Default sharePhoneConsent: false — both parties hid consent in this scenario.
         var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(client, phone);
 
         (await client.InjectTextAsync(phone, "PICK 2")).EnsureSuccessStatusCode();
@@ -44,6 +45,17 @@ public class ChatPrivacyRoutingPipelineTests : IClassFixture<DevPipelineFixture>
         var providerMatch = ChatUrlRegex.Match(providerLink.Body);
         clientMatch.Success.ShouldBeTrue($"client message missing /c/<chatId>/<token>: {clientLink.Body}");
         providerMatch.Success.ShouldBeTrue($"provider message missing /c/<chatId>/<token>: {providerLink.Body}");
+
+        clientLink.Body.ShouldStartWith("Your private chat is ready.");
+        clientLink.Body.ShouldNotContain("prefers");
+
+        var expectedMapsUrl = string.Format(
+            System.Globalization.CultureInfo.InvariantCulture,
+            "https://maps.google.com/?q={0},{1}",
+            DevPipelineFixture.SeedRefLat,
+            DevPipelineFixture.SeedRefLng);
+        providerLink.Body.ShouldContain(expectedMapsUrl);
+        providerLink.Body.ShouldNotContain("prefers");
     }
 
     [Fact]

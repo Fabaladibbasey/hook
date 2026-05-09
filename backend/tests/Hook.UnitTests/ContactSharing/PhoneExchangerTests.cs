@@ -131,8 +131,45 @@ public class PhoneExchangerTests
         Assert.Equal(ExchangeOutcome.RoutedToChat, outcome);
         Assert.Empty(deps.Whatsapp.Sent);
         Assert.Single(deps.Events.Published);
-        Assert.IsType<ChatRoutingRequested>(deps.Events.Published[0]);
+        var evt = Assert.IsType<ChatRoutingRequested>(deps.Events.Published[0]);
+        Assert.False(evt.ClientConsented);
+        Assert.True(evt.ProviderConsented);
+        Assert.Equal("Banjul", evt.RequesterAddress);
+        Assert.Equal(13.45, evt.RequesterLatitude);
+        Assert.Equal(-16.6, evt.RequesterLongitude);
         Assert.False(deps.Matches.LastClaim?.RevealContact);
+    }
+
+    [Fact]
+    public async Task TryExchange_BothHidConsent_RoutesToChatWithBothFlagsFalse()
+    {
+        var deps = new Deps();
+        var match = SeedMatch(deps, sharePhone: false, providerConsent: false);
+
+        var outcome = await deps.Build().TryExchangeAsync(match.Id);
+
+        Assert.Equal(ExchangeOutcome.RoutedToChat, outcome);
+        Assert.Empty(deps.Whatsapp.Sent);
+        var evt = Assert.IsType<ChatRoutingRequested>(deps.Events.Published[0]);
+        Assert.False(evt.ClientConsented);
+        Assert.False(evt.ProviderConsented);
+        Assert.Equal("Banjul", evt.RequesterAddress);
+        Assert.Equal(13.45, evt.RequesterLatitude);
+        Assert.Equal(-16.6, evt.RequesterLongitude);
+    }
+
+    [Fact]
+    public async Task TryExchange_OnlyProviderHidConsent_RoutesToChatWithProviderFalse()
+    {
+        var deps = new Deps();
+        var match = SeedMatch(deps, sharePhone: true, providerConsent: false);
+
+        var outcome = await deps.Build().TryExchangeAsync(match.Id);
+
+        Assert.Equal(ExchangeOutcome.RoutedToChat, outcome);
+        var evt = Assert.IsType<ChatRoutingRequested>(deps.Events.Published[0]);
+        Assert.True(evt.ClientConsented);
+        Assert.False(evt.ProviderConsented);
     }
 
     [Fact]

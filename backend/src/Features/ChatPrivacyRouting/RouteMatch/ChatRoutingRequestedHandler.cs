@@ -1,3 +1,4 @@
+using System.Globalization;
 using Hook.Features.ChatSession;
 using Hook.Features.ContactSharing.Events;
 using Hook.Features.Whatsapp;
@@ -30,16 +31,28 @@ public sealed class ChatRoutingRequestedHandler(
         match.ChatId = links.ChatId;
         await matches.SaveChangesAsync(ct);
 
+        var mapsUrl = string.Format(
+            CultureInfo.InvariantCulture,
+            "https://maps.google.com/?q={0},{1}",
+            evt.RequesterLatitude,
+            evt.RequesterLongitude);
+
+        var clientBody = evt.ClientConsented
+            ? $"The other party prefers a private chat. Open: {links.ClientUrl}"
+            : $"Your private chat is ready. Open: {links.ClientUrl}";
+
+        var providerBody = evt.ProviderConsented
+            ? $"{match.ServiceSlug} client at {evt.RequesterAddress} ({mapsUrl}) prefers a private chat. Open: {links.ProviderUrl}"
+            : $"{match.ServiceSlug} client at {evt.RequesterAddress} ({mapsUrl}) wants to chat. Open: {links.ProviderUrl}";
+
         var sends = new List<Task>(2);
         if (PhoneNumber.TryParse(evt.ClientPhone, out var client))
         {
-            sends.Add(whatsapp.SendTextAsync(client,
-                $"The other party prefers a private chat. Open: {links.ClientUrl}", ct));
+            sends.Add(whatsapp.SendTextAsync(client, clientBody, ct));
         }
         if (PhoneNumber.TryParse(evt.ProviderPhone, out var provider))
         {
-            sends.Add(whatsapp.SendTextAsync(provider,
-                $"A client wants to chat with you. Open: {links.ProviderUrl}", ct));
+            sends.Add(whatsapp.SendTextAsync(provider, providerBody, ct));
         }
         if (sends.Count > 0) await Task.WhenAll(sends);
 
