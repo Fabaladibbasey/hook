@@ -11,12 +11,12 @@ using Shouldly;
 
 namespace Hook.IntegrationTests.Chat;
 
-public sealed class ChatHubTests : IClassFixture<DevPipelineFixture>
+[Collection("Pipeline-3")]
+public sealed class ChatHubTests : PipelineTestBase
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
-    private readonly DevPipelineFixture _fx;
 
-    public ChatHubTests(DevPipelineFixture fx) => _fx = fx;
+    public ChatHubTests(DevPipelineFixture fx) : base(fx) { }
 
     private sealed record OpenResponse(Guid ChatId, Guid ParticipantId, string Role, Guid SessionId, string Status);
 
@@ -26,8 +26,8 @@ public sealed class ChatHubTests : IClassFixture<DevPipelineFixture>
     {
         await using var scope = _fx.Factory.Services.CreateAsyncScope();
         var factory = scope.ServiceProvider.GetRequiredService<ChatSessionFactory>();
-        var clientPhone = $"+1415{Random.Shared.Next(1000000, 9999999)}";
-        var providerPhone = $"+1415{Random.Shared.Next(1000000, 9999999)}";
+        var clientPhone = UniquePhone();
+        var providerPhone = UniquePhone();
         await factory.CreateAsync(clientPhone, providerPhone);
 
         var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
@@ -168,8 +168,13 @@ public sealed class ChatHubTests : IClassFixture<DevPipelineFixture>
         var second = first with { MessageId = Guid.NewGuid() };
         await conn.InvokeAsync("SendMessage", second);
 
-        // Allow reject to propagate.
-        await Task.Delay(200);
+        await WhatsappPipelineHelpers.WaitForConditionAsync(
+            () =>
+            {
+                lock (rejects) return Task.FromResult(rejects.Any(r => r.MessageId == second.MessageId));
+            },
+            timeout: TimeSpan.FromSeconds(2),
+            description: "Replay reject not received");
         lock (rejects)
         {
             var match = rejects.SingleOrDefault(r => r.MessageId == second.MessageId);
@@ -195,14 +200,19 @@ public sealed class ChatHubTests : IClassFixture<DevPipelineFixture>
         var dup = new SendMessageDto(msgId, Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 2);
         await conn.InvokeAsync("SendMessage", dup);
 
-        await Task.Delay(200);
+        await WhatsappPipelineHelpers.WaitForConditionAsync(
+            () =>
+            {
+                lock (rejects) return Task.FromResult(rejects.Any(r => r.MessageId == msgId && r.Reason == MessageRejectReason.Duplicate));
+            },
+            timeout: TimeSpan.FromSeconds(2),
+            description: "Duplicate reject not received");
         lock (rejects)
         {
             var match = rejects.SingleOrDefault(r => r.MessageId == msgId && r.Reason == MessageRejectReason.Duplicate);
             match.ShouldNotBeNull();
         }
 
-        // Sequence should not have advanced past the first successful insert.
         await using var scope = _fx.Factory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
         var participant = await db.ChatParticipants.AsNoTracking().FirstAsync(p => p.Id == chat.Client.ParticipantId);
@@ -229,6 +239,8 @@ public sealed class ChatHubTests : IClassFixture<DevPipelineFixture>
         var winner = await Task.WhenAny(revoked.Task, Task.Delay(Timeout));
         winner.ShouldBe(revoked.Task);
     }
+
+    private static string UniquePhone() => $"+1415{Guid.NewGuid().ToString("N")[..7]}";
 
     private static byte[] TestKey(byte fill)
     {

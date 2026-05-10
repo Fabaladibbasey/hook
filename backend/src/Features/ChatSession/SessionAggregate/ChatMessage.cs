@@ -8,5 +8,5 @@ public class ChatMessage
     public required byte[] Ciphertext { get; init; }
     public required byte[] Nonce { get; init; }
     public required long Sequence { get; init; }
-    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset CreatedAt { get; init; }
 }

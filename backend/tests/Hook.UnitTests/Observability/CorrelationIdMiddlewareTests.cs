@@ -7,6 +7,10 @@ using Shouldly;
 
 namespace Hook.UnitTests.Observability;
 
+[CollectionDefinition("Serilog-Static", DisableParallelization = true)]
+public sealed class SerilogStaticCollection { }
+
+[Collection("Serilog-Static")]
 public class CorrelationIdMiddlewareTests
 {
     [Fact]

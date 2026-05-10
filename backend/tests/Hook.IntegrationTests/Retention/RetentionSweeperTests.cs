@@ -19,15 +19,14 @@ namespace Hook.IntegrationTests.Retention;
 
 /// <summary>
 /// Exercises <see cref="RetentionSweeper"/> against the shared <see cref="DevPipelineFixture"/>
-/// container. The hosted service is disabled in the fixture (Retention__Enabled=false) so the
+/// container. The hosted service is disabled in the fixture (Retention:Enabled=false) so the
 /// sweeper only runs when these tests invoke it explicitly. Tests use unique phone numbers
 /// derived from <see cref="Guid.NewGuid"/> so concurrent test runs do not collide.
 /// </summary>
-public sealed class RetentionSweeperTests : IClassFixture<DevPipelineFixture>
+[Collection("Pipeline-4")]
+public sealed class RetentionSweeperTests : PipelineTestBase
 {
-    private readonly DevPipelineFixture _fx;
-
-    public RetentionSweeperTests(DevPipelineFixture fx) => _fx = fx;
+    public RetentionSweeperTests(DevPipelineFixture fx) : base(fx) { }
 
     private static string UniquePhone() => $"+220{Guid.NewGuid().ToString("N")[..8]}";
 

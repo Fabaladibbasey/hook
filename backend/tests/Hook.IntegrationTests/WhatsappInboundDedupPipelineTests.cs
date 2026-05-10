@@ -4,11 +4,10 @@ using Shouldly;
 
 namespace Hook.IntegrationTests;
 
-public class WhatsappInboundDedupPipelineTests : IClassFixture<DevPipelineFixture>
+[Collection("Pipeline-2")]
+public class WhatsappInboundDedupPipelineTests : PipelineTestBase
 {
-    private readonly DevPipelineFixture _fx;
-
-    public WhatsappInboundDedupPipelineTests(DevPipelineFixture fx) => _fx = fx;
+    public WhatsappInboundDedupPipelineTests(DevPipelineFixture fx) : base(fx) { }
 
     [Fact]
     public async Task SameMessageId_TwiceInbound_SecondReturns409()
@@ -17,8 +16,7 @@ public class WhatsappInboundDedupPipelineTests : IClassFixture<DevPipelineFixtur
         var phone = "+14155554001";
         var messageId = $"wamid.dev.test.dedup.{Guid.NewGuid():N}";
 
-        var first = await client.InjectTextAsync(phone, "I need a plumber", messageId);
-        first.StatusCode.ShouldBe(HttpStatusCode.OK);
+        await _fx.InjectTextAndAwaitAsync(phone, "I need a plumber", messageId);
 
         var second = await client.InjectTextAsync(phone, "I need a plumber", messageId);
         second.StatusCode.ShouldBe(HttpStatusCode.Conflict);
@@ -35,15 +33,11 @@ public class WhatsappInboundDedupPipelineTests : IClassFixture<DevPipelineFixtur
         var phone = "+14155554002";
         var messageId = $"wamid.dev.test.dedup.{Guid.NewGuid():N}";
 
-        (await client.InjectTextAsync(phone, "I need a plumber", messageId))
-            .EnsureSuccessStatusCode();
-
-        await client.WaitForOutboundAsync(phone, m => m.Body.Contains("YES or NO"));
+        await _fx.InjectTextAndAwaitAsync(phone, "I need a plumber", messageId);
+        await client.ExpectOutboundAsync(phone, m => m.Body.Contains("YES or NO"));
 
         var dup = await client.InjectTextAsync(phone, "I need a plumber", messageId);
         dup.StatusCode.ShouldBe(HttpStatusCode.Conflict);
-
-        await Task.Delay(800);
 
         var outbox = await client.GetOutboxAsync();
         var replies = outbox.Where(m => m.To == phone && m.Body.Contains("YES or NO")).ToList();

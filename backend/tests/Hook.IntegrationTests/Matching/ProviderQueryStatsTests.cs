@@ -7,11 +7,10 @@ using Location = Hook.Features.Geocoding.Models.Location;
 
 namespace Hook.IntegrationTests.Matching;
 
-public sealed class ProviderQueryStatsTests : IClassFixture<DevPipelineFixture>
+[Collection("Pipeline-4")]
+public sealed class ProviderQueryStatsTests : PipelineTestBase
 {
-    private readonly DevPipelineFixture _fx;
-
-    public ProviderQueryStatsTests(DevPipelineFixture fx) => _fx = fx;
+    public ProviderQueryStatsTests(DevPipelineFixture fx) : base(fx) { }
 
     [Fact]
     public async Task FindCandidates_PopulatesCompletedJobsAndSuccessRateFromProviderStats()

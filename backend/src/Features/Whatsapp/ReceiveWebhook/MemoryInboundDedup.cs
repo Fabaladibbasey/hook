@@ -13,5 +13,10 @@ public sealed class MemoryInboundDedup(IMemoryCache cache) : IInboundDedup
         return true;
     }
 
+    public void Reset()
+    {
+        if (cache is MemoryCache mc) mc.Compact(1.0);
+    }
+
     private static string Key(string id) => $"wa:msg:{id}";
 }

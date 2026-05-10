@@ -6,11 +6,10 @@ using Shouldly;
 
 namespace Hook.IntegrationTests.MetaTemplates;
 
-public sealed class WhatsappContactRepositoryTests : IClassFixture<DevPipelineFixture>
+[Collection("Pipeline-1")]
+public sealed class WhatsappContactRepositoryTests : PipelineTestBase
 {
-    private readonly DevPipelineFixture _fx;
-
-    public WhatsappContactRepositoryTests(DevPipelineFixture fx) => _fx = fx;
+    public WhatsappContactRepositoryTests(DevPipelineFixture fx) : base(fx) { }
 
     private static string UniquePhone() => $"+220{Guid.NewGuid().ToString("N")[..8]}";
 

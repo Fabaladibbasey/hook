@@ -10,11 +10,10 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Hook.IntegrationTests.Feedback;
 
-public sealed class FeedbackRepositoryTests : IClassFixture<DevPipelineFixture>
+[Collection("Pipeline-2")]
+public sealed class FeedbackRepositoryTests : PipelineTestBase
 {
-    private readonly DevPipelineFixture _fx;
-
-    public FeedbackRepositoryTests(DevPipelineFixture fx) => _fx = fx;
+    public FeedbackRepositoryTests(DevPipelineFixture fx) : base(fx) { }
 
     private static string UniquePhone() => $"+220{Guid.NewGuid().ToString("N")[..8]}";
 

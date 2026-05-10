@@ -27,6 +27,9 @@ using Microsoft.Extensions.Options;
 using Serilog;
 using Wolverine;
 
+// Bootstrap logger captured at process start; UseSerilog freezes it on first host build.
+// Test shards serialize the first host build (DevPipelineFixture.HostInitLock) to avoid
+// concurrent UseSerilog frozen-logger races.
 Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
     .CreateBootstrapLogger();
@@ -93,10 +96,28 @@ try
         // Wolverine's default 60s handler timeout preempts Ollama cold-start inference
         // (qwen2.5:3b on CPU can take 60-90s), aborting the socket mid-read. Align with
         // OllamaOptions.TimeoutSeconds plus a small buffer so HttpClient.Timeout governs.
-        var ollamaTimeout = builder.Configuration
-            .GetSection(OllamaOptions.SectionName)
-            .GetValue<int?>(nameof(OllamaOptions.TimeoutSeconds)) ?? 120;
-        opts.DefaultExecutionTimeout = TimeSpan.FromSeconds(ollamaTimeout + 30);
+        // Tests override via "Wolverine:DefaultExecutionTimeoutSeconds" since the test
+        // fixture swaps in an in-memory IConversationAi.
+        var overrideSeconds = builder.Configuration.GetValue<int?>("Wolverine:DefaultExecutionTimeoutSeconds");
+        if (overrideSeconds is int seconds && seconds > 0 && seconds <= 3600)
+        {
+            opts.DefaultExecutionTimeout = TimeSpan.FromSeconds(seconds);
+        }
+        else
+        {
+            var ollamaTimeout = builder.Configuration
+                .GetSection(OllamaOptions.SectionName)
+                .GetValue<int?>(nameof(OllamaOptions.TimeoutSeconds)) ?? 120;
+            opts.DefaultExecutionTimeout = TimeSpan.FromSeconds(ollamaTimeout + 30);
+        }
+
+        // Tests opt into runtime IL emission (TypeLoadMode.Dynamic) to avoid the
+        // per-handler static-codegen file write. Restricted to Development environments (including Staging) + Test.
+        if (!builder.Environment.IsProduction()
+            && builder.Configuration.GetValue<bool>("Wolverine:DynamicCodegen"))
+        {
+            opts.CodeGeneration.TypeLoadMode = JasperFx.CodeGeneration.TypeLoadMode.Dynamic;
+        }
     });
 
     var app = builder.Build();

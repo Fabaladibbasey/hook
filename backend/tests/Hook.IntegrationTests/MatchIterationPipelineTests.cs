@@ -2,11 +2,10 @@ using Shouldly;
 
 namespace Hook.IntegrationTests;
 
-public class MatchIterationPipelineTests : IClassFixture<DevPipelineFixture>
+[Collection("Pipeline-3")]
+public class MatchIterationPipelineTests : PipelineTestBase
 {
-    private readonly DevPipelineFixture _fx;
-
-    public MatchIterationPipelineTests(DevPipelineFixture fx) => _fx = fx;
+    public MatchIterationPipelineTests(DevPipelineFixture fx) : base(fx) { }
 
     [Fact]
     public async Task Next_AfterPresent_AutoExpandsAndPromptsIncrease()
@@ -14,16 +13,15 @@ public class MatchIterationPipelineTests : IClassFixture<DevPipelineFixture>
         using var client = _fx.Factory.CreateClient();
         var phone = "+14155552001";
 
-        var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(client, phone);
+        var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(_fx, phone);
 
-        (await client.InjectTextAsync(phone, "next")).EnsureSuccessStatusCode();
+        await _fx.InjectTextAndAwaitAsync(phone, "next");
 
-        var prompt = await client.WaitForOutboundAsync(
+        var prompt = await client.ExpectOutboundAsync(
             phone,
             m => m.Body.Contains("No more in", StringComparison.OrdinalIgnoreCase) &&
                  m.Body.Contains("INCREASE", StringComparison.OrdinalIgnoreCase),
-            since: presented.At,
-            timeout: TimeSpan.FromSeconds(15));
+            since: presented.At);
 
         prompt.Body.ShouldContain("10km");
         prompt.Body.ShouldContain("20km");
@@ -35,18 +33,17 @@ public class MatchIterationPipelineTests : IClassFixture<DevPipelineFixture>
         using var client = _fx.Factory.CreateClient();
         var phone = "+14155552002";
 
-        var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(client, phone);
+        var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(_fx, phone);
         var lastSeen = presented.At;
 
         for (var i = 0; i < 10; i++)
         {
-            (await client.InjectTextAsync(phone, "increase")).EnsureSuccessStatusCode();
-            var step = await client.WaitForOutboundAsync(
+            await _fx.InjectTextAndAwaitAsync(phone, "increase");
+            var step = await client.ExpectOutboundAsync(
                 phone,
                 m => m.Body.Contains("No more in", StringComparison.OrdinalIgnoreCase) ||
                      m.Body.Contains("No providers found in 100km", StringComparison.OrdinalIgnoreCase),
-                since: lastSeen,
-                timeout: TimeSpan.FromSeconds(15));
+                since: lastSeen);
             lastSeen = step.At;
 
             if (step.Body.Contains("No providers found in 100km", StringComparison.OrdinalIgnoreCase))
@@ -65,11 +62,9 @@ public class MatchIterationPipelineTests : IClassFixture<DevPipelineFixture>
         using var client = _fx.Factory.CreateClient();
         var phone = "+14155552003";
 
-        var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(client, phone);
+        var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(_fx, phone);
 
-        (await client.InjectTextAsync(phone, "PICK 99")).EnsureSuccessStatusCode();
-
-        await Task.Delay(800);
+        await _fx.InjectTextAndAwaitAsync(phone, "PICK 99");
 
         var outbox = await client.GetOutboxAsync();
         var afterPick = outbox.Where(m => m.At > presented.At && m.To == phone).ToList();

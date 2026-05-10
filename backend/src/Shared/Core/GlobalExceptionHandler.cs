@@ -28,7 +28,7 @@ public sealed class GlobalExceptionHandler(
     private static ProblemDetails BuildVerbose(HttpContext context, Exception exception) => new()
     {
         Title = exception.Message,
-        Detail = exception.ToString(),
+        Detail = $"{exception.GetType().FullName}: {exception.Message}",
         Status = StatusCodes.Status500InternalServerError,
         Instance = context.Request.GetDisplayUrl(),
         Extensions =
@@ -37,7 +37,7 @@ public sealed class GlobalExceptionHandler(
             ["activityId"] = context.Features.Get<IHttpActivityFeature>()?.Activity.Id,
             ["method"] = context.Request.Method,
             ["path"] = context.Request.Path.ToString(),
-            ["queryString"] = context.Request.QueryString.ToString(),
+            ["queryString"] = RequestLogScrub.Scrub(context.Request.QueryString.ToString()),
         },
     };
 

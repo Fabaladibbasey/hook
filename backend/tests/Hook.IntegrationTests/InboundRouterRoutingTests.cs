@@ -2,11 +2,10 @@ using Shouldly;
 
 namespace Hook.IntegrationTests;
 
-public class InboundRouterRoutingTests : IClassFixture<DevPipelineFixture>
+[Collection("Pipeline-2")]
+public class InboundRouterRoutingTests : PipelineTestBase
 {
-    private readonly DevPipelineFixture _fx;
-
-    public InboundRouterRoutingTests(DevPipelineFixture fx) => _fx = fx;
+    public InboundRouterRoutingTests(DevPipelineFixture fx) : base(fx) { }
 
     [Fact]
     public async Task Provider_CanAlsoCreateClientRequest_NotBlockedByAvailability()
@@ -14,29 +13,21 @@ public class InboundRouterRoutingTests : IClassFixture<DevPipelineFixture>
         using var client = _fx.Factory.CreateClient();
         const string phone = "+14155552001";
 
-        (await client.InjectTextAsync(phone, "I offer carpentry"))
-            .EnsureSuccessStatusCode();
-        await client.WaitForOutboundAsync(phone, m => m.Body.Contains("YES", StringComparison.OrdinalIgnoreCase));
+        await _fx.InjectTextAndAwaitAsync(phone, "I offer carpentry");
+        await _fx.InjectTextAndAwaitAsync(phone, "yes");
+        await _fx.InjectLocationAndAwaitAsync(phone, DevPipelineFixture.SeedRefLat, DevPipelineFixture.SeedRefLng);
+        await _fx.InjectTextAndAwaitAsync(phone, "yes");
 
-        (await client.InjectTextAsync(phone, "yes")).EnsureSuccessStatusCode();
-        await client.WaitForOutboundAsync(phone, m => m.Body.Contains("location", StringComparison.OrdinalIgnoreCase));
+        var registered = await client.ExpectOutboundAsync(
+            phone, m => m.Body.Contains("listed for", StringComparison.OrdinalIgnoreCase));
 
-        (await client.InjectLocationAsync(phone, DevPipelineFixture.SeedRefLat, DevPipelineFixture.SeedRefLng))
-            .EnsureSuccessStatusCode();
-        await client.WaitForOutboundAsync(phone, m => m.Body.Contains("Share your phone", StringComparison.OrdinalIgnoreCase));
+        await _fx.InjectTextAndAwaitAsync(phone, "I need a plumber");
 
-        (await client.InjectTextAsync(phone, "yes")).EnsureSuccessStatusCode();
-        var registered = await client.WaitForOutboundAsync(phone, m => m.Body.Contains("listed for", StringComparison.OrdinalIgnoreCase));
-
-        (await client.InjectTextAsync(phone, "I need a plumber"))
-            .EnsureSuccessStatusCode();
-
-        var clientReply = await client.WaitForOutboundAsync(
+        var clientReply = await client.ExpectOutboundAsync(
             phone,
             m => m.Body.Contains("plumbing", StringComparison.OrdinalIgnoreCase) &&
                  m.Body.Contains("YES or NO", StringComparison.OrdinalIgnoreCase),
-            since: registered.At,
-            timeout: TimeSpan.FromSeconds(10));
+            since: registered.At);
 
         clientReply.Body.ShouldContain("plumbing");
     }
@@ -47,8 +38,8 @@ public class InboundRouterRoutingTests : IClassFixture<DevPipelineFixture>
         using var client = _fx.Factory.CreateClient();
         const string phone = "+14155552003";
 
-        (await client.InjectTextAsync(phone, "request")).EnsureSuccessStatusCode();
-        var reply = await client.WaitForOutboundAsync(
+        await _fx.InjectTextAndAwaitAsync(phone, "request");
+        var reply = await client.ExpectOutboundAsync(
             phone, m => m.Body.Contains("service", StringComparison.OrdinalIgnoreCase));
 
         reply.Body.ShouldContain("service");
@@ -60,8 +51,8 @@ public class InboundRouterRoutingTests : IClassFixture<DevPipelineFixture>
         using var client = _fx.Factory.CreateClient();
         const string phone = "+14155552004";
 
-        (await client.InjectTextAsync(phone, "register")).EnsureSuccessStatusCode();
-        var reply = await client.WaitForOutboundAsync(
+        await _fx.InjectTextAndAwaitAsync(phone, "register");
+        var reply = await client.ExpectOutboundAsync(
             phone, m => m.Body.Contains("offer", StringComparison.OrdinalIgnoreCase));
 
         reply.Body.ShouldContain("offer");
@@ -73,32 +64,23 @@ public class InboundRouterRoutingTests : IClassFixture<DevPipelineFixture>
         using var client = _fx.Factory.CreateClient();
         const string phone = "+14155552002";
 
-        (await client.InjectTextAsync(phone, "I need a plumber")).EnsureSuccessStatusCode();
-        await client.WaitForOutboundAsync(phone, m => m.Body.Contains("YES or NO"));
-        (await client.InjectTextAsync(phone, "yes")).EnsureSuccessStatusCode();
-        await client.WaitForOutboundAsync(phone, m => m.Body.Contains("location pin"));
-        (await client.InjectLocationAsync(phone, DevPipelineFixture.SeedRefLat, DevPipelineFixture.SeedRefLng))
-            .EnsureSuccessStatusCode();
-        await client.WaitForOutboundAsync(phone, m => m.Body.Contains("description", StringComparison.OrdinalIgnoreCase));
-        (await client.InjectTextAsync(phone, "kitchen sink leak")).EnsureSuccessStatusCode();
-        await client.WaitForOutboundAsync(phone,
-            m => m.Body.Contains("share your phone number", StringComparison.OrdinalIgnoreCase));
+        await _fx.InjectTextAndAwaitAsync(phone, "I need a plumber");
+        await _fx.InjectTextAndAwaitAsync(phone, "yes");
+        await _fx.InjectLocationAndAwaitAsync(phone, DevPipelineFixture.SeedRefLat, DevPipelineFixture.SeedRefLng);
+        await _fx.InjectTextAndAwaitAsync(phone, "kitchen sink leak");
+        await _fx.InjectTextAndAwaitAsync(phone, "yes");
 
-        (await client.InjectTextAsync(phone, "yes")).EnsureSuccessStatusCode();
-
-        var presented = await client.WaitForOutboundAsync(
+        var presented = await client.ExpectOutboundAsync(
             phone,
             m => m.Body.Contains("present-top-matches", StringComparison.OrdinalIgnoreCase) ||
-                 m.Body.Contains("Top matches", StringComparison.OrdinalIgnoreCase),
-            timeout: TimeSpan.FromSeconds(15));
+                 m.Body.Contains("Top matches", StringComparison.OrdinalIgnoreCase));
 
-        (await client.InjectTextAsync(phone, "#1")).EnsureSuccessStatusCode();
+        await _fx.InjectTextAndAwaitAsync(phone, "#1", timeout: TimeSpan.FromSeconds(15));
 
-        var share = await client.WaitForOutboundAsync(
+        var share = await client.ExpectOutboundAsync(
             phone,
             m => m.Body.StartsWith("Provider for ", StringComparison.OrdinalIgnoreCase),
-            since: presented.At,
-            timeout: TimeSpan.FromSeconds(20));
+            since: presented.At);
 
         share.Body.ShouldContain("plumbing");
     }

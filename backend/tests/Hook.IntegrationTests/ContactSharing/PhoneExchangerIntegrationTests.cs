@@ -9,11 +9,10 @@ using Shouldly;
 
 namespace Hook.IntegrationTests.ContactSharing;
 
-public sealed class PhoneExchangerIntegrationTests : IClassFixture<DevPipelineFixture>
+[Collection("Pipeline-4")]
+public sealed class PhoneExchangerIntegrationTests : PipelineTestBase
 {
-    private readonly DevPipelineFixture _fx;
-
-    public PhoneExchangerIntegrationTests(DevPipelineFixture fx) => _fx = fx;
+    public PhoneExchangerIntegrationTests(DevPipelineFixture fx) : base(fx) { }
 
     [Fact]
     public async Task TryClaimPickAsync_WrongCallerClientPhone_ReturnsFalse()

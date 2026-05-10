@@ -8,11 +8,10 @@ using MatchEntity = Hook.Features.Matching.MatchAggregate.Match;
 
 namespace Hook.IntegrationTests.Matching;
 
-public sealed class MatchRepositoryOrderingTests : IClassFixture<DevPipelineFixture>
+[Collection("Pipeline-4")]
+public sealed class MatchRepositoryOrderingTests : PipelineTestBase
 {
-    private readonly DevPipelineFixture _fx;
-
-    public MatchRepositoryOrderingTests(DevPipelineFixture fx) => _fx = fx;
+    public MatchRepositoryOrderingTests(DevPipelineFixture fx) : base(fx) { }
 
     [Fact]
     public async Task GetForRequestAsync_TiedScoreAndDistance_BreaksByCreatedAtThenId()

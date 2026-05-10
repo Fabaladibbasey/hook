@@ -8,11 +8,10 @@ using Shouldly;
 
 namespace Hook.IntegrationTests.Matching;
 
-public sealed class UniqueIndexTests : IClassFixture<DevPipelineFixture>
+[Collection("Pipeline-4")]
+public sealed class UniqueIndexTests : PipelineTestBase
 {
-    private readonly DevPipelineFixture _fx;
-
-    public UniqueIndexTests(DevPipelineFixture fx) => _fx = fx;
+    public UniqueIndexTests(DevPipelineFixture fx) : base(fx) { }
 
     [Fact]
     public async Task Insert_DuplicateRequestProvider_RejectedByUniqueIndex()

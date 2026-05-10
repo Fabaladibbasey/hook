@@ -4,11 +4,10 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Hook.IntegrationTests.Migrations;
 
-public sealed class MigrationRoundTripTests : IClassFixture<DevPipelineFixture>
+[Collection("Pipeline-Migration")]
+public sealed class MigrationRoundTripTests : PipelineTestBase
 {
-    private readonly DevPipelineFixture _fx;
-
-    public MigrationRoundTripTests(DevPipelineFixture fx) => _fx = fx;
+    public MigrationRoundTripTests(DevPipelineFixture fx) : base(fx) { }
 
     [Fact]
     public async Task AllMigrations_AppliedAfterFixtureInit_NoPendingMigrations()

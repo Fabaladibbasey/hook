@@ -15,12 +15,15 @@ public interface IDevOutbox
     void Publish(DevOutboxMessage message);
     IReadOnlyList<DevOutboxMessage> Recent();
     IAsyncEnumerable<DevOutboxMessage> Subscribe(CancellationToken ct);
+    void Reset();
 }
 
 public sealed class DevOutbox(IOptions<DevWhatsappOptions> options) : IDevOutbox
 {
     private readonly int _ringSize = Math.Max(1, options.Value.OutboxRingSize);
-    private readonly LinkedList<DevOutboxMessage> _recent = new();
+    private readonly DevOutboxMessage?[] _ring = new DevOutboxMessage?[Math.Max(1, options.Value.OutboxRingSize)];
+    private int _head; // next-write slot
+    private int _count; // valid entries (≤ ringSize)
     private readonly Lock _recentLock = new();
     private readonly ConcurrentDictionary<Guid, Channel<DevOutboxMessage>> _subs = new();
 
@@ -28,9 +31,9 @@ public sealed class DevOutbox(IOptions<DevWhatsappOptions> options) : IDevOutbox
     {
         lock (_recentLock)
         {
-            _recent.AddLast(message);
-            while (_recent.Count > _ringSize)
-                _recent.RemoveFirst();
+            _ring[_head] = message;
+            _head = (_head + 1) % _ringSize;
+            if (_count < _ringSize) _count++;
         }
 
         foreach (var ch in _subs.Values)
@@ -40,7 +43,25 @@ public sealed class DevOutbox(IOptions<DevWhatsappOptions> options) : IDevOutbox
     public IReadOnlyList<DevOutboxMessage> Recent()
     {
         lock (_recentLock)
-            return [.. _recent];
+        {
+            if (_count == 0) return Array.Empty<DevOutboxMessage>();
+            var snap = new DevOutboxMessage[_count];
+            // Oldest is at (_head - _count) mod _ringSize.
+            var start = (_head - _count + _ringSize) % _ringSize;
+            for (var i = 0; i < _count; i++)
+                snap[i] = _ring[(start + i) % _ringSize]!;
+            return snap;
+        }
+    }
+
+    public void Reset()
+    {
+        lock (_recentLock)
+        {
+            Array.Clear(_ring);
+            _head = 0;
+            _count = 0;
+        }
     }
 
     public async IAsyncEnumerable<DevOutboxMessage> Subscribe(

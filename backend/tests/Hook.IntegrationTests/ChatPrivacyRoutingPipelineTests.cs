@@ -7,7 +7,8 @@ using Shouldly;
 
 namespace Hook.IntegrationTests;
 
-public class ChatPrivacyRoutingPipelineTests : IClassFixture<DevPipelineFixture>
+[Collection("Pipeline-4")]
+public class ChatPrivacyRoutingPipelineTests : PipelineTestBase
 {
     private const string ShareDisabledProviderPhone = "+2203000002";
 
@@ -15,9 +16,7 @@ public class ChatPrivacyRoutingPipelineTests : IClassFixture<DevPipelineFixture>
         @"/c/(?<chatId>[0-9a-f]{32})/(?<token>[A-Za-z0-9_-]{43})\b",
         RegexOptions.Compiled);
 
-    private readonly DevPipelineFixture _fx;
-
-    public ChatPrivacyRoutingPipelineTests(DevPipelineFixture fx) => _fx = fx;
+    public ChatPrivacyRoutingPipelineTests(DevPipelineFixture fx) : base(fx) { }
 
     [Fact]
     public async Task Pick_ProviderWithoutConsent_EmitsChatLinksToBothSides()
@@ -26,20 +25,18 @@ public class ChatPrivacyRoutingPipelineTests : IClassFixture<DevPipelineFixture>
         var phone = "+14155553001";
 
         // Default sharePhoneConsent: false — both parties hid consent in this scenario.
-        var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(client, phone);
+        var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(_fx, phone);
 
-        (await client.InjectTextAsync(phone, "PICK 2")).EnsureSuccessStatusCode();
+        await _fx.InjectTextAndAwaitAsync(phone, "PICK 2");
 
-        var clientLink = await client.WaitForOutboundAsync(
+        var clientLink = await client.ExpectOutboundAsync(
             phone,
             m => m.Body.Contains("private chat", StringComparison.OrdinalIgnoreCase),
-            since: presented.At,
-            timeout: TimeSpan.FromSeconds(20));
-        var providerLink = await client.WaitForOutboundAsync(
+            since: presented.At);
+        var providerLink = await client.ExpectOutboundAsync(
             ShareDisabledProviderPhone,
             m => m.Body.Contains("wants to chat", StringComparison.OrdinalIgnoreCase),
-            since: presented.At,
-            timeout: TimeSpan.FromSeconds(20));
+            since: presented.At);
 
         var clientMatch = ChatUrlRegex.Match(clientLink.Body);
         var providerMatch = ChatUrlRegex.Match(providerLink.Body);
@@ -64,19 +61,17 @@ public class ChatPrivacyRoutingPipelineTests : IClassFixture<DevPipelineFixture>
         using var client = _fx.Factory.CreateClient();
         var phone = "+14155553002";
 
-        var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(client, phone);
-        (await client.InjectTextAsync(phone, "PICK 2")).EnsureSuccessStatusCode();
+        var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(_fx, phone);
+        await _fx.InjectTextAndAwaitAsync(phone, "PICK 2");
 
-        var clientLink = await client.WaitForOutboundAsync(
+        var clientLink = await client.ExpectOutboundAsync(
             phone,
             m => ChatUrlRegex.IsMatch(m.Body),
-            since: presented.At,
-            timeout: TimeSpan.FromSeconds(20));
-        var providerLink = await client.WaitForOutboundAsync(
+            since: presented.At);
+        var providerLink = await client.ExpectOutboundAsync(
             ShareDisabledProviderPhone,
             m => ChatUrlRegex.IsMatch(m.Body),
-            since: presented.At,
-            timeout: TimeSpan.FromSeconds(20));
+            since: presented.At);
 
         var clientMatch = ChatUrlRegex.Match(clientLink.Body);
         var providerMatch = ChatUrlRegex.Match(providerLink.Body);
@@ -93,14 +88,13 @@ public class ChatPrivacyRoutingPipelineTests : IClassFixture<DevPipelineFixture>
         using var client = _fx.Factory.CreateClient();
         var phone = "+14155553003";
 
-        var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(client, phone);
-        (await client.InjectTextAsync(phone, "PICK 2")).EnsureSuccessStatusCode();
+        var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(_fx, phone);
+        await _fx.InjectTextAndAwaitAsync(phone, "PICK 2");
 
-        var clientLink = await client.WaitForOutboundAsync(
+        var clientLink = await client.ExpectOutboundAsync(
             phone,
             m => ChatUrlRegex.IsMatch(m.Body),
-            since: presented.At,
-            timeout: TimeSpan.FromSeconds(20));
+            since: presented.At);
 
         var chatIdHex = ChatUrlRegex.Match(clientLink.Body).Groups["chatId"].Value;
         var chatId = Guid.ParseExact(chatIdHex, "N");

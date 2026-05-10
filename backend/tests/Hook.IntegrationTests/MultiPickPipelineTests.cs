@@ -5,7 +5,8 @@ using Shouldly;
 
 namespace Hook.IntegrationTests;
 
-public class MultiPickPipelineTests : IClassFixture<DevPipelineFixture>
+[Collection("Pipeline-2")]
+public class MultiPickPipelineTests : PipelineTestBase
 {
     // Seed providers (see DevProviderSeedSet.All):
     //   #1 +2203000001 — ShareContact = true
@@ -15,9 +16,7 @@ public class MultiPickPipelineTests : IClassFixture<DevPipelineFixture>
     private const string ShareFalseProvider2 = "+2203000002";
     private const string ShareTrueProvider3 = "+2203000003";
 
-    private readonly DevPipelineFixture _fx;
-
-    public MultiPickPipelineTests(DevPipelineFixture fx) => _fx = fx;
+    public MultiPickPipelineTests(DevPipelineFixture fx) : base(fx) { }
 
     [Fact]
     public async Task PickAll_WithConsent_PhonesRevealedForOptInProvidersChatRoutedForOthers()
@@ -26,30 +25,27 @@ public class MultiPickPipelineTests : IClassFixture<DevPipelineFixture>
         var phone = "+14155556001";
 
         var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(
-            client, phone, sharePhoneConsent: true);
+            _fx, phone, sharePhoneConsent: true);
 
-        (await client.InjectTextAsync(phone, "PICK ALL")).EnsureSuccessStatusCode();
+        await _fx.InjectTextAndAwaitAsync(phone, "PICK ALL", timeout: TimeSpan.FromSeconds(20));
 
         // Provider 1 + Provider 3 both consented — they receive direct phone notice.
-        var notice1 = await client.WaitForOutboundAsync(
+        var notice1 = await client.ExpectOutboundAsync(
             ShareTrueProvider1,
             m => m.Body.StartsWith("Client wants ", StringComparison.OrdinalIgnoreCase) &&
                  m.Body.Contains(phone, StringComparison.Ordinal),
-            since: presented.At,
-            timeout: TimeSpan.FromSeconds(20));
-        var notice3 = await client.WaitForOutboundAsync(
+            since: presented.At);
+        var notice3 = await client.ExpectOutboundAsync(
             ShareTrueProvider3,
             m => m.Body.StartsWith("Client wants ", StringComparison.OrdinalIgnoreCase) &&
                  m.Body.Contains(phone, StringComparison.Ordinal),
-            since: presented.At,
-            timeout: TimeSpan.FromSeconds(20));
+            since: presented.At);
 
         // Provider 2 declined to share — they receive the chat link instead.
-        var providerChatLink = await client.WaitForOutboundAsync(
+        var providerChatLink = await client.ExpectOutboundAsync(
             ShareFalseProvider2,
             m => m.Body.Contains("wants to chat", StringComparison.OrdinalIgnoreCase),
-            since: presented.At,
-            timeout: TimeSpan.FromSeconds(20));
+            since: presented.At);
 
         notice1.Body.ShouldContain("plumbing");
         notice3.Body.ShouldContain("plumbing");
@@ -65,26 +61,25 @@ public class MultiPickPipelineTests : IClassFixture<DevPipelineFixture>
         var phone = "+14155556002";
 
         var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(
-            client, phone, sharePhoneConsent: false);
+            _fx, phone, sharePhoneConsent: false);
 
-        (await client.InjectTextAsync(phone, "PICK ALL")).EnsureSuccessStatusCode();
+        await _fx.InjectTextAndAwaitAsync(phone, "PICK ALL", timeout: TimeSpan.FromSeconds(20));
 
-        // Each picked provider should receive a chat link (the no-consent path).
-        var p1Link = await client.WaitForOutboundAsync(
+        // Provider body varies by their own consent: consent=true -> "prefers a private
+        // chat"; consent=false -> "wants to chat". Assert per-provider so a regression
+        // can't slip past with a generic chat-link body match.
+        var p1Link = await client.ExpectOutboundAsync(
             ShareTrueProvider1,
-            m => m.Body.Contains("wants to chat", StringComparison.OrdinalIgnoreCase),
-            since: presented.At,
-            timeout: TimeSpan.FromSeconds(20));
-        var p2Link = await client.WaitForOutboundAsync(
+            m => m.Body.Contains("prefers a private chat", StringComparison.OrdinalIgnoreCase),
+            since: presented.At);
+        var p2Link = await client.ExpectOutboundAsync(
             ShareFalseProvider2,
             m => m.Body.Contains("wants to chat", StringComparison.OrdinalIgnoreCase),
-            since: presented.At,
-            timeout: TimeSpan.FromSeconds(20));
-        var p3Link = await client.WaitForOutboundAsync(
+            since: presented.At);
+        var p3Link = await client.ExpectOutboundAsync(
             ShareTrueProvider3,
-            m => m.Body.Contains("wants to chat", StringComparison.OrdinalIgnoreCase),
-            since: presented.At,
-            timeout: TimeSpan.FromSeconds(20));
+            m => m.Body.Contains("prefers a private chat", StringComparison.OrdinalIgnoreCase),
+            since: presented.At);
 
         p1Link.Body.ShouldNotBeNullOrEmpty();
         p2Link.Body.ShouldNotBeNullOrEmpty();
@@ -114,19 +109,15 @@ public class MultiPickPipelineTests : IClassFixture<DevPipelineFixture>
         var phone = "+14155556003";
 
         var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(
-            client, phone, sharePhoneConsent: true);
+            _fx, phone, sharePhoneConsent: true);
 
-        (await client.InjectTextAsync(phone, "PICK 1")).EnsureSuccessStatusCode();
+        await _fx.InjectTextAndAwaitAsync(phone, "PICK 1", timeout: TimeSpan.FromSeconds(20));
 
-        // Let the bus settle.
-        await client.WaitForOutboundAsync(
+        await client.ExpectOutboundAsync(
             ShareTrueProvider1,
             m => m.Body.StartsWith("Client wants ", StringComparison.OrdinalIgnoreCase) &&
                  m.Body.Contains(phone, StringComparison.Ordinal),
-            since: presented.At,
-            timeout: TimeSpan.FromSeconds(20));
-
-        await Task.Delay(TimeSpan.FromSeconds(1));
+            since: presented.At);
 
         var outbox = await client.GetOutboxAsync();
         var unpickedSpam = outbox
@@ -148,19 +139,9 @@ public class MultiPickPipelineTests : IClassFixture<DevPipelineFixture>
             .OrderByDescending(r => r.CreatedAt)
             .FirstAsync();
 
-        // Wait briefly for PickedAt writes to land.
-        for (var i = 0; i < 20; i++)
-        {
-            var unpicked = await db.Matches
-                .CountAsync(m => m.RequestId == request.Id && m.PickedAt == null);
-            if (unpicked == 0) return;
-            await Task.Delay(200);
-            db.ChangeTracker.Clear();
-        }
-
-        var stillUnpicked = await db.Matches
+        var unpicked = await db.Matches
             .CountAsync(m => m.RequestId == request.Id && m.PickedAt == null);
-        stillUnpicked.ShouldBe(0, "every match should have been marked PickedAt after PICK ALL");
+        unpicked.ShouldBe(0, "every match should have been marked PickedAt after PICK ALL");
     }
 
     private async Task AssertOnlyMatchPickedAsync(string clientPhone, string pickedProviderPhone)

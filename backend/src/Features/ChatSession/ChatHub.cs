@@ -119,14 +119,6 @@ public sealed class ChatHub(IChatRepository chats, ChatScheduler scheduler, ILog
             return;
         }
 
-        if (!participant.TryAdvanceSequence(dto.Sequence))
-        {
-            logger.LogWarning("Replayed/out-of-order seq rejected chat={ChatId} participant={ParticipantId} seq={Seq}",
-                chatId, participantId, dto.Sequence);
-            await RejectAsync(dto.MessageId, MessageRejectReason.Replay);
-            return;
-        }
-
         var msg = new ChatMessage
         {
             Id = dto.MessageId,
@@ -141,6 +133,14 @@ public sealed class ChatHub(IChatRepository chats, ChatScheduler scheduler, ILog
         if (!inserted)
         {
             await RejectAsync(dto.MessageId, MessageRejectReason.Duplicate);
+            return;
+        }
+
+        if (!participant.TryAdvanceSequence(dto.Sequence))
+        {
+            logger.LogWarning("Replayed/out-of-order seq rejected chat={ChatId} participant={ParticipantId} seq={Seq}",
+                chatId, participantId, dto.Sequence);
+            await RejectAsync(dto.MessageId, MessageRejectReason.Replay);
             return;
         }
 

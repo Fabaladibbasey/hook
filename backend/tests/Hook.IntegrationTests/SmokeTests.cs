@@ -23,29 +23,24 @@ public sealed class HookAppFixture : IAsyncLifetime
 
     public WebApplicationFactory<global::Hook.Program> Factory { get; private set; } = default!;
 
-    private static readonly string[] EnvKeys =
-    [
-        "ConnectionStrings__HookDb",
-        "Whatsapp__VerifyToken",
-        "Whatsapp__AppSecret",
-        "Whatsapp__PhoneNumberId",
-        "Whatsapp__AccessToken",
-        "GoogleGeocoding__ApiKey"
-    ];
-
     public async Task InitializeAsync()
     {
         await Db.StartAsync();
 
-        Environment.SetEnvironmentVariable("ConnectionStrings__HookDb", Db.GetConnectionString());
-        Environment.SetEnvironmentVariable("Whatsapp__VerifyToken", VerifyToken);
-        Environment.SetEnvironmentVariable("Whatsapp__AppSecret", AppSecret);
-        Environment.SetEnvironmentVariable("Whatsapp__PhoneNumberId", "PN-1");
-        Environment.SetEnvironmentVariable("Whatsapp__AccessToken", "token");
-        Environment.SetEnvironmentVariable("GoogleGeocoding__ApiKey", "k");
-
+        // Per-Factory UseSetting so this fixture can run in parallel with
+        // DevPipelineFixture shards without racing on process-wide env vars.
+        var connectionString = Db.GetConnectionString();
         Factory = new WebApplicationFactory<global::Hook.Program>()
-            .WithWebHostBuilder(b => b.UseEnvironment("Test"));
+            .WithWebHostBuilder(b =>
+            {
+                b.UseEnvironment("Test");
+                b.UseSetting("ConnectionStrings:HookDb", connectionString);
+                b.UseSetting("Whatsapp:VerifyToken", VerifyToken);
+                b.UseSetting("Whatsapp:AppSecret", AppSecret);
+                b.UseSetting("Whatsapp:PhoneNumberId", "PN-1");
+                b.UseSetting("Whatsapp:AccessToken", "token");
+                b.UseSetting("GoogleGeocoding:ApiKey", "k");
+            });
 
         // Force host build & create schema from current model.
         using var scope = Factory.Services.CreateScope();
@@ -57,8 +52,6 @@ public sealed class HookAppFixture : IAsyncLifetime
     {
         await Factory.DisposeAsync();
         await Db.DisposeAsync();
-        foreach (var key in EnvKeys)
-            Environment.SetEnvironmentVariable(key, null);
     }
 }
 

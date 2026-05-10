@@ -9,7 +9,11 @@ public static class ChatServiceCollectionExtensions
         services.AddScoped<IChatRepository, ChatRepository>();
         services.AddScoped<ChatSessionFactory>();
 
-        services.AddSignalR();
+        services.AddSignalR(options =>
+        {
+            options.EnableDetailedErrors = false;
+            options.MaximumReceiveMessageSize = 32 * 1024;
+        });
 
         return services;
     }

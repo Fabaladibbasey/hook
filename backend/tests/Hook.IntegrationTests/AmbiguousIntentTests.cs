@@ -11,11 +11,10 @@ namespace Hook.IntegrationTests;
 // router asks the user to disambiguate (REQUEST = client, REGISTER = provider)
 // instead of silently committing them to the wrong orchestrator. Numeric 1/2
 // and the legacy HIRE/OFFER tokens stay accepted for back-compat.
-public class AmbiguousIntentTests : IClassFixture<DevPipelineFixture>
+[Collection("Pipeline-4")]
+public class AmbiguousIntentTests : PipelineTestBase
 {
-    private readonly DevPipelineFixture _fx;
-
-    public AmbiguousIntentTests(DevPipelineFixture fx) => _fx = fx;
+    public AmbiguousIntentTests(DevPipelineFixture fx) : base(fx) { }
 
     private FakeConversationAi GetFakeAi()
     {
@@ -36,12 +35,11 @@ public class AmbiguousIntentTests : IClassFixture<DevPipelineFixture>
         try
         {
             using var client = _fx.Factory.CreateClient();
-            (await client.InjectTextAsync(phone, text)).EnsureSuccessStatusCode();
+            await _fx.InjectTextAndAwaitAsync(phone, text);
 
-            var disambig = await client.WaitForOutboundAsync(
+            var disambig = await client.ExpectOutboundAsync(
                 phone,
-                m => m.Body.Contains("REQUEST or REGISTER", StringComparison.OrdinalIgnoreCase),
-                timeout: TimeSpan.FromSeconds(8));
+                m => m.Body.Contains("REQUEST or REGISTER", StringComparison.OrdinalIgnoreCase));
 
             disambig.Body.ShouldContain("REQUEST", Case.Sensitive);
             disambig.Body.ShouldContain("REGISTER", Case.Sensitive);
@@ -64,22 +62,20 @@ public class AmbiguousIntentTests : IClassFixture<DevPipelineFixture>
         try
         {
             using var client = _fx.Factory.CreateClient();
-            (await client.InjectTextAsync(phone, text)).EnsureSuccessStatusCode();
-            var disambig = await client.WaitForOutboundAsync(
+            await _fx.InjectTextAndAwaitAsync(phone, text);
+            var disambig = await client.ExpectOutboundAsync(
                 phone,
-                m => m.Body.Contains("REQUEST or REGISTER", StringComparison.OrdinalIgnoreCase),
-                timeout: TimeSpan.FromSeconds(8));
+                m => m.Body.Contains("REQUEST or REGISTER", StringComparison.OrdinalIgnoreCase));
 
-            (await client.InjectTextAsync(phone, "REQUEST")).EnsureSuccessStatusCode();
+            await _fx.InjectTextAndAwaitAsync(phone, "REQUEST");
 
             // After REQUEST, the router replays the original text into the ClientRequest
             // orchestrator. The fake AI doesn't extract any service from the dummy
             // text so we expect the "What service do you need?" reply.
-            var clientReply = await client.WaitForOutboundAsync(
+            var clientReply = await client.ExpectOutboundAsync(
                 phone,
                 m => m.Body.Contains("What service do you need", StringComparison.OrdinalIgnoreCase),
-                since: disambig.At,
-                timeout: TimeSpan.FromSeconds(8));
+                since: disambig.At);
 
             clientReply.Body.ShouldNotContain("I detected", Case.Insensitive);
         }
@@ -100,22 +96,20 @@ public class AmbiguousIntentTests : IClassFixture<DevPipelineFixture>
         try
         {
             using var client = _fx.Factory.CreateClient();
-            (await client.InjectTextAsync(phone, text)).EnsureSuccessStatusCode();
-            var disambig = await client.WaitForOutboundAsync(
+            await _fx.InjectTextAndAwaitAsync(phone, text);
+            var disambig = await client.ExpectOutboundAsync(
                 phone,
-                m => m.Body.Contains("REQUEST or REGISTER", StringComparison.OrdinalIgnoreCase),
-                timeout: TimeSpan.FromSeconds(8));
+                m => m.Body.Contains("REQUEST or REGISTER", StringComparison.OrdinalIgnoreCase));
 
-            (await client.InjectTextAsync(phone, "REGISTER")).EnsureSuccessStatusCode();
+            await _fx.InjectTextAndAwaitAsync(phone, "REGISTER");
 
             // After REGISTER, the router replays the original text into the Registration
             // orchestrator. The fake AI extracts no services from the dummy text so
             // we expect the "Tell me what services you offer" reply.
-            var providerReply = await client.WaitForOutboundAsync(
+            var providerReply = await client.ExpectOutboundAsync(
                 phone,
                 m => m.Body.Contains("services you offer", StringComparison.OrdinalIgnoreCase),
-                since: disambig.At,
-                timeout: TimeSpan.FromSeconds(8));
+                since: disambig.At);
 
             providerReply.Body.ShouldNotContain("Do you need", Case.Insensitive);
         }
@@ -136,19 +130,17 @@ public class AmbiguousIntentTests : IClassFixture<DevPipelineFixture>
         try
         {
             using var client = _fx.Factory.CreateClient();
-            (await client.InjectTextAsync(phone, text)).EnsureSuccessStatusCode();
-            var disambig = await client.WaitForOutboundAsync(
+            await _fx.InjectTextAndAwaitAsync(phone, text);
+            var disambig = await client.ExpectOutboundAsync(
                 phone,
-                m => m.Body.Contains("REQUEST or REGISTER", StringComparison.OrdinalIgnoreCase),
-                timeout: TimeSpan.FromSeconds(8));
+                m => m.Body.Contains("REQUEST or REGISTER", StringComparison.OrdinalIgnoreCase));
 
-            (await client.InjectTextAsync(phone, "maybe")).EnsureSuccessStatusCode();
+            await _fx.InjectTextAndAwaitAsync(phone, "maybe");
 
-            var reprompt = await client.WaitForOutboundAsync(
+            var reprompt = await client.ExpectOutboundAsync(
                 phone,
                 m => m.Body.Contains("Reply REQUEST", StringComparison.OrdinalIgnoreCase),
-                since: disambig.At,
-                timeout: TimeSpan.FromSeconds(8));
+                since: disambig.At);
 
             reprompt.Body.ShouldContain("REQUEST", Case.Sensitive);
             reprompt.Body.ShouldContain("REGISTER", Case.Sensitive);

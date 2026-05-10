@@ -11,23 +11,7 @@ jobs:
     name: Build & Test (.NET)
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgis/postgis:16-3.4
-        env:
-          POSTGRES_DB: hook
-          POSTGRES_USER: hook
-          POSTGRES_PASSWORD: hook
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U hook -d hook"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
     env:
-      ConnectionStrings__HookDb: "Host=localhost;Port=5432;Database=hook;Username=hook;Password=hook"
       DOTNET_NOLOGO: "true"
       DOTNET_CLI_TELEMETRY_OPTOUT: "true"
 

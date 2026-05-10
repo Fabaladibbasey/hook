@@ -6,7 +6,6 @@ internal static class ChatHubConstants
     public const int NonceBytes = 12;
     public const int MaxPublicKeyBytes = 200;
     public const int InitialHistoryTake = 50;
-
     public const string ChatMessagesPrimaryKey = "PK_chat_messages";
 
     public static class Items
