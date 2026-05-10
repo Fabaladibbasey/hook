@@ -1,8 +1,11 @@
 name: Deploy
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
+  push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
@@ -22,6 +25,7 @@ permissions:
 jobs:
   build-push:
     name: Build & Push image (dotnet publish /t:PublishContainer)
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.meta.outputs.image }}
@@ -30,15 +34,17 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "10.0.x"
 
       - name: Setup Node 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "20"
           cache: "npm"
@@ -48,7 +54,12 @@ jobs:
         id: meta
         working-directory: ${{ github.workspace }}
         run: |
-          SHA_SHORT="${GITHUB_SHA::7}"
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            HEAD_SHA="${{ github.event.workflow_run.head_sha }}"
+            SHA_SHORT="${HEAD_SHA::7}"
+          else
+            SHA_SHORT="${GITHUB_SHA::7}"
+          fi
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             TAG="${GITHUB_REF_NAME}"
           elif [ -n "${{ inputs.tag }}" ]; then
