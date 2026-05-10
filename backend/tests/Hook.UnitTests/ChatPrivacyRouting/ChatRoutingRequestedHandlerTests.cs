@@ -10,10 +10,16 @@ using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Phone;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
+using Moq;
 using MatchEntity = Hook.Features.Matching.MatchAggregate.Match;
 
 namespace Hook.UnitTests.ChatPrivacyRouting;
 
+[CollectionDefinition(nameof(CultureSensitiveCollection), DisableParallelization = true)]
+public sealed class CultureSensitiveCollection { }
+
+[Collection(nameof(CultureSensitiveCollection))]
 public class ChatRoutingRequestedHandlerTests
 {
     private const string ClientPhone = "+2203339999";
@@ -25,16 +31,65 @@ public class ChatRoutingRequestedHandlerTests
     private const double Lon = -16.6;
     private const int MatchPosition = 2;
 
+    private readonly Dictionary<Guid, MatchEntity> _matches = new();
+    private readonly List<ChatSession> _sessions = new();
+    private readonly List<(string To, string Body)> _sent = new();
+
+    private readonly Mock<IMatchRepository> _matchesMock;
+    private readonly Mock<IChatRepository> _chatsMock;
+    private readonly Mock<IWhatsappClient> _whatsappMock;
+    private readonly TimeProvider _clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-05-09T12:00:00Z"));
+    private readonly IOptions<ChatOptions> _chatOptions =
+        Options.Create(new ChatOptions { PublicChatBaseUrl = "https://hook.test" });
+
+    public ChatRoutingRequestedHandlerTests()
+    {
+        _matchesMock = new Mock<IMatchRepository>();
+        _matchesMock.Setup(x => x.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) =>
+                _matches.TryGetValue(id, out var m) ? m : null);
+
+        _chatsMock = new Mock<IChatRepository>();
+        _chatsMock.Setup(x => x.AddSessionAsync(It.IsAny<ChatSession>(), It.IsAny<CancellationToken>()))
+            .Callback<ChatSession, CancellationToken>((s, _) => _sessions.Add(s))
+            .Returns(Task.CompletedTask);
+        _chatsMock.Setup(x => x.AddParticipantsAsync(It.IsAny<IEnumerable<ChatParticipant>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        _whatsappMock = new Mock<IWhatsappClient>();
+        _whatsappMock.Setup(x => x.SendTextAsync(It.IsAny<PhoneNumber>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<PhoneNumber, string, CancellationToken>((to, body, _) => _sent.Add((to.Value, body)))
+            .ReturnsAsync("msg-1");
+    }
+
+    private MatchEntity SeedMatch()
+    {
+        var match = new MatchEntity
+        {
+            RequestId = Guid.NewGuid(),
+            ProviderPhone = ProviderPhone,
+            ServiceSlug = Slug
+        };
+        _matches[match.Id] = match;
+        return match;
+    }
+
+    private ChatRoutingRequestedHandler Build()
+    {
+        var factory = new ChatSessionFactory(_chatsMock.Object, _chatOptions, _clock);
+        return new ChatRoutingRequestedHandler(factory, _matchesMock.Object, _whatsappMock.Object,
+            NullLogger<ChatRoutingRequestedHandler>.Instance);
+    }
+
     [Fact]
     public async Task Handle_BothHidConsent_NeitherMessageBlamesTheOtherParty()
     {
-        var deps = new Deps();
-        var match = deps.SeedMatch();
+        var match = SeedMatch();
 
-        await deps.Build().Handle(MakeEvt(match.Id, clientConsented: false, providerConsented: false), CancellationToken.None);
+        await Build().Handle(MakeEvt(match.Id, clientConsented: false, providerConsented: false), CancellationToken.None);
 
-        var client = deps.Whatsapp.Sent.Single(s => s.To.Value == ClientPhone);
-        var provider = deps.Whatsapp.Sent.Single(s => s.To.Value == ProviderPhone);
+        var client = _sent.Single(s => s.To == ClientPhone);
+        var provider = _sent.Single(s => s.To == ProviderPhone);
         Assert.StartsWith($"Match #{MatchPosition} ({MaskedProvider}): your private chat is ready. Open: ", client.Body);
         Assert.Contains($"{Slug} client at {Address} (https://maps.google.com/?q=13.45,-16.6) wants to chat. Open: ", provider.Body);
         Assert.DoesNotContain("prefers", client.Body);
@@ -44,13 +99,12 @@ public class ChatRoutingRequestedHandlerTests
     [Fact]
     public async Task Handle_OnlyClientConsented_OtherPartyToClient_NeutralToProvider()
     {
-        var deps = new Deps();
-        var match = deps.SeedMatch();
+        var match = SeedMatch();
 
-        await deps.Build().Handle(MakeEvt(match.Id, clientConsented: true, providerConsented: false), CancellationToken.None);
+        await Build().Handle(MakeEvt(match.Id, clientConsented: true, providerConsented: false), CancellationToken.None);
 
-        var client = deps.Whatsapp.Sent.Single(s => s.To.Value == ClientPhone);
-        var provider = deps.Whatsapp.Sent.Single(s => s.To.Value == ProviderPhone);
+        var client = _sent.Single(s => s.To == ClientPhone);
+        var provider = _sent.Single(s => s.To == ProviderPhone);
         Assert.StartsWith($"Match #{MatchPosition} ({MaskedProvider}): the other party prefers a private chat. Open: ", client.Body);
         Assert.Contains("wants to chat", provider.Body);
         Assert.Contains("https://maps.google.com/?q=13.45,-16.6", provider.Body);
@@ -59,13 +113,12 @@ public class ChatRoutingRequestedHandlerTests
     [Fact]
     public async Task Handle_OnlyProviderConsented_NeutralToClient_OtherPartyToProvider()
     {
-        var deps = new Deps();
-        var match = deps.SeedMatch();
+        var match = SeedMatch();
 
-        await deps.Build().Handle(MakeEvt(match.Id, clientConsented: false, providerConsented: true), CancellationToken.None);
+        await Build().Handle(MakeEvt(match.Id, clientConsented: false, providerConsented: true), CancellationToken.None);
 
-        var client = deps.Whatsapp.Sent.Single(s => s.To.Value == ClientPhone);
-        var provider = deps.Whatsapp.Sent.Single(s => s.To.Value == ProviderPhone);
+        var client = _sent.Single(s => s.To == ClientPhone);
+        var provider = _sent.Single(s => s.To == ProviderPhone);
         Assert.StartsWith($"Match #{MatchPosition} ({MaskedProvider}): your private chat is ready. Open: ", client.Body);
         Assert.Contains("prefers a private chat", provider.Body);
         Assert.Contains("https://maps.google.com/?q=13.45,-16.6", provider.Body);
@@ -74,133 +127,45 @@ public class ChatRoutingRequestedHandlerTests
     [Fact]
     public async Task Handle_MapsUrlUsesInvariantCulture_EvenUnderGermanLocale()
     {
-        var original = Thread.CurrentThread.CurrentCulture;
+        var original = CultureInfo.DefaultThreadCurrentCulture;
+        CultureInfo.DefaultThreadCurrentCulture = new CultureInfo("de-DE");
         try
         {
-            Thread.CurrentThread.CurrentCulture = new CultureInfo("de-DE");
-            var deps = new Deps();
-            var match = deps.SeedMatch();
+            var match = SeedMatch();
 
-            await deps.Build().Handle(MakeEvt(match.Id, clientConsented: false, providerConsented: false), CancellationToken.None);
+            await Build().Handle(MakeEvt(match.Id, clientConsented: false, providerConsented: false), CancellationToken.None);
 
-            var provider = deps.Whatsapp.Sent.Single(s => s.To.Value == ProviderPhone);
+            var provider = _sent.Single(s => s.To == ProviderPhone);
             Assert.Contains("?q=13.45,-16.6", provider.Body);
             Assert.DoesNotContain("?q=13,45", provider.Body);
         }
         finally
         {
-            Thread.CurrentThread.CurrentCulture = original;
+            CultureInfo.DefaultThreadCurrentCulture = original;
         }
     }
 
     [Fact]
     public async Task Handle_MatchAlreadyHasChatId_DoesNotSendOrCreateLinks()
     {
-        var deps = new Deps();
-        var match = deps.SeedMatch();
+        var match = SeedMatch();
         match.ChatId = Guid.NewGuid();
 
-        await deps.Build().Handle(MakeEvt(match.Id, clientConsented: false, providerConsented: false), CancellationToken.None);
+        await Build().Handle(MakeEvt(match.Id, clientConsented: false, providerConsented: false), CancellationToken.None);
 
-        Assert.Empty(deps.Whatsapp.Sent);
-        Assert.Empty(deps.Chats.Sessions);
+        Assert.Empty(_sent);
+        Assert.Empty(_sessions);
+    }
+
+    [Fact]
+    public async Task Handle_MatchMissing_DoesNotSendOrCreateLinks()
+    {
+        await Build().Handle(MakeEvt(Guid.NewGuid(), clientConsented: false, providerConsented: false), CancellationToken.None);
+
+        Assert.Empty(_sent);
+        Assert.Empty(_sessions);
     }
 
     private static ChatRoutingRequested MakeEvt(Guid matchId, bool clientConsented, bool providerConsented) =>
         new(matchId, Guid.NewGuid(), ClientPhone, ProviderPhone, clientConsented, providerConsented, Address, Lat, Lon, MatchPosition);
-
-    private sealed class Deps
-    {
-        public FakeMatchRepository Matches { get; } = new();
-        public FakeChatRepository Chats { get; } = new();
-        public FakeWhatsapp Whatsapp { get; } = new();
-        public TimeProvider Clock { get; } = new FixedTimeProvider(DateTimeOffset.Parse("2026-05-09T12:00:00Z"));
-        public IOptions<ChatOptions> Options { get; } = Microsoft.Extensions.Options.Options.Create(
-            new ChatOptions { PublicChatBaseUrl = "https://hook.test" });
-
-        public MatchEntity SeedMatch()
-        {
-            var match = new MatchEntity
-            {
-                RequestId = Guid.NewGuid(),
-                ProviderPhone = ProviderPhone,
-                ServiceSlug = Slug
-            };
-            Matches.Stored[match.Id] = match;
-            return match;
-        }
-
-        public ChatRoutingRequestedHandler Build()
-        {
-            var factory = new ChatSessionFactory(Chats, Options, Clock);
-            return new ChatRoutingRequestedHandler(factory, Matches, Whatsapp,
-                NullLogger<ChatRoutingRequestedHandler>.Instance);
-        }
-    }
-
-    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
-    {
-        public override DateTimeOffset GetUtcNow() => now;
-    }
-
-    private sealed class FakeMatchRepository : IMatchRepository
-    {
-        public Dictionary<Guid, MatchEntity> Stored { get; } = new();
-
-        public Task<MatchEntity?> GetAsync(Guid id, CancellationToken ct = default) =>
-            Task.FromResult(Stored.TryGetValue(id, out var m) ? m : null);
-        public Task<IReadOnlyList<MatchEntity>> GetForRequestAsync(Guid requestId, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<MatchEntity>>(Array.Empty<MatchEntity>());
-        public Task AddAsync(MatchEntity match, CancellationToken ct = default) => Task.CompletedTask;
-        public Task AddRangeAsync(IEnumerable<MatchEntity> matches, CancellationToken ct = default) => Task.CompletedTask;
-        public Task<bool> TryClaimPickAsync(PickClaim claim, CancellationToken ct = default) => Task.FromResult(true);
-        public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
-    }
-
-    private sealed class FakeChatRepository : IChatRepository
-    {
-        public List<ChatSession> Sessions { get; } = new();
-        public List<ChatParticipant> Participants { get; } = new();
-
-        public Task<ChatSession?> GetSessionAsync(Guid chatId, CancellationToken ct = default) =>
-            Task.FromResult<ChatSession?>(null);
-        public Task<ChatParticipant?> GetByTokenAsync(string token, CancellationToken ct = default) =>
-            Task.FromResult<ChatParticipant?>(null);
-        public Task<ChatParticipant?> GetParticipantAsync(Guid participantId, CancellationToken ct = default) =>
-            Task.FromResult<ChatParticipant?>(null);
-        public Task<ChatParticipant?> GetPeerAsync(Guid chatId, Guid exceptParticipantId, CancellationToken ct = default) =>
-            Task.FromResult<ChatParticipant?>(null);
-        public Task<IReadOnlyList<ChatParticipant>> GetParticipantsAsync(Guid chatId, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<ChatParticipant>>(Array.Empty<ChatParticipant>());
-        public Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(Guid chatId, int take, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<ChatMessage>>(Array.Empty<ChatMessage>());
-        public Task AddSessionAsync(ChatSession session, CancellationToken ct = default)
-        {
-            Sessions.Add(session);
-            return Task.CompletedTask;
-        }
-        public Task AddParticipantAsync(ChatParticipant participant, CancellationToken ct = default)
-        {
-            Participants.Add(participant);
-            return Task.CompletedTask;
-        }
-        public Task AddParticipantsAsync(IEnumerable<ChatParticipant> participants, CancellationToken ct = default)
-        {
-            Participants.AddRange(participants);
-            return Task.CompletedTask;
-        }
-        public Task<bool> TryAddMessageAsync(ChatMessage message, CancellationToken ct = default) => Task.FromResult(true);
-        public Task AddAccessLogAsync(ChatAccessLog log, CancellationToken ct = default) => Task.CompletedTask;
-        public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
-    }
-
-    private sealed class FakeWhatsapp : IWhatsappClient
-    {
-        public List<(PhoneNumber To, string Body)> Sent { get; } = new();
-        public Task<string> SendTextAsync(PhoneNumber to, string body, CancellationToken ct = default)
-        {
-            Sent.Add((to, body));
-            return Task.FromResult("msg-1");
-        }
-    }
 }

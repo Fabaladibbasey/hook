@@ -3,6 +3,7 @@ using Hook.Features.Matching.Match;
 using Hook.Features.Matching.MatchAggregate;
 using Hook.Features.ServiceRequest.RequestAggregate;
 using Microsoft.Extensions.Options;
+using Moq;
 using NetTopologySuite.Geometries;
 using Shouldly;
 using MatchEntity = Hook.Features.Matching.MatchAggregate.Match;
@@ -12,76 +13,112 @@ namespace Hook.UnitTests.Matching;
 
 public class MatchingServiceTests
 {
+    private readonly Mock<IServiceRequestRepository> _requestsMock = new();
+    private readonly Mock<IProviderQueryService> _queryMock = new();
+    private readonly Mock<IMatchRepository> _matchesMock = new();
+    private IReadOnlyList<string>? _capturedExcludes;
+    private double? _capturedRadius;
+    private IReadOnlyList<ProviderCandidate> _queryResult = Array.Empty<ProviderCandidate>();
+
+    public MatchingServiceTests()
+    {
+        _queryMock
+            .Setup(x => x.FindCandidatesAsync(
+                It.IsAny<Point>(), It.IsAny<string>(), It.IsAny<double>(),
+                It.IsAny<IEnumerable<string>>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback<Point, string, double, IEnumerable<string>, DateTimeOffset, CancellationToken>(
+                (_, _, radius, excludes, _, _) =>
+                {
+                    _capturedRadius = radius;
+                    _capturedExcludes = excludes.ToList();
+                })
+            .ReturnsAsync(() => _queryResult);
+
+        _matchesMock.Setup(x => x.GetForRequestAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<MatchEntity>());
+        _matchesMock.Setup(x => x.AddRangeAsync(It.IsAny<IEnumerable<MatchEntity>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _matchesMock.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _requestsMock.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+    }
+
+    private MatchingService Build(MatchingOptions? opts = null) =>
+        new(_requestsMock.Object, _queryMock.Object, _matchesMock.Object,
+            new MatchScorer(Options.Create(opts ?? new MatchingOptions())),
+            Options.Create(opts ?? new MatchingOptions()),
+            TimeProvider.System);
+
+    private ServiceRequestEntity SeedRequest(
+        string clientPhone = "+2203539005",
+        double initialRadiusKm = 5)
+    {
+        var req = ServiceRequestEntity.Create(
+            clientPhone, "plumbing",
+            new Hook.Features.Geocoding.Models.Location(13.4549, -16.5790),
+            "Banjul", string.Empty, initialRadiusKm, DateTimeOffset.UtcNow, sharePhoneNumber: false);
+        _requestsMock.Setup(x => x.GetAsync(req.Id, It.IsAny<CancellationToken>())).ReturnsAsync(req);
+        return req;
+    }
+
     [Fact]
     public async Task RunForRequestAsync_ShouldExcludeClientOwnPhoneFromCandidates()
     {
-        var clientPhone = "+2203539005";
-        var request = ServiceRequestEntity.Create(
-            clientPhone,
-            serviceSlug: "plumbing",
-            location: new Hook.Features.Geocoding.Models.Location(13.4549, -16.5790),
-            formattedAddress: "Banjul",
-            description: string.Empty,
-            initialRadiusKm: 5,
-            now: DateTimeOffset.UtcNow,
-            sharePhoneNumber: false);
-
-        var requests = new StubRequestRepo(request);
-        var query = new CapturingQuery();
-        var matches = new StubMatchRepo();
-        var scorer = new MatchScorer(Options.Create(new MatchingOptions()));
-
-        var service = new MatchingService(
-            requests,
-            query,
-            matches,
-            scorer,
-            Options.Create(new MatchingOptions()),
-            TimeProvider.System);
-
-        await service.RunForRequestAsync(request.Id);
-
-        query.LastExcludePhones.ShouldNotBeNull();
-        query.LastExcludePhones!.ShouldContain(clientPhone);
+        var request = SeedRequest(clientPhone: "+2203539005");
+        await Build().RunForRequestAsync(request.Id);
+        _capturedExcludes.ShouldNotBeNull();
+        _capturedExcludes!.ShouldContain("+2203539005");
     }
 
-    private sealed class StubRequestRepo(ServiceRequestEntity request) : IServiceRequestRepository
+    [Fact]
+    public async Task RunForRequestAsync_RequestMissing_ReturnsNullAndDoesNotQuery()
     {
-        public Task<ServiceRequestEntity?> GetAsync(Guid id, CancellationToken ct = default) =>
-            Task.FromResult<ServiceRequestEntity?>(id == request.Id ? request : null);
-        public Task<ServiceRequestEntity?> GetActiveByClientAsync(string clientPhone, CancellationToken ct = default) =>
-            Task.FromResult<ServiceRequestEntity?>(clientPhone == request.ClientPhone ? request : null);
-        public Task AddAsync(ServiceRequestEntity req, CancellationToken ct = default) => Task.CompletedTask;
-        public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
+        _requestsMock.Setup(x => x.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ServiceRequestEntity?)null);
+
+        var result = await Build().RunForRequestAsync(Guid.NewGuid());
+
+        result.ShouldBeNull();
+        _queryMock.Verify(x => x.FindCandidatesAsync(
+            It.IsAny<Point>(), It.IsAny<string>(), It.IsAny<double>(),
+            It.IsAny<IEnumerable<string>>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
-    private sealed class CapturingQuery : IProviderQueryService
+    [Fact]
+    public async Task RunForRequestAsync_UsesCurrentRadiusWhenWidened()
     {
-        public IReadOnlyList<string>? LastExcludePhones { get; private set; }
+        var request = SeedRequest(initialRadiusKm: 5);
+        request.CurrentRadiusKm = 20;
 
-        public Task<IReadOnlyList<ProviderCandidate>> FindCandidatesAsync(
-            Point requestLocation,
-            string serviceSlug,
-            double radiusKm,
-            IEnumerable<string> excludePhones,
-            DateTimeOffset now,
-            CancellationToken ct = default)
-        {
-            LastExcludePhones = [.. excludePhones];
-            return Task.FromResult<IReadOnlyList<ProviderCandidate>>(Array.Empty<ProviderCandidate>());
-        }
+        await Build().RunForRequestAsync(request.Id);
+
+        _capturedRadius.ShouldBe(20);
     }
 
-    private sealed class StubMatchRepo : IMatchRepository
+    [Fact]
+    public async Task RunForRequestAsync_FallsBackToDefaultRadius_WhenRequestRadiusZero()
     {
-        public Task<MatchEntity?> GetAsync(Guid id, CancellationToken ct = default) =>
-            Task.FromResult<MatchEntity?>(null);
-        public Task<IReadOnlyList<MatchEntity>> GetForRequestAsync(Guid requestId, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<MatchEntity>>(Array.Empty<MatchEntity>());
-        public Task AddAsync(MatchEntity match, CancellationToken ct = default) => Task.CompletedTask;
-        public Task AddRangeAsync(IEnumerable<MatchEntity> matches, CancellationToken ct = default) => Task.CompletedTask;
-        public Task<bool> TryClaimPickAsync(PickClaim claim, CancellationToken ct = default) =>
-            Task.FromResult(true);
-        public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
+        var request = SeedRequest(initialRadiusKm: 0);
+        var opts = new MatchingOptions { DefaultRadiusKm = 7.5 };
+
+        await Build(opts).RunForRequestAsync(request.Id);
+
+        _capturedRadius.ShouldBe(7.5);
+    }
+
+    [Fact]
+    public async Task RunForRequestAsync_ExcludesPreviouslyShownProviderPhones()
+    {
+        var request = SeedRequest();
+        request.RecordShown(new[] { "+2204440001", "+2204440002" });
+
+        await Build().RunForRequestAsync(request.Id);
+
+        _capturedExcludes.ShouldNotBeNull();
+        _capturedExcludes!.ShouldContain("+2204440001");
+        _capturedExcludes!.ShouldContain("+2204440002");
+        _capturedExcludes!.ShouldContain(request.ClientPhone);
     }
 }

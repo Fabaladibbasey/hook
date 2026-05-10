@@ -2,7 +2,6 @@ using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
 using Hook.Features.Feedback;
 using Hook.Features.Feedback.Models;
-using Hook.Features.Feedback.ProviderStatsAggregate;
 using Hook.Features.Feedback.Step1Prompt;
 using Hook.Features.Geocoding.Models;
 using Hook.Features.Matching.MatchAggregate;
@@ -10,25 +9,123 @@ using Hook.Features.ServiceRequest.RequestAggregate;
 using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Phone;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+using MatchEntity = Hook.Features.Matching.MatchAggregate.Match;
 using ServiceRequestEntity = Hook.Features.ServiceRequest.RequestAggregate.ServiceRequest;
 
 namespace Hook.UnitTests.Feedback;
 
 public class Step1FeedbackHandlerTests
 {
+    private readonly Dictionary<Guid, MatchEntity> _matches = new();
+    private readonly Dictionary<Guid, IReadOnlyList<MatchEntity>> _requestMatches = new();
+    private readonly Dictionary<Guid, ServiceRequestEntity> _requests = new();
+    private readonly List<MatchFeedback> _added = new();
+    private readonly List<Guid> _deleted = new();
+    private readonly List<(PhoneNumber To, string Body)> _sent = new();
+    private readonly List<string> _callOrder = new();
+
+    private readonly Mock<IFeedbackRepository> _feedbackMock = new();
+    private readonly Mock<IMatchRepository> _matchesMock = new();
+    private readonly Mock<IServiceRequestRepository> _requestsMock = new();
+    private readonly Mock<IConversationAi> _aiMock = new();
+    private readonly Mock<IWhatsappClient> _whatsappMock = new();
+
+    private bool _tryAddResult = true;
+    private bool _anyByRequestStepResult;
+    private int _anyByRequestStepCalled;
+    private IReadOnlyDictionary<string, string>? _lastFacts;
+    private bool _aiReturnBlank;
+    private Exception? _whatsappThrowOnSend;
+
+    public Step1FeedbackHandlerTests()
+    {
+        _feedbackMock.Setup(x => x.TryAddPendingAsync(It.IsAny<MatchFeedback>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((MatchFeedback f, CancellationToken _) =>
+            {
+                _callOrder.Add("TryAdd");
+                if (_tryAddResult) _added.Add(f);
+                return _tryAddResult;
+            });
+        _feedbackMock.Setup(x => x.DeletePendingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, CancellationToken>((id, _) => _deleted.Add(id))
+            .ReturnsAsync(true);
+        _feedbackMock.Setup(x => x.AnyByRequestStepAsync(It.IsAny<Guid>(), It.IsAny<FeedbackStep>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                _anyByRequestStepCalled++;
+                return _anyByRequestStepResult;
+            });
+
+        _matchesMock.Setup(x => x.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) =>
+                _matches.TryGetValue(id, out var m) ? m : null);
+        _matchesMock.Setup(x => x.GetForRequestAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid requestId, CancellationToken _) =>
+            {
+                // Explicit-only: tests must seed _requestMatches in production order.
+                if (!_requestMatches.TryGetValue(requestId, out var list))
+                    throw new InvalidOperationException(
+                        $"FakeMatchRepository.RequestMatches missing seed for {requestId}");
+                return list;
+            });
+
+        _requestsMock.Setup(x => x.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) =>
+                _requests.TryGetValue(id, out var r) ? r : null);
+
+        _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ReplyContext ctx, CancellationToken _) =>
+            {
+                _lastFacts = ctx.Facts;
+                return _aiReturnBlank ? string.Empty : "ok";
+            });
+
+        _whatsappMock.Setup(x => x.SendTextAsync(It.IsAny<PhoneNumber>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((PhoneNumber to, string body, CancellationToken _) =>
+            {
+                _callOrder.Add("Send");
+                if (_whatsappThrowOnSend is not null) throw _whatsappThrowOnSend;
+                _sent.Add((to, body));
+                return Task.FromResult("msg-1");
+            });
+    }
+
+    private Step1FeedbackHandler Build() =>
+        new(_matchesMock.Object, _requestsMock.Object, _feedbackMock.Object,
+            _aiMock.Object, _whatsappMock.Object,
+            NullLogger<Step1FeedbackHandler>.Instance);
+
+    private MatchEntity SeedMatch()
+    {
+        var requestId = Guid.NewGuid();
+        var match = new MatchEntity
+        {
+            RequestId = requestId,
+            ProviderPhone = "+2203331234",
+            ServiceSlug = "plumbing"
+        };
+        _matches[match.Id] = match;
+        _requestMatches[requestId] = new[] { match };
+
+        _requests[requestId] = ServiceRequestEntity.Create(
+            "+2203339999", "plumbing",
+            new Location(13.45, -16.6), "Banjul",
+            "req-test", 5.0, DateTimeOffset.UtcNow, false);
+        return match;
+    }
+
     [Fact]
     public async Task Handle_HappyPath_AddsPendingThenSends()
     {
-        var deps = new Deps();
-        var match = SeedMatch(deps);
-        var handler = deps.Build();
+        var match = SeedMatch();
 
-        await handler.Handle(new Step1FeedbackCheck(match.Id), CancellationToken.None);
+        await Build().Handle(new Step1FeedbackCheck(match.Id), CancellationToken.None);
 
-        Assert.Single(deps.Feedback.Added);
-        Assert.Single(deps.Whatsapp.Sent);
-        Assert.Equal(new[] { "TryAdd", "Send" }, deps.CallOrder);
-        Assert.Empty(deps.Feedback.Deleted);
+        Assert.Single(_added);
+        Assert.Single(_sent);
+        Assert.Equal(new[] { "TryAdd", "Send" }, _callOrder);
+        Assert.Empty(_deleted);
     }
 
     [Fact]
@@ -37,29 +134,25 @@ public class Step1FeedbackHandlerTests
         // Simulates the 23505 catch path inside TryAddPendingAsync — i.e., a previous
         // Step1 prompt for this match left a Pending row, so the partial unique index
         // rejects this insert and the handler must exit before sending.
-        var deps = new Deps();
-        var match = SeedMatch(deps);
-        deps.Feedback.TryAddResult = false;
-        var handler = deps.Build();
+        var match = SeedMatch();
+        _tryAddResult = false;
 
-        await handler.Handle(new Step1FeedbackCheck(match.Id), CancellationToken.None);
+        await Build().Handle(new Step1FeedbackCheck(match.Id), CancellationToken.None);
 
-        Assert.Empty(deps.Feedback.Added);
-        Assert.Empty(deps.Whatsapp.Sent);
+        Assert.Empty(_added);
+        Assert.Empty(_sent);
     }
 
     [Fact]
     public async Task Handle_TryAddPendingFails_NoSend()
     {
-        var deps = new Deps();
-        var match = SeedMatch(deps);
-        deps.Feedback.TryAddResult = false;
-        var handler = deps.Build();
+        var match = SeedMatch();
+        _tryAddResult = false;
 
-        await handler.Handle(new Step1FeedbackCheck(match.Id), CancellationToken.None);
+        await Build().Handle(new Step1FeedbackCheck(match.Id), CancellationToken.None);
 
-        Assert.Empty(deps.Whatsapp.Sent);
-        Assert.Equal(new[] { "TryAdd" }, deps.CallOrder);
+        Assert.Empty(_sent);
+        Assert.Equal(new[] { "TryAdd" }, _callOrder);
     }
 
     [Fact]
@@ -68,33 +161,29 @@ public class Step1FeedbackHandlerTests
         // AiReplyHelper.TryGenerateAsync surfaces Ollama failures as null. The handler
         // must release the just-reserved pending row, otherwise the partial unique index
         // would lock out future Step1 prompts for this match forever.
-        var deps = new Deps();
-        var match = SeedMatch(deps);
-        deps.Ai.ReturnBlank = true;
-        var handler = deps.Build();
+        var match = SeedMatch();
+        _aiReturnBlank = true;
 
-        await handler.Handle(new Step1FeedbackCheck(match.Id), CancellationToken.None);
+        await Build().Handle(new Step1FeedbackCheck(match.Id), CancellationToken.None);
 
-        Assert.Single(deps.Feedback.Added);
-        Assert.Single(deps.Feedback.Deleted);
-        Assert.Equal(deps.Feedback.Added[0].Id, deps.Feedback.Deleted[0]);
-        Assert.Empty(deps.Whatsapp.Sent);
+        Assert.Single(_added);
+        Assert.Single(_deleted);
+        Assert.Equal(_added[0].Id, _deleted[0]);
+        Assert.Empty(_sent);
     }
 
     [Fact]
     public async Task Handle_WhatsappSendThrows_DeletesPendingAndRethrows()
     {
-        var deps = new Deps();
-        var match = SeedMatch(deps);
-        deps.Whatsapp.ThrowOnSend = new InvalidOperationException("transport down");
-        var handler = deps.Build();
+        var match = SeedMatch();
+        _whatsappThrowOnSend = new InvalidOperationException("transport down");
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            handler.Handle(new Step1FeedbackCheck(match.Id), CancellationToken.None));
+            Build().Handle(new Step1FeedbackCheck(match.Id), CancellationToken.None));
 
-        Assert.Single(deps.Feedback.Added);
-        Assert.Single(deps.Feedback.Deleted);
-        Assert.Equal(deps.Feedback.Added[0].Id, deps.Feedback.Deleted[0]);
+        Assert.Single(_added);
+        Assert.Single(_deleted);
+        Assert.Equal(_added[0].Id, _deleted[0]);
     }
 
     [Fact]
@@ -103,19 +192,55 @@ public class Step1FeedbackHandlerTests
         // Multi-PICK: a sibling match in the same request already has a Step1 row
         // (Pending or answered), so Step1FeedbackHandler must exit silently — no
         // TryAddPending, no AI, no send. Dedupe goal: one Step1 prompt per request.
-        var deps = new Deps();
-        var match = SeedMatch(deps);
-        deps.Feedback.AnyByRequestStepResult = true;
-        var handler = deps.Build();
+        var match = SeedMatch();
+        _anyByRequestStepResult = true;
 
-        await handler.Handle(new Step1FeedbackCheck(match.Id), CancellationToken.None);
+        await Build().Handle(new Step1FeedbackCheck(match.Id), CancellationToken.None);
 
-        Assert.Empty(deps.Feedback.Added);
-        Assert.Empty(deps.Whatsapp.Sent);
-        Assert.Empty(deps.CallOrder);
+        Assert.Empty(_added);
+        Assert.Empty(_sent);
+        Assert.Empty(_callOrder);
         // Dedupe must actually call the repository — guards against accidentally
         // dropping the gate behind a refactor that exits before the check.
-        Assert.Equal(1, deps.Feedback.AnyByRequestStepCalled);
+        Assert.Equal(1, _anyByRequestStepCalled);
+    }
+
+    [Fact]
+    public async Task Handle_MatchMissing_Silent()
+    {
+        await Build().Handle(new Step1FeedbackCheck(Guid.NewGuid()), CancellationToken.None);
+
+        Assert.Empty(_added);
+        Assert.Empty(_sent);
+        Assert.Empty(_callOrder);
+    }
+
+    [Fact]
+    public async Task Handle_RequestMissing_Silent()
+    {
+        var match = SeedMatch();
+        _requests.Remove(match.RequestId);
+
+        await Build().Handle(new Step1FeedbackCheck(match.Id), CancellationToken.None);
+
+        Assert.Empty(_added);
+        Assert.Empty(_sent);
+    }
+
+    [Fact]
+    public async Task Handle_BadClientPhone_Silent()
+    {
+        var match = SeedMatch();
+        var requestId = match.RequestId;
+        _requests[requestId] = ServiceRequestEntity.Create(
+            "not-a-phone", "plumbing",
+            new Location(13.45, -16.6), "Banjul",
+            "req-test", 5.0, DateTimeOffset.UtcNow, false);
+
+        await Build().Handle(new Step1FeedbackCheck(match.Id), CancellationToken.None);
+
+        Assert.Empty(_added);
+        Assert.Empty(_sent);
     }
 
     [Fact]
@@ -125,9 +250,8 @@ public class Step1FeedbackHandlerTests
         // production order (Score DESC) lists it FIRST regardless of insertion time.
         // The bot's "pickedProviders" fact must use that order so a positional reply
         // ("2") later resolves to the actual second-listed match.
-        var deps = new Deps();
         var requestId = Guid.NewGuid();
-        var match = new Match
+        var match = new MatchEntity
         {
             RequestId = requestId,
             ProviderPhone = "+2203331234",
@@ -135,33 +259,31 @@ public class Step1FeedbackHandlerTests
             Score = 0.5,
             PickedAt = DateTimeOffset.UtcNow
         };
-        deps.Matches.Stored[match.Id] = match;
-        deps.Requests.Stored[requestId] = ServiceRequestEntity.Create(
+        _matches[match.Id] = match;
+        _requests[requestId] = ServiceRequestEntity.Create(
             "+2203339999", "plumbing",
             new Location(13.45, -16.6), "Banjul",
             "req-test", 5.0, DateTimeOffset.UtcNow, false);
 
-        var sibling = new Match
+        var sibling = new MatchEntity
         {
             RequestId = match.RequestId,
             ProviderPhone = "+2204445678",
             ServiceSlug = "plumbing",
-            CreatedAt = match.CreatedAt.AddSeconds(-1), // older but higher-scored
+            CreatedAt = match.CreatedAt.AddSeconds(-1),
             PickedAt = DateTimeOffset.UtcNow,
             Score = 0.9
         };
-        deps.Matches.Stored[sibling.Id] = sibling;
+        _matches[sibling.Id] = sibling;
         // Production order: Score DESC -> sibling first, anchor match second.
-        deps.Matches.RequestMatches[match.RequestId] = new[] { sibling, match };
+        _requestMatches[match.RequestId] = new[] { sibling, match };
 
-        var handler = deps.Build();
-        await handler.Handle(new Step1FeedbackCheck(match.Id), CancellationToken.None);
+        await Build().Handle(new Step1FeedbackCheck(match.Id), CancellationToken.None);
 
-        Assert.Single(deps.Whatsapp.Sent);
-        var lastFacts = deps.Ai.LastFacts;
-        Assert.NotNull(lastFacts);
-        Assert.True(lastFacts!.ContainsKey("pickedProviders"));
-        var rendered = lastFacts["pickedProviders"];
+        Assert.Single(_sent);
+        Assert.NotNull(_lastFacts);
+        Assert.True(_lastFacts!.ContainsKey("pickedProviders"));
+        var rendered = _lastFacts["pickedProviders"];
         var firstSlot = rendered.IndexOf("1)", StringComparison.Ordinal);
         var secondSlot = rendered.IndexOf("2)", StringComparison.Ordinal);
         Assert.True(firstSlot >= 0 && secondSlot > firstSlot);
@@ -173,174 +295,6 @@ public class Step1FeedbackHandlerTests
         Assert.Contains("78", slot1, StringComparison.Ordinal);
         Assert.Contains("34", slot2, StringComparison.Ordinal);
         // instruction must reflect multi-pick branch (mentions "which one").
-        Assert.Contains("which one", lastFacts["instruction"], StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static Match SeedMatch(Deps deps)
-    {
-        var requestId = Guid.NewGuid();
-        var match = new Match
-        {
-            RequestId = requestId,
-            ProviderPhone = "+2203331234",
-            ServiceSlug = "plumbing"
-        };
-        deps.Matches.Stored[match.Id] = match;
-        // Default: single-match request. Multi-pick tests overwrite this with the
-        // production-ordered list (Score DESC, DistanceKm, CreatedAt, Id).
-        deps.Matches.RequestMatches[requestId] = new[] { match };
-
-        deps.Requests.Stored[requestId] = ServiceRequestEntity.Create(
-            "+2203339999", "plumbing",
-            new Location(13.45, -16.6), "Banjul",
-            "req-test", 5.0, DateTimeOffset.UtcNow, false);
-        return match;
-    }
-
-    private sealed class Deps
-    {
-        public FakeFeedbackRepository Feedback { get; }
-        public FakeMatchRepository Matches { get; } = new();
-        public FakeRequestRepository Requests { get; } = new();
-        public FakeAi Ai { get; } = new();
-        public FakeWhatsapp Whatsapp { get; }
-        public List<string> CallOrder { get; } = new();
-
-        public Deps()
-        {
-            Feedback = new FakeFeedbackRepository(CallOrder);
-            Whatsapp = new FakeWhatsapp(CallOrder);
-        }
-
-        public Step1FeedbackHandler Build() =>
-            new(Matches, Requests, Feedback, Ai, Whatsapp,
-                NullLogger<Step1FeedbackHandler>.Instance);
-    }
-
-    private sealed class FakeFeedbackRepository(List<string> callOrder) : IFeedbackRepository
-    {
-        public Dictionary<(Guid, FeedbackStep), MatchFeedback> PendingForMatch { get; } = new();
-        public List<MatchFeedback> Added { get; } = new();
-        public List<Guid> Deleted { get; } = new();
-        public bool TryAddResult { get; set; } = true;
-
-        public Task<MatchFeedback?> GetLatestPendingForClientAsync(string clientPhone, CancellationToken ct = default) =>
-            Task.FromResult<MatchFeedback?>(null);
-
-        public Task<MatchFeedback?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
-            Task.FromResult<MatchFeedback?>(null);
-
-        public Task AddAsync(MatchFeedback feedback, CancellationToken ct = default) => Task.CompletedTask;
-
-        public Task<ProviderStats?> GetStatsAsync(string providerPhone, CancellationToken ct = default) =>
-            Task.FromResult<ProviderStats?>(null);
-
-        public Task UpsertStatsAsync(ProviderStats stats, CancellationToken ct = default) => Task.CompletedTask;
-        public Task DeleteStatsAsync(string providerPhone, CancellationToken ct = default) => Task.CompletedTask;
-        public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
-
-        public Task<MatchFeedback?> GetPendingAsync(Guid matchId, FeedbackStep step, CancellationToken ct = default) =>
-            Task.FromResult(PendingForMatch.TryGetValue((matchId, step), out var f) ? f : null);
-
-        public Task<MatchFeedback?> GetLatestByMatchAndStepAsync(Guid matchId, FeedbackStep step, CancellationToken ct = default) =>
-            Task.FromResult<MatchFeedback?>(null);
-
-        public bool AnyByRequestStepResult { get; set; } = false;
-        public int AnyByRequestStepCalled { get; private set; }
-        public Task<bool> AnyByRequestStepAsync(Guid requestId, FeedbackStep step, CancellationToken ct = default)
-        {
-            AnyByRequestStepCalled++;
-            return Task.FromResult(AnyByRequestStepResult);
-        }
-
-        public Task<bool> TryClaimPendingAsync(Guid feedbackId, FeedbackAnswer answer, DateTimeOffset now, CancellationToken ct = default) =>
-            Task.FromResult(true);
-
-        public Task<bool> TryClaimPendingWithEtaAsync(Guid feedbackId, FeedbackAnswer answer, DateTimeOffset etaUtc, DateTimeOffset now, CancellationToken ct = default) =>
-            Task.FromResult(true);
-
-        public Task<bool> TryAddPendingAsync(MatchFeedback feedback, CancellationToken ct = default)
-        {
-            callOrder.Add("TryAdd");
-            if (TryAddResult) Added.Add(feedback);
-            return Task.FromResult(TryAddResult);
-        }
-
-        public Task<bool> DeletePendingAsync(Guid feedbackId, CancellationToken ct = default)
-        {
-            Deleted.Add(feedbackId);
-            return Task.FromResult(true);
-        }
-    }
-
-    private sealed class FakeMatchRepository : IMatchRepository
-    {
-        public Dictionary<Guid, Match> Stored { get; } = new();
-        public Dictionary<Guid, IReadOnlyList<Match>> RequestMatches { get; } = new();
-
-        public Task<Match?> GetAsync(Guid id, CancellationToken ct = default) =>
-            Task.FromResult(Stored.TryGetValue(id, out var m) ? m : null);
-        public Task<IReadOnlyList<Match>> GetForRequestAsync(Guid requestId, CancellationToken ct = default)
-        {
-            // Explicit-only: tests must seed RequestMatches in the order the production
-            // repository returns (Score DESC, DistanceKm, CreatedAt, Id). A silent
-            // auto-derive masks ordering bugs — fail loudly instead.
-            if (!RequestMatches.TryGetValue(requestId, out var list))
-                throw new InvalidOperationException(
-                    $"FakeMatchRepository.RequestMatches missing seed for {requestId}");
-            return Task.FromResult(list);
-        }
-        public Task AddAsync(Match match, CancellationToken ct = default) => Task.CompletedTask;
-        public Task AddRangeAsync(IEnumerable<Match> matches, CancellationToken ct = default) => Task.CompletedTask;
-        public Task<bool> TryClaimPickAsync(PickClaim claim, CancellationToken ct = default) =>
-            Task.FromResult(true);
-        public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
-    }
-
-    private sealed class FakeRequestRepository : IServiceRequestRepository
-    {
-        public Dictionary<Guid, ServiceRequestEntity> Stored { get; } = new();
-        public Task<ServiceRequestEntity?> GetActiveByClientAsync(string clientPhone, CancellationToken ct = default) =>
-            Task.FromResult<ServiceRequestEntity?>(null);
-        public Task<ServiceRequestEntity?> GetAsync(Guid id, CancellationToken ct = default) =>
-            Task.FromResult(Stored.TryGetValue(id, out var r) ? r : null);
-        public Task AddAsync(ServiceRequestEntity request, CancellationToken ct = default) => Task.CompletedTask;
-        public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
-    }
-
-    private sealed class FakeAi : IConversationAi
-    {
-        public bool ReturnBlank { get; set; }
-        public IReadOnlyDictionary<string, string>? LastFacts { get; private set; }
-
-        public Task<IntentDetectionResult> DetectIntentAsync(string userMessage, CancellationToken ct = default) =>
-            Task.FromResult(new IntentDetectionResult(IntentKind.Unknown, 0.5, "en", "fake"));
-        public Task<ServiceExtractionResult> ExtractServicesAsync(string userMessage, CancellationToken ct = default) =>
-            Task.FromResult(new ServiceExtractionResult(Array.Empty<string>()));
-        public Task<ServiceJudgeResult> JudgeServiceMatchAsync(string proposedSlug, IReadOnlyList<string> candidateSlugs, CancellationToken ct = default) =>
-            Task.FromResult(new ServiceJudgeResult(null, true, proposedSlug));
-        public Task<string> GenerateReplyAsync(ReplyContext context, CancellationToken ct = default)
-        {
-            LastFacts = context.Facts;
-            return Task.FromResult(ReturnBlank ? string.Empty : "ok");
-        }
-        public Task<LanguageDetectionResult> DetectLanguageAsync(string userMessage, CancellationToken ct = default) =>
-            Task.FromResult(new LanguageDetectionResult("en", 1.0));
-        public Task<DateTimeOffset?> ExtractEtaAsync(string userMessage, DateTimeOffset now, CancellationToken ct = default) =>
-            Task.FromResult<DateTimeOffset?>(null);
-    }
-
-    private sealed class FakeWhatsapp(List<string> callOrder) : IWhatsappClient
-    {
-        public List<(PhoneNumber To, string Body)> Sent { get; } = new();
-        public Exception? ThrowOnSend { get; set; }
-
-        public Task<string> SendTextAsync(PhoneNumber to, string body, CancellationToken ct = default)
-        {
-            callOrder.Add("Send");
-            if (ThrowOnSend is not null) throw ThrowOnSend;
-            Sent.Add((to, body));
-            return Task.FromResult("msg-1");
-        }
+        Assert.Contains("which one", _lastFacts["instruction"], StringComparison.OrdinalIgnoreCase);
     }
 }

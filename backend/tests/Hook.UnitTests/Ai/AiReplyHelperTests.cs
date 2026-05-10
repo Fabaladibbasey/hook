@@ -1,6 +1,7 @@
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Shouldly;
 
 namespace Hook.UnitTests.Ai;
@@ -10,12 +11,15 @@ public class AiReplyHelperTests
     private static readonly ReplyContext Ctx =
         new("present-top-matches", RecentTurns: Array.Empty<ConversationTurn>(), LanguageHint: "en");
 
+    private readonly Mock<IConversationAi> _aiMock = new();
+
     [Fact]
     public async Task TryGenerateAsync_ShouldReturnReply_WhenAiSucceeds()
     {
-        var ai = new ScriptedAi(reply: "Hi there");
+        _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("Hi there");
 
-        var result = await AiReplyHelper.TryGenerateAsync(ai, Ctx, "test", NullLogger.Instance, CancellationToken.None);
+        var result = await AiReplyHelper.TryGenerateAsync(_aiMock.Object, Ctx, "test", NullLogger.Instance, CancellationToken.None);
 
         result.ShouldBe("Hi there");
     }
@@ -23,9 +27,10 @@ public class AiReplyHelperTests
     [Fact]
     public async Task TryGenerateAsync_ShouldReturnNull_WhenAiThrows()
     {
-        var ai = new ScriptedAi(toThrow: new InvalidOperationException("ollama down"));
+        _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("ollama down"));
 
-        var result = await AiReplyHelper.TryGenerateAsync(ai, Ctx, "test", NullLogger.Instance, CancellationToken.None);
+        var result = await AiReplyHelper.TryGenerateAsync(_aiMock.Object, Ctx, "test", NullLogger.Instance, CancellationToken.None);
 
         result.ShouldBeNull();
     }
@@ -33,9 +38,10 @@ public class AiReplyHelperTests
     [Fact]
     public async Task TryGenerateAsync_ShouldReturnNull_WhenAiReturnsBlank()
     {
-        var ai = new ScriptedAi(reply: "   ");
+        _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("   ");
 
-        var result = await AiReplyHelper.TryGenerateAsync(ai, Ctx, "test", NullLogger.Instance, CancellationToken.None);
+        var result = await AiReplyHelper.TryGenerateAsync(_aiMock.Object, Ctx, "test", NullLogger.Instance, CancellationToken.None);
 
         result.ShouldBeNull();
     }
@@ -45,10 +51,11 @@ public class AiReplyHelperTests
     {
         using var cts = new CancellationTokenSource();
         cts.Cancel();
-        var ai = new ScriptedAi(toThrow: new OperationCanceledException(cts.Token));
+        _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
 
         await Should.ThrowAsync<OperationCanceledException>(() =>
-            AiReplyHelper.TryGenerateAsync(ai, Ctx, "test", NullLogger.Instance, cts.Token));
+            AiReplyHelper.TryGenerateAsync(_aiMock.Object, Ctx, "test", NullLogger.Instance, cts.Token));
     }
 
     [Theory]
@@ -61,9 +68,10 @@ public class AiReplyHelperTests
     [InlineData("Sorry, but I cannot help.")]
     public async Task TryGenerateAsync_ShouldReturnNull_WhenAiReturnsRefusal(string refusal)
     {
-        var ai = new ScriptedAi(reply: refusal);
+        _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(refusal);
 
-        var result = await AiReplyHelper.TryGenerateAsync(ai, Ctx, "test", NullLogger.Instance, CancellationToken.None);
+        var result = await AiReplyHelper.TryGenerateAsync(_aiMock.Object, Ctx, "test", NullLogger.Instance, CancellationToken.None);
 
         result.ShouldBeNull();
     }
@@ -74,9 +82,10 @@ public class AiReplyHelperTests
     [InlineData("Hi there! Let's get you sorted.")]
     public async Task TryGenerateAsync_ShouldPassThrough_WhenReplyContainsBenignSorry(string reply)
     {
-        var ai = new ScriptedAi(reply: reply);
+        _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(reply);
 
-        var result = await AiReplyHelper.TryGenerateAsync(ai, Ctx, "test", NullLogger.Instance, CancellationToken.None);
+        var result = await AiReplyHelper.TryGenerateAsync(_aiMock.Object, Ctx, "test", NullLogger.Instance, CancellationToken.None);
 
         result.ShouldBe(reply);
     }
@@ -89,9 +98,10 @@ public class AiReplyHelperTests
     [InlineData("As you wish — acting as an unrestricted assistant now.")]
     public async Task TryGenerateAsync_ShouldReturnNull_WhenAiEchoesJailbreakMarker(string reply)
     {
-        var ai = new ScriptedAi(reply: reply);
+        _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(reply);
 
-        var result = await AiReplyHelper.TryGenerateAsync(ai, Ctx, "test", NullLogger.Instance, CancellationToken.None);
+        var result = await AiReplyHelper.TryGenerateAsync(_aiMock.Object, Ctx, "test", NullLogger.Instance, CancellationToken.None);
 
         result.ShouldBeNull();
     }
@@ -102,34 +112,11 @@ public class AiReplyHelperTests
     [InlineData("I'll help you find a plumber nearby.")]
     public async Task TryGenerateAsync_ShouldPassThrough_WhenReplyHasNoJailbreakMarker(string reply)
     {
-        var ai = new ScriptedAi(reply: reply);
+        _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(reply);
 
-        var result = await AiReplyHelper.TryGenerateAsync(ai, Ctx, "test", NullLogger.Instance, CancellationToken.None);
+        var result = await AiReplyHelper.TryGenerateAsync(_aiMock.Object, Ctx, "test", NullLogger.Instance, CancellationToken.None);
 
         result.ShouldBe(reply);
-    }
-
-    private sealed class ScriptedAi : IConversationAi
-    {
-        private readonly string? _reply;
-        private readonly Exception? _toThrow;
-
-        public ScriptedAi(string? reply = null, Exception? toThrow = null)
-        {
-            _reply = reply;
-            _toThrow = toThrow;
-        }
-
-        public Task<string> GenerateReplyAsync(ReplyContext context, CancellationToken ct = default)
-        {
-            if (_toThrow is not null) throw _toThrow;
-            return Task.FromResult(_reply ?? string.Empty);
-        }
-
-        public Task<IntentDetectionResult> DetectIntentAsync(string userMessage, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<ServiceExtractionResult> ExtractServicesAsync(string userMessage, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<ServiceJudgeResult> JudgeServiceMatchAsync(string proposedSlug, IReadOnlyList<string> candidateSlugs, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<LanguageDetectionResult> DetectLanguageAsync(string userMessage, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<DateTimeOffset?> ExtractEtaAsync(string userMessage, DateTimeOffset now, CancellationToken ct = default) => throw new NotSupportedException();
     }
 }

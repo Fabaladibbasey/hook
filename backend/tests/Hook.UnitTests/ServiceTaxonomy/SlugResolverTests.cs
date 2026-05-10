@@ -3,33 +3,57 @@ using Hook.Features.Ai.Models;
 using Hook.Features.ServiceTaxonomy;
 using Hook.Features.ServiceTaxonomy.ResolveSlug;
 using Hook.Features.ServiceTaxonomy.ServiceAggregate;
-using Hook.TestHelpers;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using Shouldly;
 
 namespace Hook.UnitTests.ServiceTaxonomy;
 
 public class SlugResolverTests
 {
-    private static SlugResolver Build(
-        FakeServiceRepository repository,
-        IConversationAi? ai = null,
-        double autoMerge = 0.85,
-        double aiJudge = 0.50)
+    private readonly Dictionary<string, Service> _store = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Mock<IServiceRepository> _repoMock = new();
+    private readonly Mock<IConversationAi> _aiMock = new();
+    private Func<string, string, double> _similarityRule = (_, _) => 0;
+
+    public SlugResolverTests()
+    {
+        _repoMock.Setup(x => x.GetBySlugAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string slug, CancellationToken _) =>
+                _store.TryGetValue(slug, out var s) ? s : null);
+
+        _repoMock.Setup(x => x.FindSimilarAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string slug, int take, CancellationToken _) =>
+                _store.Keys
+                    .Select(s => new SlugSimilarity(s, _similarityRule(s, slug)))
+                    .Where(x => x.Similarity > 0)
+                    .OrderByDescending(x => x.Similarity)
+                    .Take(take)
+                    .ToList());
+
+        _repoMock.Setup(x => x.AddAsync(It.IsAny<Service>(), It.IsAny<CancellationToken>()))
+            .Callback<Service, CancellationToken>((s, _) => _store[s.Slug] = s)
+            .Returns(Task.CompletedTask);
+
+        // Default AI: do not auto-merge — judges every mid-band call as new.
+        _aiMock.Setup(x => x.JudgeServiceMatchAsync(
+                It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string proposed, IReadOnlyList<string> _, CancellationToken __) =>
+                new ServiceJudgeResult(null, true, proposed));
+    }
+
+    private SlugResolver Build(double autoMerge = 0.85, double aiJudge = 0.50)
     {
         var options = Options.Create(new ServiceTaxonomyOptions
         {
             AutoMergeThreshold = autoMerge,
             AiJudgeThreshold = aiJudge
         });
-
-        return new SlugResolver(
-            repository,
-            ai ?? new FakeConversationAi(),
-            options,
-            NullLogger<SlugResolver>.Instance);
+        return new SlugResolver(_repoMock.Object, _aiMock.Object, options, NullLogger<SlugResolver>.Instance);
     }
+
+    private void Seed(string slug) => _store[slug] = Service.Create(slug);
 
     [Theory]
     [InlineData("Plumbing Services!", "plumbing-services")]
@@ -44,24 +68,22 @@ public class SlugResolverTests
     [Fact]
     public async Task ResolveAsync_ShouldReturnExistingWhenExactMatch()
     {
-        var repo = new FakeServiceRepository();
-        repo.Seed("plumbing");
-        var resolver = Build(repo);
+        Seed("plumbing");
+        var resolver = Build();
 
         var result = await resolver.ResolveAsync("Plumbing", "I need a plumber");
 
         result.CanonicalSlug.ShouldBe("plumbing");
         result.Resolution.ShouldBe(SlugResolution.ReturnedExisting);
-        repo.GetSeed("plumbing")!.RawExamples.ShouldContain("I need a plumber");
+        _store["plumbing"].RawExamples.ShouldContain("I need a plumber");
     }
 
     [Fact]
     public async Task ResolveAsync_ShouldAutoMergeWhenSimilarityAboveAutoMergeThreshold()
     {
-        var repo = new FakeServiceRepository();
-        repo.Seed("plumbing");
-        repo.SimilarityRule = (existing, _) => existing == "plumbing" ? 0.92 : 0;
-        var resolver = Build(repo);
+        Seed("plumbing");
+        _similarityRule = (existing, _) => existing == "plumbing" ? 0.92 : 0;
+        var resolver = Build();
 
         var result = await resolver.ResolveAsync("plumbings", null);
 
@@ -73,11 +95,12 @@ public class SlugResolverTests
     [Fact]
     public async Task ResolveAsync_ShouldUseAiJudgeForMidBandSimilarity()
     {
-        var repo = new FakeServiceRepository();
-        repo.Seed("plumbing");
-        repo.SimilarityRule = (existing, _) => existing == "plumbing" ? 0.65 : 0;
-        var ai = new ScriptedAi { JudgeResult = new ServiceJudgeResult("plumbing", false, null) };
-        var resolver = Build(repo, ai);
+        Seed("plumbing");
+        _similarityRule = (existing, _) => existing == "plumbing" ? 0.65 : 0;
+        _aiMock.Setup(x => x.JudgeServiceMatchAsync(
+                It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ServiceJudgeResult("plumbing", false, null));
+        var resolver = Build();
 
         var result = await resolver.ResolveAsync("pipe-repair", "my sink leaks");
 
@@ -88,26 +111,26 @@ public class SlugResolverTests
     [Fact]
     public async Task ResolveAsync_ShouldCreateNewSlugWhenAiJudgesNew()
     {
-        var repo = new FakeServiceRepository();
-        repo.Seed("plumbing");
-        repo.SimilarityRule = (existing, _) => existing == "plumbing" ? 0.55 : 0;
-        var ai = new ScriptedAi { JudgeResult = new ServiceJudgeResult(null, true, "astrology") };
-        var resolver = Build(repo, ai);
+        Seed("plumbing");
+        _similarityRule = (existing, _) => existing == "plumbing" ? 0.55 : 0;
+        _aiMock.Setup(x => x.JudgeServiceMatchAsync(
+                It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ServiceJudgeResult(null, true, "astrology"));
+        var resolver = Build();
 
         var result = await resolver.ResolveAsync("astrology", null);
 
         result.CanonicalSlug.ShouldBe("astrology");
         result.Resolution.ShouldBe(SlugResolution.AiJudgedNew);
-        repo.GetSeed("astrology").ShouldNotBeNull();
+        _store.ContainsKey("astrology").ShouldBeTrue();
     }
 
     [Fact]
     public async Task ResolveAsync_ShouldCreateNewWhenSimilarityBelowAiJudgeThreshold()
     {
-        var repo = new FakeServiceRepository();
-        repo.Seed("plumbing");
-        repo.SimilarityRule = (_, _) => 0.10;
-        var resolver = Build(repo);
+        Seed("plumbing");
+        _similarityRule = (_, _) => 0.10;
+        var resolver = Build();
 
         var result = await resolver.ResolveAsync("astrology", null);
 
@@ -119,96 +142,38 @@ public class SlugResolverTests
     public async Task ResolveAsync_ShouldRejectAiJudgedMatchOutsideCandidateList()
     {
         // Defense-in-depth: even if the IConversationAi implementation returns a slug
-        // that wasn't in the candidate list (e.g. a future bug or a non-validating
-        // adapter), SlugResolver itself must refuse to write it as a canonical row.
-        var repo = new FakeServiceRepository();
-        repo.Seed("plumbing");
-        repo.SimilarityRule = (existing, _) => existing == "plumbing" ? 0.65 : 0;
-        var ai = new ScriptedAi { JudgeResult = new ServiceJudgeResult("evil-slug", false, null) };
-        var resolver = Build(repo, ai);
+        // that wasn't in the candidate list, SlugResolver itself must refuse to write
+        // it as a canonical row.
+        Seed("plumbing");
+        _similarityRule = (existing, _) => existing == "plumbing" ? 0.65 : 0;
+        _aiMock.Setup(x => x.JudgeServiceMatchAsync(
+                It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ServiceJudgeResult("evil-slug", false, null));
+        var resolver = Build();
 
         var result = await resolver.ResolveAsync("plumbingg", "I do plumbingg");
 
         result.CanonicalSlug.ShouldNotBe("evil-slug");
-        result.CanonicalSlug.ShouldBe("plumbingg");                  // user's normalized proposal
+        result.CanonicalSlug.ShouldBe("plumbingg");
         result.Resolution.ShouldBe(SlugResolution.AiJudgedNew);
-        repo.GetSeed("evil-slug").ShouldBeNull();                    // never written
-        repo.GetSeed("plumbingg").ShouldNotBeNull();
+        _store.ContainsKey("evil-slug").ShouldBeFalse();
+        _store.ContainsKey("plumbingg").ShouldBeTrue();
     }
 
     [Fact]
     public async Task ResolveAsync_ShouldHonourAiJudgedMatchWhenInCandidateList()
     {
-        // Sanity: a legitimate AI judgment that picks an actual candidate still works.
-        var repo = new FakeServiceRepository();
-        repo.Seed("plumbing");
-        repo.Seed("carpentry");
-        repo.SimilarityRule = (existing, _) => existing == "plumbing" ? 0.65 : 0;
-        var ai = new ScriptedAi { JudgeResult = new ServiceJudgeResult("plumbing", false, null) };
-        var resolver = Build(repo, ai);
+        Seed("plumbing");
+        Seed("carpentry");
+        _similarityRule = (existing, _) => existing == "plumbing" ? 0.65 : 0;
+        _aiMock.Setup(x => x.JudgeServiceMatchAsync(
+                It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ServiceJudgeResult("plumbing", false, null));
+        var resolver = Build();
 
         var result = await resolver.ResolveAsync("pipe-fix", "leaky pipe");
 
         result.CanonicalSlug.ShouldBe("plumbing");
         result.Resolution.ShouldBe(SlugResolution.AiJudgedMerge);
-    }
-
-    private sealed class FakeServiceRepository : IServiceRepository
-    {
-        private readonly Dictionary<string, Service> _store = new(StringComparer.OrdinalIgnoreCase);
-
-        public Func<string, string, double> SimilarityRule { get; set; } = (_, _) => 0;
-
-        public void Seed(string slug)
-        {
-            _store[slug] = Service.Create(slug);
-        }
-
-        public Service? GetSeed(string slug) => _store.TryGetValue(slug, out var s) ? s : null;
-
-        public Task<Service?> GetBySlugAsync(string slug, CancellationToken ct = default) =>
-            Task.FromResult(_store.TryGetValue(slug, out var s) ? s : null);
-
-        public Task<IReadOnlyList<SlugSimilarity>> FindSimilarAsync(string slug, int take, CancellationToken ct = default)
-        {
-            var matches = _store.Keys
-                .Select(s => new SlugSimilarity(s, SimilarityRule(s, slug)))
-                .Where(x => x.Similarity > 0)
-                .OrderByDescending(x => x.Similarity)
-                .Take(take)
-                .ToList();
-            return Task.FromResult<IReadOnlyList<SlugSimilarity>>(matches);
-        }
-
-        public Task AddAsync(Service service, CancellationToken ct = default)
-        {
-            _store[service.Slug] = service;
-            return Task.CompletedTask;
-        }
-
-        public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
-    }
-
-    private sealed class ScriptedAi : IConversationAi
-    {
-        public ServiceJudgeResult JudgeResult { get; init; } = new(null, true, null);
-
-        public Task<IntentDetectionResult> DetectIntentAsync(string userMessage, CancellationToken ct = default) =>
-            Task.FromResult(new IntentDetectionResult(IntentKind.Unknown, 0, "en", null));
-
-        public Task<ServiceExtractionResult> ExtractServicesAsync(string userMessage, CancellationToken ct = default) =>
-            Task.FromResult(new ServiceExtractionResult(Array.Empty<string>()));
-
-        public Task<ServiceJudgeResult> JudgeServiceMatchAsync(string proposedSlug, IReadOnlyList<string> candidateSlugs, CancellationToken ct = default) =>
-            Task.FromResult(JudgeResult);
-
-        public Task<string> GenerateReplyAsync(ReplyContext context, CancellationToken ct = default) =>
-            Task.FromResult(string.Empty);
-
-        public Task<LanguageDetectionResult> DetectLanguageAsync(string userMessage, CancellationToken ct = default) =>
-            Task.FromResult(new LanguageDetectionResult("en", 1));
-
-        public Task<DateTimeOffset?> ExtractEtaAsync(string userMessage, DateTimeOffset now, CancellationToken ct = default) =>
-            Task.FromResult<DateTimeOffset?>(null);
     }
 }

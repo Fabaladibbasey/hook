@@ -7,6 +7,8 @@ using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Core;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
+using Moq;
 using MatchEntity = Hook.Features.Matching.MatchAggregate.Match;
 using ProviderEntity = Hook.Features.ProviderAvailability.AvailabilityAggregate.ProviderAvailability;
 using ProviderRepoIface = Hook.Features.ProviderAvailability.AvailabilityAggregate.IProviderAvailabilityRepository;
@@ -16,191 +18,63 @@ namespace Hook.UnitTests.ContactSharing;
 
 public class PhoneExchangerTests
 {
-    [Fact]
-    public async Task TryExchange_NoMatch_InvalidData()
+    private readonly Dictionary<Guid, MatchEntity> _matches = new();
+    private readonly Dictionary<Guid, ServiceRequestEntity> _requests = new();
+    private readonly Dictionary<string, ProviderEntity> _providers = new();
+    private readonly List<(PhoneNumber To, string Body)> _sent = new();
+    private readonly List<object> _published = new();
+
+    private readonly Mock<IMatchRepository> _matchesMock = new();
+    private readonly Mock<IServiceRequestRepository> _requestsMock = new();
+    private readonly Mock<ProviderRepoIface> _providersMock = new();
+    private readonly Mock<IWhatsappClient> _whatsappMock = new();
+    private readonly Mock<IEventPublisher> _eventsMock = new();
+    private readonly TimeProvider _clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-05-07T12:00:00Z"));
+
+    private bool _claimResult = true;
+    private PickClaim? _lastClaim;
+
+    public PhoneExchangerTests()
     {
-        var deps = new Deps();
-        var outcome = await deps.Build().TryExchangeAsync(Guid.NewGuid(), 1);
-        Assert.Equal(ExchangeOutcome.InvalidData, outcome);
+        _matchesMock.Setup(x => x.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) =>
+                _matches.TryGetValue(id, out var m) ? m : null);
+        _matchesMock.Setup(x => x.TryClaimPickAsync(It.IsAny<PickClaim>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PickClaim claim, CancellationToken _) =>
+            {
+                _lastClaim = claim;
+                if (_claimResult && _matches.TryGetValue(claim.MatchId, out var m))
+                {
+                    m.ContactShared = claim.RevealContact;
+                    m.PickedAt = claim.Now;
+                }
+                return _claimResult;
+            });
+
+        _requestsMock.Setup(x => x.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) =>
+                _requests.TryGetValue(id, out var r) ? r : null);
+
+        _providersMock.Setup(x => x.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string phone, CancellationToken _) =>
+                _providers.TryGetValue(phone, out var p) ? p : null);
+
+        _whatsappMock.Setup(x => x.SendTextAsync(It.IsAny<PhoneNumber>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<PhoneNumber, string, CancellationToken>((to, body, _) => _sent.Add((to, body)))
+            .ReturnsAsync("msg-1");
+
+        _eventsMock.Setup(x => x.PublishAsync(It.IsAny<It.IsAnyType>(), It.IsAny<CancellationToken>()))
+            .Callback(new InvocationAction(inv => _published.Add(inv.Arguments[0])))
+            .Returns(Task.CompletedTask);
     }
 
-    [Fact]
-    public async Task TryExchange_RequestMissing_RequestMissing()
-    {
-        var deps = new Deps();
-        var match = SeedMatch(deps);
-        deps.Requests.Stored.Remove(match.RequestId);
-        var outcome = await deps.Build().TryExchangeAsync(match.Id, 1);
-        Assert.Equal(ExchangeOutcome.RequestMissing, outcome);
-    }
+    private PhoneExchanger Build() => new(
+        _matchesMock.Object, _requestsMock.Object, _providersMock.Object,
+        _whatsappMock.Object, _eventsMock.Object, _clock,
+        NullLogger<PhoneExchanger>.Instance);
 
-    [Fact]
-    public async Task TryExchange_ProviderMissing_ProviderMissing()
-    {
-        var deps = new Deps();
-        var match = SeedMatch(deps);
-        deps.Providers.Stored.Remove(match.ProviderPhone);
-        var outcome = await deps.Build().TryExchangeAsync(match.Id, 1);
-        Assert.Equal(ExchangeOutcome.ProviderMissing, outcome);
-    }
-
-    [Fact]
-    public async Task TryExchange_ProviderTtlElapsed_ProviderExpired()
-    {
-        var deps = new Deps();
-        var match = SeedMatch(deps, providerExpired: true);
-        var outcome = await deps.Build().TryExchangeAsync(match.Id, 1);
-        Assert.Equal(ExchangeOutcome.ProviderExpired, outcome);
-    }
-
-    [Fact]
-    public async Task TryExchange_ProviderTtlEqualsNow_ProviderExpired()
-    {
-        var deps = new Deps();
-        var match = SeedMatch(deps, providerExpiresAtNow: true);
-        var outcome = await deps.Build().TryExchangeAsync(match.Id, 1);
-        Assert.Equal(ExchangeOutcome.ProviderExpired, outcome);
-    }
-
-    [Fact]
-    public async Task TryExchange_AlreadySharedRePick_ResendsPhone_PrefixedByMatchPosition()
-    {
-        var deps = new Deps();
-        var match = SeedMatch(deps);
-        match.ContactShared = true;
-        match.PickedAt = DateTimeOffset.UtcNow;
-
-        var outcome = await deps.Build().TryExchangeAsync(match.Id, 7);
-
-        Assert.Equal(ExchangeOutcome.AlreadyShared, outcome);
-        Assert.Single(deps.Whatsapp.Sent);
-        Assert.StartsWith("Match #7: ", deps.Whatsapp.Sent[0].Body);
-        Assert.Empty(deps.Events.Published);
-    }
-
-    [Fact]
-    public async Task TryExchange_AlreadyRoutedRePick_SendsNotice_PrefixedByMatchPositionAndMaskedPhone()
-    {
-        var deps = new Deps();
-        var match = SeedMatch(deps);
-        match.PickedAt = DateTimeOffset.UtcNow;
-
-        var outcome = await deps.Build().TryExchangeAsync(match.Id, 3);
-
-        Assert.Equal(ExchangeOutcome.AlreadyRouted, outcome);
-        Assert.Single(deps.Whatsapp.Sent);
-        Assert.StartsWith("Match #3 (+220***34): ", deps.Whatsapp.Sent[0].Body);
-        Assert.Contains("chat", deps.Whatsapp.Sent[0].Body, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task TryExchange_RaceLost_NoSendsNoPublishes()
-    {
-        var deps = new Deps();
-        var match = SeedMatch(deps);
-        deps.Matches.ClaimResult = false;
-
-        var outcome = await deps.Build().TryExchangeAsync(match.Id, 1);
-
-        Assert.Equal(ExchangeOutcome.RaceLost, outcome);
-        Assert.Empty(deps.Whatsapp.Sent);
-        Assert.Empty(deps.Events.Published);
-    }
-
-    [Fact]
-    public async Task TryExchange_BothConsent_ClaimSucceeds_Exchanged()
-    {
-        var deps = new Deps();
-        var match = SeedMatch(deps, sharePhone: true, providerConsent: true);
-
-        var outcome = await deps.Build().TryExchangeAsync(match.Id, 2);
-
-        Assert.Equal(ExchangeOutcome.Exchanged, outcome);
-        Assert.Equal(2, deps.Whatsapp.Sent.Count);
-        var clientNotice = deps.Whatsapp.Sent.Single(s => s.To.Value == "+2203339999");
-        Assert.StartsWith("Match #2: provider for plumbing: ", clientNotice.Body);
-        Assert.Single(deps.Events.Published);
-        Assert.IsType<ContactExchanged>(deps.Events.Published[0]);
-        Assert.True(deps.Matches.LastClaim?.RevealContact);
-    }
-
-    [Fact]
-    public async Task TryExchange_NoBilateralConsent_RoutesToChat_CarriesMatchPosition()
-    {
-        var deps = new Deps();
-        var match = SeedMatch(deps, sharePhone: false, providerConsent: true);
-
-        var outcome = await deps.Build().TryExchangeAsync(match.Id, 4);
-
-        Assert.Equal(ExchangeOutcome.RoutedToChat, outcome);
-        Assert.Empty(deps.Whatsapp.Sent);
-        Assert.Single(deps.Events.Published);
-        var evt = Assert.IsType<ChatRoutingRequested>(deps.Events.Published[0]);
-        Assert.False(evt.ClientConsented);
-        Assert.True(evt.ProviderConsented);
-        Assert.Equal("Banjul", evt.RequesterAddress);
-        Assert.Equal(13.45, evt.RequesterLatitude);
-        Assert.Equal(-16.6, evt.RequesterLongitude);
-        Assert.Equal(4, evt.MatchPosition);
-        Assert.False(deps.Matches.LastClaim?.RevealContact);
-    }
-
-    [Fact]
-    public async Task TryExchange_BothHidConsent_RoutesToChatWithBothFlagsFalse()
-    {
-        var deps = new Deps();
-        var match = SeedMatch(deps, sharePhone: false, providerConsent: false);
-
-        var outcome = await deps.Build().TryExchangeAsync(match.Id, 1);
-
-        Assert.Equal(ExchangeOutcome.RoutedToChat, outcome);
-        Assert.Empty(deps.Whatsapp.Sent);
-        var evt = Assert.IsType<ChatRoutingRequested>(deps.Events.Published[0]);
-        Assert.False(evt.ClientConsented);
-        Assert.False(evt.ProviderConsented);
-        Assert.Equal("Banjul", evt.RequesterAddress);
-        Assert.Equal(13.45, evt.RequesterLatitude);
-        Assert.Equal(-16.6, evt.RequesterLongitude);
-    }
-
-    [Fact]
-    public async Task TryExchange_OnlyProviderHidConsent_RoutesToChatWithProviderFalse()
-    {
-        var deps = new Deps();
-        var match = SeedMatch(deps, sharePhone: true, providerConsent: false);
-
-        var outcome = await deps.Build().TryExchangeAsync(match.Id, 1);
-
-        Assert.Equal(ExchangeOutcome.RoutedToChat, outcome);
-        var evt = Assert.IsType<ChatRoutingRequested>(deps.Events.Published[0]);
-        Assert.True(evt.ClientConsented);
-        Assert.False(evt.ProviderConsented);
-    }
-
-    [Fact]
-    public async Task TryExchange_PassesCallerClientPhoneToClaim()
-    {
-        var deps = new Deps();
-        var match = SeedMatch(deps);
-
-        await deps.Build().TryExchangeAsync(match.Id, 1);
-
-        Assert.Equal(deps.Requests.Stored[match.RequestId].ClientPhone, deps.Matches.LastClaim?.CallerClientPhone);
-    }
-
-    [Fact]
-    public async Task TryExchange_BadPhoneInRequest_InvalidData()
-    {
-        var deps = new Deps();
-        var match = SeedMatch(deps, clientPhone: "not-a-phone");
-        var outcome = await deps.Build().TryExchangeAsync(match.Id, 1);
-        Assert.Equal(ExchangeOutcome.InvalidData, outcome);
-    }
-
-    private static MatchEntity SeedMatch(
-        Deps deps,
-        bool providerExpired = false,
-        bool providerExpiresAtNow = false,
+    private MatchEntity SeedMatch(
+        DateTimeOffset? providerExpiresAt = null,
         bool sharePhone = true,
         bool providerConsent = true,
         string clientPhone = "+2203339999")
@@ -212,107 +86,187 @@ public class PhoneExchangerTests
             ProviderPhone = providerPhone,
             ServiceSlug = "plumbing"
         };
-        deps.Matches.Stored[match.Id] = match;
+        _matches[match.Id] = match;
 
         var request = ServiceRequestEntity.Create(
             clientPhone, "plumbing",
             new Location(13.45, -16.6), "Banjul",
             "req-test", 5.0, DateTimeOffset.UtcNow, sharePhone);
-        deps.Requests.Stored[match.RequestId] = request;
+        _requests[match.RequestId] = request;
 
-        var now = deps.Clock.GetUtcNow();
-        var expiresAt = providerExpired ? now.AddHours(-1)
-                      : providerExpiresAtNow ? now
-                      : now.AddHours(24);
-        deps.Providers.Stored[providerPhone] = ProviderEntity.Register(
+        var now = _clock.GetUtcNow();
+        var expiresAt = providerExpiresAt ?? now.AddHours(24);
+        _providers[providerPhone] = ProviderEntity.Register(
             providerPhone, new[] { "plumbing" },
             new Location(13.45, -16.6), "Banjul",
             providerConsent, expiresAt - now, now);
         return match;
     }
 
-    private sealed class Deps
+    [Fact]
+    public async Task TryExchange_NoMatch_InvalidData()
     {
-        public FakeMatchRepository Matches { get; } = new();
-        public FakeRequestRepository Requests { get; } = new();
-        public FakeProviderRepository Providers { get; } = new();
-        public FakeWhatsapp Whatsapp { get; } = new();
-        public FakeEventPublisher Events { get; } = new();
-        public TimeProvider Clock { get; } = new FixedTimeProvider(DateTimeOffset.Parse("2026-05-07T12:00:00Z"));
-
-        public PhoneExchanger Build() => new(
-            Matches, Requests, Providers, Whatsapp, Events, Clock,
-            NullLogger<PhoneExchanger>.Instance);
+        var outcome = await Build().TryExchangeAsync(Guid.NewGuid(), 1);
+        Assert.Equal(ExchangeOutcome.InvalidData, outcome);
     }
 
-    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    [Fact]
+    public async Task TryExchange_RequestMissing_RequestMissing()
     {
-        public override DateTimeOffset GetUtcNow() => now;
+        var match = SeedMatch();
+        _requests.Remove(match.RequestId);
+        var outcome = await Build().TryExchangeAsync(match.Id, 1);
+        Assert.Equal(ExchangeOutcome.RequestMissing, outcome);
     }
 
-    private sealed class FakeMatchRepository : IMatchRepository
+    [Fact]
+    public async Task TryExchange_ProviderMissing_ProviderMissing()
     {
-        public Dictionary<Guid, MatchEntity> Stored { get; } = new();
-        public bool ClaimResult { get; set; } = true;
-        public PickClaim? LastClaim { get; private set; }
-
-        public Task<MatchEntity?> GetAsync(Guid id, CancellationToken ct = default) =>
-            Task.FromResult(Stored.TryGetValue(id, out var m) ? m : null);
-        public Task<IReadOnlyList<MatchEntity>> GetForRequestAsync(Guid requestId, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<MatchEntity>>(Array.Empty<MatchEntity>());
-        public Task AddAsync(MatchEntity match, CancellationToken ct = default) => Task.CompletedTask;
-        public Task AddRangeAsync(IEnumerable<MatchEntity> matches, CancellationToken ct = default) => Task.CompletedTask;
-        public Task<bool> TryClaimPickAsync(PickClaim claim, CancellationToken ct = default)
-        {
-            LastClaim = claim;
-            if (ClaimResult && Stored.TryGetValue(claim.MatchId, out var m))
-            {
-                m.ContactShared = claim.RevealContact;
-                m.PickedAt = claim.Now;
-            }
-            return Task.FromResult(ClaimResult);
-        }
-        public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
+        var match = SeedMatch();
+        _providers.Remove(match.ProviderPhone);
+        var outcome = await Build().TryExchangeAsync(match.Id, 1);
+        Assert.Equal(ExchangeOutcome.ProviderMissing, outcome);
     }
 
-    private sealed class FakeRequestRepository : IServiceRequestRepository
+    [Fact]
+    public async Task TryExchange_ProviderTtlElapsed_ProviderExpired()
     {
-        public Dictionary<Guid, ServiceRequestEntity> Stored { get; } = new();
-        public Task<ServiceRequestEntity?> GetActiveByClientAsync(string clientPhone, CancellationToken ct = default) =>
-            Task.FromResult<ServiceRequestEntity?>(null);
-        public Task<ServiceRequestEntity?> GetAsync(Guid id, CancellationToken ct = default) =>
-            Task.FromResult(Stored.TryGetValue(id, out var r) ? r : null);
-        public Task AddAsync(ServiceRequestEntity request, CancellationToken ct = default) => Task.CompletedTask;
-        public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
+        var match = SeedMatch(providerExpiresAt: _clock.GetUtcNow().AddHours(-1));
+        var outcome = await Build().TryExchangeAsync(match.Id, 1);
+        Assert.Equal(ExchangeOutcome.ProviderExpired, outcome);
     }
 
-    private sealed class FakeProviderRepository : ProviderRepoIface
+    [Fact]
+    public async Task TryExchange_ProviderTtlEqualsNow_ProviderExpired()
     {
-        public Dictionary<string, ProviderEntity> Stored { get; } = new();
-        public Task<ProviderEntity?> GetAsync(string phone, CancellationToken ct = default) =>
-            Task.FromResult(Stored.TryGetValue(phone, out var p) ? p : null);
-        public Task AddAsync(ProviderEntity availability, CancellationToken ct = default) => Task.CompletedTask;
-        public Task RemoveAsync(string phone, CancellationToken ct = default) => Task.CompletedTask;
-        public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
+        var match = SeedMatch(providerExpiresAt: _clock.GetUtcNow());
+        var outcome = await Build().TryExchangeAsync(match.Id, 1);
+        Assert.Equal(ExchangeOutcome.ProviderExpired, outcome);
     }
 
-    private sealed class FakeWhatsapp : IWhatsappClient
+    [Fact]
+    public async Task TryExchange_AlreadySharedRePick_ResendsPhone_PrefixedByMatchPosition()
     {
-        public List<(PhoneNumber To, string Body)> Sent { get; } = new();
-        public Task<string> SendTextAsync(PhoneNumber to, string body, CancellationToken ct = default)
-        {
-            Sent.Add((to, body));
-            return Task.FromResult("msg-1");
-        }
+        var match = SeedMatch();
+        match.ContactShared = true;
+        match.PickedAt = DateTimeOffset.UtcNow;
+
+        var outcome = await Build().TryExchangeAsync(match.Id, 7);
+
+        Assert.Equal(ExchangeOutcome.AlreadyShared, outcome);
+        Assert.Single(_sent);
+        Assert.StartsWith("Match #7: ", _sent[0].Body);
+        Assert.Empty(_published);
     }
 
-    private sealed class FakeEventPublisher : IEventPublisher
+    [Fact]
+    public async Task TryExchange_AlreadyRoutedRePick_SendsNotice_PrefixedByMatchPositionAndMaskedPhone()
     {
-        public List<object> Published { get; } = new();
-        public Task PublishAsync<T>(T message, CancellationToken ct = default)
-        {
-            Published.Add(message!);
-            return Task.CompletedTask;
-        }
+        var match = SeedMatch();
+        match.PickedAt = DateTimeOffset.UtcNow;
+
+        var outcome = await Build().TryExchangeAsync(match.Id, 3);
+
+        Assert.Equal(ExchangeOutcome.AlreadyRouted, outcome);
+        Assert.Single(_sent);
+        Assert.StartsWith("Match #3 (+220***34): ", _sent[0].Body);
+        Assert.Contains("chat", _sent[0].Body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task TryExchange_RaceLost_NoSendsNoPublishes()
+    {
+        var match = SeedMatch();
+        _claimResult = false;
+
+        var outcome = await Build().TryExchangeAsync(match.Id, 1);
+
+        Assert.Equal(ExchangeOutcome.RaceLost, outcome);
+        Assert.Empty(_sent);
+        Assert.Empty(_published);
+    }
+
+    [Fact]
+    public async Task TryExchange_BothConsent_ClaimSucceeds_Exchanged()
+    {
+        var match = SeedMatch(sharePhone: true, providerConsent: true);
+
+        var outcome = await Build().TryExchangeAsync(match.Id, 2);
+
+        Assert.Equal(ExchangeOutcome.Exchanged, outcome);
+        Assert.Equal(2, _sent.Count);
+        var clientNotice = _sent.Single(s => s.To.Value == "+2203339999");
+        Assert.StartsWith("Match #2: provider for plumbing: ", clientNotice.Body);
+        Assert.Single(_published);
+        Assert.IsType<ContactExchanged>(_published[0]);
+        Assert.True(_lastClaim?.RevealContact);
+    }
+
+    [Fact]
+    public async Task TryExchange_NoBilateralConsent_RoutesToChat_CarriesMatchPosition()
+    {
+        var match = SeedMatch(sharePhone: false, providerConsent: true);
+
+        var outcome = await Build().TryExchangeAsync(match.Id, 4);
+
+        Assert.Equal(ExchangeOutcome.RoutedToChat, outcome);
+        Assert.Empty(_sent);
+        Assert.Single(_published);
+        var evt = Assert.IsType<ChatRoutingRequested>(_published[0]);
+        Assert.False(evt.ClientConsented);
+        Assert.True(evt.ProviderConsented);
+        Assert.Equal("Banjul", evt.RequesterAddress);
+        Assert.Equal(13.45, evt.RequesterLatitude);
+        Assert.Equal(-16.6, evt.RequesterLongitude);
+        Assert.Equal(4, evt.MatchPosition);
+        Assert.False(_lastClaim?.RevealContact);
+    }
+
+    [Fact]
+    public async Task TryExchange_BothHidConsent_RoutesToChatWithBothFlagsFalse()
+    {
+        var match = SeedMatch(sharePhone: false, providerConsent: false);
+
+        var outcome = await Build().TryExchangeAsync(match.Id, 1);
+
+        Assert.Equal(ExchangeOutcome.RoutedToChat, outcome);
+        Assert.Empty(_sent);
+        var evt = Assert.IsType<ChatRoutingRequested>(_published[0]);
+        Assert.False(evt.ClientConsented);
+        Assert.False(evt.ProviderConsented);
+        Assert.Equal("Banjul", evt.RequesterAddress);
+        Assert.Equal(13.45, evt.RequesterLatitude);
+        Assert.Equal(-16.6, evt.RequesterLongitude);
+    }
+
+    [Fact]
+    public async Task TryExchange_OnlyProviderHidConsent_RoutesToChatWithProviderFalse()
+    {
+        var match = SeedMatch(sharePhone: true, providerConsent: false);
+
+        var outcome = await Build().TryExchangeAsync(match.Id, 1);
+
+        Assert.Equal(ExchangeOutcome.RoutedToChat, outcome);
+        var evt = Assert.IsType<ChatRoutingRequested>(_published[0]);
+        Assert.True(evt.ClientConsented);
+        Assert.False(evt.ProviderConsented);
+    }
+
+    [Fact]
+    public async Task TryExchange_PassesCallerClientPhoneToClaim()
+    {
+        var match = SeedMatch();
+
+        await Build().TryExchangeAsync(match.Id, 1);
+
+        Assert.Equal(_requests[match.RequestId].ClientPhone, _lastClaim?.CallerClientPhone);
+    }
+
+    [Fact]
+    public async Task TryExchange_BadPhoneInRequest_InvalidData()
+    {
+        var match = SeedMatch(clientPhone: "not-a-phone");
+        var outcome = await Build().TryExchangeAsync(match.Id, 1);
+        Assert.Equal(ExchangeOutcome.InvalidData, outcome);
     }
 }
