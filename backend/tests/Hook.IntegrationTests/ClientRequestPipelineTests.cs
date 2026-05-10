@@ -117,7 +117,7 @@ public class ClientRequestPipelineTests : PipelineTestBase
 
         var clientShare = await client.ExpectOutboundAsync(
             phone,
-            m => m.Body.StartsWith("Provider for ", StringComparison.OrdinalIgnoreCase),
+            m => m.Body.StartsWith("Match #1: provider for ", StringComparison.Ordinal),
             since: presented.At);
 
         clientShare.Body.ShouldContain("plumbing");
@@ -159,7 +159,7 @@ public class ClientRequestPipelineTests : PipelineTestBase
 
         var clientShare = await client.ExpectOutboundAsync(
             phone,
-            m => m.Body.StartsWith("Provider for ", StringComparison.OrdinalIgnoreCase),
+            m => m.Body.StartsWith("Match #1: provider for ", StringComparison.Ordinal),
             since: ambiguity.At);
 
         clientShare.Body.ShouldContain("plumbing");
@@ -348,7 +348,7 @@ public class ClientRequestPipelineTests : PipelineTestBase
         var followup = await client.ExpectOutboundAsync(
             phone,
             m => m.Body.StartsWith("Which match", StringComparison.OrdinalIgnoreCase) ||
-                 m.Body.StartsWith("Provider for ", StringComparison.OrdinalIgnoreCase),
+                 m.Body.StartsWith("Match #", StringComparison.Ordinal),
             since: presented.At);
 
         followup.Body.ShouldNotContain("listed as a provider", Case.Insensitive);

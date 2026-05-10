@@ -23,7 +23,7 @@ public readonly record struct PhoneNumber
 
         var trimmed = raw.Trim();
         var withPlus = trimmed.StartsWith('+') ? trimmed : "+" + trimmed.TrimStart('0');
-        var compact = new string(withPlus.Where(c => c == '+' || char.IsDigit(c)).ToArray());
+        var compact = new string([.. withPlus.Where(c => c == '+' || char.IsDigit(c))]);
 
         if (!E164.IsMatch(compact)) return false;
 

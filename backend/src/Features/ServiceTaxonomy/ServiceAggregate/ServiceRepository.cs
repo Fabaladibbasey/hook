@@ -17,7 +17,7 @@ public sealed class ServiceRepository(HookDbContext db) : IServiceRepository
             .Take(take)
             .ToListAsync(ct);
 
-        return rows.Select(x => new SlugSimilarity(x.Slug, x.Similarity)).ToList();
+        return [.. rows.Select(x => new SlugSimilarity(x.Slug, x.Similarity))];
     }
 
     public async Task AddAsync(Service service, CancellationToken ct = default) =>

@@ -20,7 +20,7 @@ public class PhoneExchangerTests
     public async Task TryExchange_NoMatch_InvalidData()
     {
         var deps = new Deps();
-        var outcome = await deps.Build().TryExchangeAsync(Guid.NewGuid());
+        var outcome = await deps.Build().TryExchangeAsync(Guid.NewGuid(), 1);
         Assert.Equal(ExchangeOutcome.InvalidData, outcome);
     }
 
@@ -30,7 +30,7 @@ public class PhoneExchangerTests
         var deps = new Deps();
         var match = SeedMatch(deps);
         deps.Requests.Stored.Remove(match.RequestId);
-        var outcome = await deps.Build().TryExchangeAsync(match.Id);
+        var outcome = await deps.Build().TryExchangeAsync(match.Id, 1);
         Assert.Equal(ExchangeOutcome.RequestMissing, outcome);
     }
 
@@ -40,7 +40,7 @@ public class PhoneExchangerTests
         var deps = new Deps();
         var match = SeedMatch(deps);
         deps.Providers.Stored.Remove(match.ProviderPhone);
-        var outcome = await deps.Build().TryExchangeAsync(match.Id);
+        var outcome = await deps.Build().TryExchangeAsync(match.Id, 1);
         Assert.Equal(ExchangeOutcome.ProviderMissing, outcome);
     }
 
@@ -49,7 +49,7 @@ public class PhoneExchangerTests
     {
         var deps = new Deps();
         var match = SeedMatch(deps, providerExpired: true);
-        var outcome = await deps.Build().TryExchangeAsync(match.Id);
+        var outcome = await deps.Build().TryExchangeAsync(match.Id, 1);
         Assert.Equal(ExchangeOutcome.ProviderExpired, outcome);
     }
 
@@ -58,36 +58,38 @@ public class PhoneExchangerTests
     {
         var deps = new Deps();
         var match = SeedMatch(deps, providerExpiresAtNow: true);
-        var outcome = await deps.Build().TryExchangeAsync(match.Id);
+        var outcome = await deps.Build().TryExchangeAsync(match.Id, 1);
         Assert.Equal(ExchangeOutcome.ProviderExpired, outcome);
     }
 
     [Fact]
-    public async Task TryExchange_AlreadySharedRePick_ResendsPhone()
+    public async Task TryExchange_AlreadySharedRePick_ResendsPhone_PrefixedByMatchPosition()
     {
         var deps = new Deps();
         var match = SeedMatch(deps);
         match.ContactShared = true;
         match.PickedAt = DateTimeOffset.UtcNow;
 
-        var outcome = await deps.Build().TryExchangeAsync(match.Id);
+        var outcome = await deps.Build().TryExchangeAsync(match.Id, 7);
 
         Assert.Equal(ExchangeOutcome.AlreadyShared, outcome);
         Assert.Single(deps.Whatsapp.Sent);
+        Assert.StartsWith("Match #7: ", deps.Whatsapp.Sent[0].Body);
         Assert.Empty(deps.Events.Published);
     }
 
     [Fact]
-    public async Task TryExchange_AlreadyRoutedRePick_SendsNotice()
+    public async Task TryExchange_AlreadyRoutedRePick_SendsNotice_PrefixedByMatchPositionAndMaskedPhone()
     {
         var deps = new Deps();
         var match = SeedMatch(deps);
         match.PickedAt = DateTimeOffset.UtcNow;
 
-        var outcome = await deps.Build().TryExchangeAsync(match.Id);
+        var outcome = await deps.Build().TryExchangeAsync(match.Id, 3);
 
         Assert.Equal(ExchangeOutcome.AlreadyRouted, outcome);
         Assert.Single(deps.Whatsapp.Sent);
+        Assert.StartsWith("Match #3 (+220***34): ", deps.Whatsapp.Sent[0].Body);
         Assert.Contains("chat", deps.Whatsapp.Sent[0].Body, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -98,7 +100,7 @@ public class PhoneExchangerTests
         var match = SeedMatch(deps);
         deps.Matches.ClaimResult = false;
 
-        var outcome = await deps.Build().TryExchangeAsync(match.Id);
+        var outcome = await deps.Build().TryExchangeAsync(match.Id, 1);
 
         Assert.Equal(ExchangeOutcome.RaceLost, outcome);
         Assert.Empty(deps.Whatsapp.Sent);
@@ -111,22 +113,24 @@ public class PhoneExchangerTests
         var deps = new Deps();
         var match = SeedMatch(deps, sharePhone: true, providerConsent: true);
 
-        var outcome = await deps.Build().TryExchangeAsync(match.Id);
+        var outcome = await deps.Build().TryExchangeAsync(match.Id, 2);
 
         Assert.Equal(ExchangeOutcome.Exchanged, outcome);
         Assert.Equal(2, deps.Whatsapp.Sent.Count);
+        var clientNotice = deps.Whatsapp.Sent.Single(s => s.To.Value == "+2203339999");
+        Assert.StartsWith("Match #2: provider for plumbing: ", clientNotice.Body);
         Assert.Single(deps.Events.Published);
         Assert.IsType<ContactExchanged>(deps.Events.Published[0]);
         Assert.True(deps.Matches.LastClaim?.RevealContact);
     }
 
     [Fact]
-    public async Task TryExchange_NoBilateralConsent_RoutesToChat()
+    public async Task TryExchange_NoBilateralConsent_RoutesToChat_CarriesMatchPosition()
     {
         var deps = new Deps();
         var match = SeedMatch(deps, sharePhone: false, providerConsent: true);
 
-        var outcome = await deps.Build().TryExchangeAsync(match.Id);
+        var outcome = await deps.Build().TryExchangeAsync(match.Id, 4);
 
         Assert.Equal(ExchangeOutcome.RoutedToChat, outcome);
         Assert.Empty(deps.Whatsapp.Sent);
@@ -137,6 +141,7 @@ public class PhoneExchangerTests
         Assert.Equal("Banjul", evt.RequesterAddress);
         Assert.Equal(13.45, evt.RequesterLatitude);
         Assert.Equal(-16.6, evt.RequesterLongitude);
+        Assert.Equal(4, evt.MatchPosition);
         Assert.False(deps.Matches.LastClaim?.RevealContact);
     }
 
@@ -146,7 +151,7 @@ public class PhoneExchangerTests
         var deps = new Deps();
         var match = SeedMatch(deps, sharePhone: false, providerConsent: false);
 
-        var outcome = await deps.Build().TryExchangeAsync(match.Id);
+        var outcome = await deps.Build().TryExchangeAsync(match.Id, 1);
 
         Assert.Equal(ExchangeOutcome.RoutedToChat, outcome);
         Assert.Empty(deps.Whatsapp.Sent);
@@ -164,7 +169,7 @@ public class PhoneExchangerTests
         var deps = new Deps();
         var match = SeedMatch(deps, sharePhone: true, providerConsent: false);
 
-        var outcome = await deps.Build().TryExchangeAsync(match.Id);
+        var outcome = await deps.Build().TryExchangeAsync(match.Id, 1);
 
         Assert.Equal(ExchangeOutcome.RoutedToChat, outcome);
         var evt = Assert.IsType<ChatRoutingRequested>(deps.Events.Published[0]);
@@ -178,7 +183,7 @@ public class PhoneExchangerTests
         var deps = new Deps();
         var match = SeedMatch(deps);
 
-        await deps.Build().TryExchangeAsync(match.Id);
+        await deps.Build().TryExchangeAsync(match.Id, 1);
 
         Assert.Equal(deps.Requests.Stored[match.RequestId].ClientPhone, deps.Matches.LastClaim?.CallerClientPhone);
     }
@@ -188,7 +193,7 @@ public class PhoneExchangerTests
     {
         var deps = new Deps();
         var match = SeedMatch(deps, clientPhone: "not-a-phone");
-        var outcome = await deps.Build().TryExchangeAsync(match.Id);
+        var outcome = await deps.Build().TryExchangeAsync(match.Id, 1);
         Assert.Equal(ExchangeOutcome.InvalidData, outcome);
     }
 

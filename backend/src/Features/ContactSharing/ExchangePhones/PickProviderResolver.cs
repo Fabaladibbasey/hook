@@ -3,6 +3,8 @@ using MatchEntity = Hook.Features.Matching.MatchAggregate.Match;
 
 namespace Hook.Features.ContactSharing.ExchangePhones;
 
+public sealed record PickedMatch(MatchEntity Match, int Position);
+
 public static class PickProviderResolver
 {
     private static readonly Regex IndexListRegex = new(
@@ -28,27 +30,38 @@ public static class PickProviderResolver
     public static bool IsPickIntent(string text) =>
         PickKeywordRegex.IsMatch(text) || BareIndexSyntaxRegex.IsMatch(text);
 
-    public static IReadOnlyList<MatchEntity> Resolve(string text, IReadOnlyList<MatchEntity> matches)
+    public static IReadOnlyList<PickedMatch> Resolve(string text, IReadOnlyList<MatchEntity> matches)
     {
-        if (matches.Count == 0) return Array.Empty<MatchEntity>();
+        if (matches.Count == 0) return Array.Empty<PickedMatch>();
 
-        if (AllRegex.IsMatch(text)) return matches.ToList();
+        if (AllRegex.IsMatch(text))
+            return [.. matches.Select((m, i) => new PickedMatch(m, i + 1))];
 
         var indices = ParseIndices(text, matches.Count);
-        if (indices.Count > 0) return indices.Select(i => matches[i]).ToList();
+        if (indices.Count > 0)
+            return [.. indices.Select(i => new PickedMatch(matches[i], i + 1))];
 
         // Full-phone match wins over last-4 — if the user typed the full E.164 we
         // accept it as an unambiguous pick regardless of the pick keyword.
-        var full = matches.FirstOrDefault(m => text.Contains(m.ProviderPhone, StringComparison.Ordinal));
-        if (full is not null) return [full];
+        var fullIdx = IndexOf(matches, m => text.Contains(m.ProviderPhone, StringComparison.Ordinal));
+        if (fullIdx >= 0) return [new PickedMatch(matches[fullIdx], fullIdx + 1)];
 
         // Last-4 fragment fallback runs only when the user explicitly typed "pick".
         // Without the keyword, an incidental digit run ("1234 main st") could
         // exchange contact info without intent.
-        if (!PickKeywordRegex.IsMatch(text)) return Array.Empty<MatchEntity>();
+        if (!PickKeywordRegex.IsMatch(text)) return Array.Empty<PickedMatch>();
 
-        var fragmentHit = MatchByLastFourFragment(text, matches);
-        return fragmentHit is null ? Array.Empty<MatchEntity>() : [fragmentHit];
+        var fragmentIdx = MatchByLastFourFragmentIndex(text, matches);
+        return fragmentIdx < 0
+            ? Array.Empty<PickedMatch>()
+            : [new PickedMatch(matches[fragmentIdx], fragmentIdx + 1)];
+    }
+
+    private static int IndexOf(IReadOnlyList<MatchEntity> matches, Func<MatchEntity, bool> pred)
+    {
+        for (var i = 0; i < matches.Count; i++)
+            if (pred(matches[i])) return i;
+        return -1;
     }
 
     private static IReadOnlyList<int> ParseIndices(string text, int count)
@@ -71,16 +84,21 @@ public static class PickProviderResolver
     /// <summary>
     /// Match against the last 4 digits of any provider phone, requiring digit-bounded
     /// edges so "1234 main st" does not match a phone ending in 1234. On collision
-    /// (two or more providers share the trailing 4) returns null; the caller drops the
+    /// (two or more providers share the trailing 4) returns -1; the caller drops the
     /// inbound silently and the user can retry with an explicit index.
     /// </summary>
-    private static MatchEntity? MatchByLastFourFragment(string text, IReadOnlyList<MatchEntity> matches)
+    private static int MatchByLastFourFragmentIndex(string text, IReadOnlyList<MatchEntity> matches)
     {
-        var lastFourHits = matches
-            .Where(m => m.ProviderPhone.Length >= 4 && HasDigitBoundedFragment(text, m.ProviderPhone[^4..]))
-            .Take(2)
-            .ToList();
-        return lastFourHits.Count == 1 ? lastFourHits[0] : null;
+        var hit = -1;
+        for (var i = 0; i < matches.Count; i++)
+        {
+            var m = matches[i];
+            if (m.ProviderPhone.Length < 4) continue;
+            if (!HasDigitBoundedFragment(text, m.ProviderPhone[^4..])) continue;
+            if (hit >= 0) return -1; // collision
+            hit = i;
+        }
+        return hit;
     }
 
     private static bool HasDigitBoundedFragment(string text, string fragment)

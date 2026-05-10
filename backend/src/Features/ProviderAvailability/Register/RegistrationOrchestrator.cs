@@ -223,7 +223,7 @@ public sealed class RegistrationOrchestrator(
 
         existing.AddServices(newSlugs, options.Value.MaxServicesPerProvider);
         // Recompute the actually-added subset after the cap (Services is now capped).
-        return newSlugs.Where(s => existing.Services.Contains(s)).ToList();
+        return [.. newSlugs.Where(s => existing.Services.Contains(s))];
     }
 
     private async Task CollectLocationAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)

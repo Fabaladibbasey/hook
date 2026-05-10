@@ -67,7 +67,7 @@ public class MatchingServiceTests
             DateTimeOffset now,
             CancellationToken ct = default)
         {
-            LastExcludePhones = excludePhones.ToList();
+            LastExcludePhones = [.. excludePhones];
             return Task.FromResult<IReadOnlyList<ProviderCandidate>>(Array.Empty<ProviderCandidate>());
         }
     }

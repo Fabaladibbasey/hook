@@ -11,4 +11,5 @@ public sealed record ChatRoutingRequested(
     bool ProviderConsented,
     string RequesterAddress,
     double RequesterLatitude,
-    double RequesterLongitude);
+    double RequesterLongitude,
+    int MatchPosition);

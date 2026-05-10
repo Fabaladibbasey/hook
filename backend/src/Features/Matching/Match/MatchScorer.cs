@@ -40,10 +40,9 @@ public sealed class MatchScorer(IOptions<MatchingOptions> options)
         DateTimeOffset now,
         int take)
     {
-        return candidates
+        return [.. candidates
             .Select(c => Score(c, radiusKm, now))
             .OrderByDescending(s => s.Score)
-            .Take(take)
-            .ToList();
+            .Take(take)];
     }
 }

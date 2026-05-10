@@ -18,10 +18,12 @@ public class ChatRoutingRequestedHandlerTests
 {
     private const string ClientPhone = "+2203339999";
     private const string ProviderPhone = "+2203331234";
+    private const string MaskedProvider = "+220***34";
     private const string Slug = "plumbing";
     private const string Address = "Banjul";
     private const double Lat = 13.45;
     private const double Lon = -16.6;
+    private const int MatchPosition = 2;
 
     [Fact]
     public async Task Handle_BothHidConsent_NeitherMessageBlamesTheOtherParty()
@@ -33,7 +35,7 @@ public class ChatRoutingRequestedHandlerTests
 
         var client = deps.Whatsapp.Sent.Single(s => s.To.Value == ClientPhone);
         var provider = deps.Whatsapp.Sent.Single(s => s.To.Value == ProviderPhone);
-        Assert.StartsWith("Your private chat is ready. Open: ", client.Body);
+        Assert.StartsWith($"Match #{MatchPosition} ({MaskedProvider}): your private chat is ready. Open: ", client.Body);
         Assert.Contains($"{Slug} client at {Address} (https://maps.google.com/?q=13.45,-16.6) wants to chat. Open: ", provider.Body);
         Assert.DoesNotContain("prefers", client.Body);
         Assert.DoesNotContain("prefers", provider.Body);
@@ -49,7 +51,7 @@ public class ChatRoutingRequestedHandlerTests
 
         var client = deps.Whatsapp.Sent.Single(s => s.To.Value == ClientPhone);
         var provider = deps.Whatsapp.Sent.Single(s => s.To.Value == ProviderPhone);
-        Assert.StartsWith("The other party prefers a private chat. Open: ", client.Body);
+        Assert.StartsWith($"Match #{MatchPosition} ({MaskedProvider}): the other party prefers a private chat. Open: ", client.Body);
         Assert.Contains("wants to chat", provider.Body);
         Assert.Contains("https://maps.google.com/?q=13.45,-16.6", provider.Body);
     }
@@ -64,7 +66,7 @@ public class ChatRoutingRequestedHandlerTests
 
         var client = deps.Whatsapp.Sent.Single(s => s.To.Value == ClientPhone);
         var provider = deps.Whatsapp.Sent.Single(s => s.To.Value == ProviderPhone);
-        Assert.StartsWith("Your private chat is ready. Open: ", client.Body);
+        Assert.StartsWith($"Match #{MatchPosition} ({MaskedProvider}): your private chat is ready. Open: ", client.Body);
         Assert.Contains("prefers a private chat", provider.Body);
         Assert.Contains("https://maps.google.com/?q=13.45,-16.6", provider.Body);
     }
@@ -105,7 +107,7 @@ public class ChatRoutingRequestedHandlerTests
     }
 
     private static ChatRoutingRequested MakeEvt(Guid matchId, bool clientConsented, bool providerConsented) =>
-        new(matchId, Guid.NewGuid(), ClientPhone, ProviderPhone, clientConsented, providerConsented, Address, Lat, Lon);
+        new(matchId, Guid.NewGuid(), ClientPhone, ProviderPhone, clientConsented, providerConsented, Address, Lat, Lon, MatchPosition);
 
     private sealed class Deps
     {

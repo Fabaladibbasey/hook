@@ -43,7 +43,7 @@ public class ChatPrivacyRoutingPipelineTests : PipelineTestBase
         clientMatch.Success.ShouldBeTrue($"client message missing /c/<chatId>/<token>: {clientLink.Body}");
         providerMatch.Success.ShouldBeTrue($"provider message missing /c/<chatId>/<token>: {providerLink.Body}");
 
-        clientLink.Body.ShouldStartWith("Your private chat is ready.");
+        clientLink.Body.ShouldStartWith("Match #2 (+220***02): your private chat is ready.");
         clientLink.Body.ShouldNotContain("prefers");
 
         var expectedMapsUrl = string.Format(

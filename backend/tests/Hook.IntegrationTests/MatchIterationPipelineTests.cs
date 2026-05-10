@@ -68,7 +68,7 @@ public class MatchIterationPipelineTests : PipelineTestBase
 
         var outbox = await client.GetOutboxAsync();
         var afterPick = outbox.Where(m => m.At > presented.At && m.To == phone).ToList();
-        afterPick.ShouldNotContain(m => m.Body.StartsWith("Provider for ", StringComparison.OrdinalIgnoreCase));
+        afterPick.ShouldNotContain(m => m.Body.Contains("provider for ", StringComparison.OrdinalIgnoreCase));
         afterPick.ShouldNotContain(m => m.Body.Contains("private chat", StringComparison.OrdinalIgnoreCase));
     }
 }

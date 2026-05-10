@@ -25,7 +25,7 @@ public class ProviderAvailability
         return new ProviderAvailability
         {
             Phone = phone,
-            Services = services.Distinct().ToList(),
+            Services = [.. services.Distinct()],
             Location = location.ToPoint(),
             FormattedAddress = formattedAddress,
             ShareContact = shareContact,
@@ -42,7 +42,7 @@ public class ProviderAvailability
 
     public void UpdateServices(IEnumerable<string> services)
     {
-        Services = services.Distinct().ToList();
+        Services = [.. services.Distinct()];
     }
 
     /// <summary>
@@ -51,7 +51,7 @@ public class ProviderAvailability
     /// </summary>
     public void AddServices(IEnumerable<string> services, int max)
     {
-        Services = Services.Concat(services).Distinct().Take(max).ToList();
+        Services = [.. Services.Concat(services).Distinct().Take(max)];
     }
 
     public void UpdateLocation(Location location, string formattedAddress)

@@ -17,7 +17,7 @@ public sealed class PhoneExchanger(
     TimeProvider clock,
     ILogger<PhoneExchanger> logger)
 {
-    public async Task<ExchangeOutcome> TryExchangeAsync(Guid matchId, CancellationToken ct = default)
+    public async Task<ExchangeOutcome> TryExchangeAsync(Guid matchId, int matchPosition, CancellationToken ct = default)
     {
         var match = await matches.GetAsync(matchId, ct);
         if (match is null)
@@ -43,7 +43,7 @@ public sealed class PhoneExchanger(
 
         if (match.ContactShared)
         {
-            await whatsapp.SendTextAsync(clientPhone, FormatProviderResend(match.ServiceSlug, providerPhone), ct);
+            await whatsapp.SendTextAsync(clientPhone, FormatProviderResend(matchPosition, match.ServiceSlug, providerPhone), ct);
             return ExchangeOutcome.AlreadyShared;
         }
 
@@ -53,7 +53,7 @@ public sealed class PhoneExchanger(
             // on ChatId, so re-publishing wouldn't re-deliver the link. Send a brief
             // notice pointing the client at the existing chat thread instead.
             await whatsapp.SendTextAsync(clientPhone,
-                $"Already connected to chat with the provider for {match.ServiceSlug}. Check your earlier messages for the chat link.", ct);
+                $"Match #{matchPosition} ({providerPhone.Mask()}): already connected to chat with the provider for {match.ServiceSlug}. Check your earlier messages for the chat link.", ct);
             return ExchangeOutcome.AlreadyRouted;
         }
 
@@ -78,17 +78,18 @@ public sealed class PhoneExchanger(
                 provider.ShareContact,
                 request.FormattedAddress,
                 request.Location.Y,
-                request.Location.X), ct);
+                request.Location.X,
+                matchPosition), ct);
             return ExchangeOutcome.RoutedToChat;
         }
 
-        await whatsapp.SendTextAsync(clientPhone, FormatProviderResend(match.ServiceSlug, providerPhone), ct);
+        await whatsapp.SendTextAsync(clientPhone, FormatProviderResend(matchPosition, match.ServiceSlug, providerPhone), ct);
         await whatsapp.SendTextAsync(providerPhone,
             $"Client wants {match.ServiceSlug} ({clientPhone.Value}). Expect a message.", ct);
         await events.PublishAsync(new ContactExchanged(match.Id, request.Id, request.ClientPhone, provider.Phone), ct);
         return ExchangeOutcome.Exchanged;
     }
 
-    private static string FormatProviderResend(string serviceSlug, PhoneNumber providerPhone) =>
-        $"Provider for {serviceSlug}: {providerPhone.Value}. Reach out directly.";
+    private static string FormatProviderResend(int position, string serviceSlug, PhoneNumber providerPhone) =>
+        $"Match #{position}: provider for {serviceSlug}: {providerPhone.Value}. Reach out directly.";
 }

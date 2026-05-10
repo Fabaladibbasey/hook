@@ -5,55 +5,60 @@ namespace Hook.UnitTests.ContactSharing;
 
 public class PickProviderResolverTests
 {
-    private static IReadOnlyList<Match> Five() => Enumerable.Range(0, 5)
+    private static IReadOnlyList<Match> Five() => [.. Enumerable.Range(0, 5)
         .Select(i => new Match
         {
             RequestId = Guid.NewGuid(),
             ProviderPhone = $"+220300000{i}",
             ServiceSlug = "plumbing"
-        }).ToList();
+        })];
 
     [Fact]
-    public void Resolve_SingleIndex_ReturnsOneMatch()
+    public void Resolve_SingleIndex_ReturnsOneMatchAtPosition1()
     {
         var matches = Five();
         var picked = PickProviderResolver.Resolve("PICK 1", matches);
-        Assert.Single(picked);
-        Assert.Equal(matches[0].Id, picked[0].Id);
+        var single = Assert.Single(picked);
+        Assert.Equal(matches[0].Id, single.Match.Id);
+        Assert.Equal(1, single.Position);
     }
 
     [Fact]
-    public void Resolve_HashSingleIndex_ReturnsOneMatch()
+    public void Resolve_HashSingleIndex_ReturnsOneMatchAtPosition1()
     {
         var matches = Five();
         var picked = PickProviderResolver.Resolve("#1", matches);
-        Assert.Single(picked);
-        Assert.Equal(matches[0].Id, picked[0].Id);
+        var single = Assert.Single(picked);
+        Assert.Equal(matches[0].Id, single.Match.Id);
+        Assert.Equal(1, single.Position);
     }
 
     [Fact]
-    public void Resolve_BareDigit_ReturnsOneMatch()
+    public void Resolve_BareDigit_ReturnsOneMatchAtPosition1()
     {
         var matches = Five();
         var picked = PickProviderResolver.Resolve("1", matches);
-        Assert.Single(picked);
-        Assert.Equal(matches[0].Id, picked[0].Id);
+        var single = Assert.Single(picked);
+        Assert.Equal(matches[0].Id, single.Match.Id);
+        Assert.Equal(1, single.Position);
     }
 
     [Fact]
-    public void Resolve_CommaSeparated_ReturnsMultipleDistinctMatchesInOrder()
+    public void Resolve_CommaSeparated_ReturnsMultipleDistinctMatchesInOrder_WithPositions()
     {
         var matches = Five();
         var picked = PickProviderResolver.Resolve("PICK 1,3,5", matches);
-        Assert.Equal(new[] { matches[0].Id, matches[2].Id, matches[4].Id }, picked.Select(m => m.Id));
+        Assert.Equal(new[] { matches[0].Id, matches[2].Id, matches[4].Id }, picked.Select(p => p.Match.Id));
+        Assert.Equal(new[] { 1, 3, 5 }, picked.Select(p => p.Position));
     }
 
     [Fact]
-    public void Resolve_All_ReturnsEveryPresentedMatch()
+    public void Resolve_All_ReturnsEveryPresentedMatch_WithIncreasingPositions()
     {
         var matches = Five();
         var picked = PickProviderResolver.Resolve("PICK ALL", matches);
         Assert.Equal(5, picked.Count);
+        Assert.Equal(new[] { 1, 2, 3, 4, 5 }, picked.Select(p => p.Position));
     }
 
     [Fact]
@@ -62,6 +67,7 @@ public class PickProviderResolverTests
         var matches = Five();
         var picked = PickProviderResolver.Resolve("pick all", matches);
         Assert.Equal(5, picked.Count);
+        Assert.Equal(new[] { 1, 2, 3, 4, 5 }, picked.Select(p => p.Position));
     }
 
     [Fact]
@@ -69,8 +75,9 @@ public class PickProviderResolverTests
     {
         var matches = Five();
         var picked = PickProviderResolver.Resolve("PICK 1,99", matches);
-        Assert.Single(picked);
-        Assert.Equal(matches[0].Id, picked[0].Id);
+        var single = Assert.Single(picked);
+        Assert.Equal(matches[0].Id, single.Match.Id);
+        Assert.Equal(1, single.Position);
     }
 
     [Fact]
@@ -78,25 +85,28 @@ public class PickProviderResolverTests
     {
         var matches = Five();
         var picked = PickProviderResolver.Resolve("PICK 2,2,3", matches);
-        Assert.Equal(new[] { matches[1].Id, matches[2].Id }, picked.Select(m => m.Id));
+        Assert.Equal(new[] { matches[1].Id, matches[2].Id }, picked.Select(p => p.Match.Id));
+        Assert.Equal(new[] { 2, 3 }, picked.Select(p => p.Position));
     }
 
     [Fact]
-    public void Resolve_FullPhone_AlwaysWinsRegardlessOfPickKeyword()
+    public void Resolve_FullPhone_AlwaysWinsRegardlessOfPickKeyword_PositionFromIndex()
     {
         var matches = Five();
         var picked = PickProviderResolver.Resolve("call +2203000003", matches);
-        Assert.Single(picked);
-        Assert.Equal(matches[3].Id, picked[0].Id);
+        var single = Assert.Single(picked);
+        Assert.Equal(matches[3].Id, single.Match.Id);
+        Assert.Equal(4, single.Position);
     }
 
     [Fact]
-    public void Resolve_FullPhoneAmongDigits_StillMatches()
+    public void Resolve_FullPhoneAmongDigits_StillMatches_PositionFromIndex()
     {
         var matches = Five();
         var picked = PickProviderResolver.Resolve("call me at +2203000003 plumber", matches);
-        Assert.Single(picked);
-        Assert.Equal(matches[3].Id, picked[0].Id);
+        var single = Assert.Single(picked);
+        Assert.Equal(matches[3].Id, single.Match.Id);
+        Assert.Equal(4, single.Position);
     }
 
     [Fact]
@@ -140,16 +150,17 @@ public class PickProviderResolverTests
     }
 
     [Fact]
-    public void Resolve_PhoneFragmentSingleHit_WithPickKeyword_Picks()
+    public void Resolve_PhoneFragmentSingleHit_WithPickKeyword_Picks_PositionFromIndex()
     {
         var matches = new[]
         {
-            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2203331234", ServiceSlug = "plumbing" },
             new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2207775678", ServiceSlug = "plumbing" },
+            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2203331234", ServiceSlug = "plumbing" },
         };
         var picked = PickProviderResolver.Resolve("pick 1234", matches);
-        Assert.Single(picked);
-        Assert.Equal(matches[0].Id, picked[0].Id);
+        var single = Assert.Single(picked);
+        Assert.Equal(matches[1].Id, single.Match.Id);
+        Assert.Equal(2, single.Position);
     }
 
     [Fact]

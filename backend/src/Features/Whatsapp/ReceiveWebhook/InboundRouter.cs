@@ -343,12 +343,12 @@ public sealed class InboundRouterHandler(
         var invalidData = 0;
         var transientFail = 0;
 
-        foreach (var match in picked)
+        foreach (var p in picked)
         {
             try
             {
-                logger.LogDebug("Route → PhoneExchanger.TryExchange match={MatchId} for {Phone}", match.Id, maskedPhone);
-                var outcome = await phoneExchanger.TryExchangeAsync(match.Id, ct);
+                logger.LogDebug("Route → PhoneExchanger.TryExchange match={MatchId} pos={Position} for {Phone}", p.Match.Id, p.Position, maskedPhone);
+                var outcome = await phoneExchanger.TryExchangeAsync(p.Match.Id, p.Position, ct);
                 switch (outcome)
                 {
                     case ExchangeOutcome.Exchanged:
@@ -377,7 +377,7 @@ public sealed class InboundRouterHandler(
             }
             catch (Npgsql.PostgresException ex) when (IsTransientPostgres(ex.SqlState))
             {
-                logger.LogWarning(ex, "Transient Postgres failure during PhoneExchanger for match {MatchId}", match.Id);
+                logger.LogWarning(ex, "Transient Postgres failure during PhoneExchanger for match {MatchId}", p.Match.Id);
                 transientFail++;
             }
         }
@@ -438,7 +438,7 @@ public sealed class InboundRouterHandler(
         {
             logger.LogDebug("Route → PhoneExchanger.TryExchange (free-text share) match={MatchId} for {Phone}",
                 matchOrder[0].Id, maskedPhone);
-            await phoneExchanger.TryExchangeAsync(matchOrder[0].Id, ct);
+            await phoneExchanger.TryExchangeAsync(matchOrder[0].Id, 1, ct);
             return;
         }
 

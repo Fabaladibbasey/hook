@@ -79,7 +79,7 @@ public class InboundRouterRoutingTests : PipelineTestBase
 
         var share = await client.ExpectOutboundAsync(
             phone,
-            m => m.Body.StartsWith("Provider for ", StringComparison.OrdinalIgnoreCase),
+            m => m.Body.StartsWith("Match #1: provider for ", StringComparison.Ordinal),
             since: presented.At);
 
         share.Body.ShouldContain("plumbing");

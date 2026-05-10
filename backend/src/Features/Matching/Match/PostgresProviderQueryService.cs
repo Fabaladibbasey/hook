@@ -35,12 +35,12 @@ public sealed class PostgresProviderQueryService(HookDbContext db) : IProviderQu
             })
             .ToListAsync(ct);
 
-        return rows.Select(r => new ProviderCandidate(
+        return [.. rows.Select(r => new ProviderCandidate(
             r.Phone,
             r.ShareContact,
             r.LastActiveAt,
             r.DistanceMeters / 1000.0,
             CompletedJobs: r.Stats?.CompletedCount ?? 0,
-            SuccessRate: r.Stats?.SuccessRate ?? 0)).ToList();
+            SuccessRate: r.Stats?.SuccessRate ?? 0))];
     }
 }

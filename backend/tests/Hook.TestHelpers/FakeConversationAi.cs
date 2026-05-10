@@ -59,7 +59,7 @@ public sealed class FakeConversationAi : IConversationAi
         if (lower.Contains("electric")) slugs.Add("electrical");
         if (lower.Contains("mechanic") || lower.Contains("auto") || lower.Contains("car repair")) slugs.Add("auto-repair");
 
-        return Task.FromResult(new ServiceExtractionResult(slugs.Distinct().ToArray()));
+        return Task.FromResult(new ServiceExtractionResult([.. slugs.Distinct()]));
     }
 
     public Task<ServiceJudgeResult> JudgeServiceMatchAsync(

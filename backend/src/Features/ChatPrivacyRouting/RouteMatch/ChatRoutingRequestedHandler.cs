@@ -37,9 +37,12 @@ public sealed class ChatRoutingRequestedHandler(
             evt.RequesterLatitude,
             evt.RequesterLongitude);
 
+        var providerParsed = PhoneNumber.TryParse(evt.ProviderPhone, out var provider);
+        var maskedProvider = providerParsed ? provider.Mask() : evt.ProviderPhone;
+        var prefix = $"Match #{evt.MatchPosition} ({maskedProvider}): ";
         var clientBody = evt.ClientConsented
-            ? $"The other party prefers a private chat. Open: {links.ClientUrl}"
-            : $"Your private chat is ready. Open: {links.ClientUrl}";
+            ? $"{prefix}the other party prefers a private chat. Open: {links.ClientUrl}"
+            : $"{prefix}your private chat is ready. Open: {links.ClientUrl}";
 
         var providerBody = evt.ProviderConsented
             ? $"{match.ServiceSlug} client at {evt.RequesterAddress} ({mapsUrl}) prefers a private chat. Open: {links.ProviderUrl}"
@@ -50,7 +53,7 @@ public sealed class ChatRoutingRequestedHandler(
         {
             sends.Add(whatsapp.SendTextAsync(client, clientBody, ct));
         }
-        if (PhoneNumber.TryParse(evt.ProviderPhone, out var provider))
+        if (providerParsed)
         {
             sends.Add(whatsapp.SendTextAsync(provider, providerBody, ct));
         }

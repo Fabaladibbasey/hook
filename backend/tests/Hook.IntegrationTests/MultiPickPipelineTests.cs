@@ -85,6 +85,22 @@ public class MultiPickPipelineTests : PipelineTestBase
         p2Link.Body.ShouldNotBeNullOrEmpty();
         p3Link.Body.ShouldNotBeNullOrEmpty();
 
+        // Client receives one chat-link per match, each prefixed with its 1-based
+        // position from the original presented list and the masked provider phone.
+        // sharePhoneConsent=false → all three say "your private chat is ready".
+        await client.ExpectOutboundAsync(
+            phone,
+            m => m.Body.StartsWith("Match #1 (+220***01): your private chat is ready.", StringComparison.Ordinal),
+            since: presented.At);
+        await client.ExpectOutboundAsync(
+            phone,
+            m => m.Body.StartsWith("Match #2 (+220***02): your private chat is ready.", StringComparison.Ordinal),
+            since: presented.At);
+        await client.ExpectOutboundAsync(
+            phone,
+            m => m.Body.StartsWith("Match #3 (+220***03): your private chat is ready.", StringComparison.Ordinal),
+            since: presented.At);
+
         // No raw phone-reveal notices should have been sent — those are
         // bilateral-consent only.
         var outbox = await client.GetOutboxAsync();
@@ -117,6 +133,12 @@ public class MultiPickPipelineTests : PipelineTestBase
             ShareTrueProvider1,
             m => m.Body.StartsWith("Client wants ", StringComparison.OrdinalIgnoreCase) &&
                  m.Body.Contains(phone, StringComparison.Ordinal),
+            since: presented.At);
+
+        // Client-side phone-reveal notice prefixed with position from the original list.
+        await client.ExpectOutboundAsync(
+            phone,
+            m => m.Body.StartsWith("Match #1: provider for plumbing: +2203000001.", StringComparison.Ordinal),
             since: presented.At);
 
         var outbox = await client.GetOutboxAsync();
