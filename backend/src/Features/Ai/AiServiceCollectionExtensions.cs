@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using Polly;
 
 namespace Hook.Features.Ai;
 
@@ -15,18 +16,14 @@ public static class AiServiceCollectionExtensions
             http.BaseAddress = new Uri(opts.BaseUrl);
             http.Timeout = TimeSpan.FromSeconds(opts.TimeoutSeconds);
         })
-        .AddStandardResilienceHandler(o =>
+        // Ollama is local + single-tenant; slow CPU inference is not transient, so retries
+        // just multiply the wait before AiReplyHelper drops the message. Strip retry/circuit-
+        // breaker layers and keep a single timeout matching OllamaOptions.TimeoutSeconds.
+        .AddResilienceHandler("ai.ollama", (builder, ctx) =>
         {
-            // The standard handler defaults (10s per attempt, 30s total) preempt the configured
-            // HttpClient timeout, which causes cold-start CPU inference to be cancelled before
-            // the model finishes generating. Scale the resilience timeouts off TimeoutSeconds so
-            // configuration drives the real cap.
-            var timeoutSeconds = configuration
-                .GetSection(OllamaOptions.SectionName)
-                .GetValue<int?>(nameof(OllamaOptions.TimeoutSeconds)) ?? 120;
-            o.AttemptTimeout.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
-            o.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(timeoutSeconds * 3);
-            o.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(timeoutSeconds * 2);
+            var timeoutSeconds = ctx.ServiceProvider
+                .GetRequiredService<IOptions<OllamaOptions>>().Value.TimeoutSeconds;
+            builder.AddTimeout(TimeSpan.FromSeconds(timeoutSeconds));
         });
 
         services.TryAddSingleton(TimeProvider.System);
