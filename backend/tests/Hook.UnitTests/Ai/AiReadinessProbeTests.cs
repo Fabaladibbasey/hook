@@ -93,6 +93,7 @@ public class AiReadinessProbeTests
         public Task<ServiceJudgeResult> JudgeServiceMatchAsync(string proposedSlug, IReadOnlyList<string> candidateSlugs, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<string> GenerateReplyAsync(ReplyContext context, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<LanguageDetectionResult> DetectLanguageAsync(string userMessage, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<DateTimeOffset?> ExtractEtaAsync(string userMessage, DateTimeOffset now, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
     private sealed class FrozenClock(DateTimeOffset now) : TimeProvider
@@ -116,6 +117,7 @@ public class AiReadinessProbeTests
         public Task<ServiceJudgeResult> JudgeServiceMatchAsync(string proposedSlug, IReadOnlyList<string> candidateSlugs, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<string> GenerateReplyAsync(ReplyContext context, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<LanguageDetectionResult> DetectLanguageAsync(string userMessage, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<DateTimeOffset?> ExtractEtaAsync(string userMessage, DateTimeOffset now, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
     private sealed class ThrowingAi(Exception toThrow) : IConversationAi
@@ -125,5 +127,6 @@ public class AiReadinessProbeTests
         public Task<ServiceJudgeResult> JudgeServiceMatchAsync(string proposedSlug, IReadOnlyList<string> candidateSlugs, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<string> GenerateReplyAsync(ReplyContext context, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<LanguageDetectionResult> DetectLanguageAsync(string userMessage, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<DateTimeOffset?> ExtractEtaAsync(string userMessage, DateTimeOffset now, CancellationToken ct = default) => throw new NotSupportedException();
     }
 }

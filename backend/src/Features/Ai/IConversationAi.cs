@@ -16,4 +16,16 @@ public interface IConversationAi
     Task<string> GenerateReplyAsync(ReplyContext context, CancellationToken ct = default);
 
     Task<LanguageDetectionResult> DetectLanguageAsync(string userMessage, CancellationToken ct = default);
+
+    // Extracts a future point-in-time the user has stated for when a job will be
+    // done. Returns null when:
+    // - the message contains no parseable future time
+    // - the JSON response is missing `etaUtc` or it is null/empty
+    // - the parsed timestamp is at or before `now` (no point scheduling a recheck
+    //   for a moment that has already passed)
+    // - the parsed string is not a valid ISO-8601 instant
+    // `now` lets callers ground relative phrases like "in 3 hours". The system
+    // prompt currently assumes UTC clock-times when parsing absolute references —
+    // non-UTC clients may see a wrong-day recheck (tracked separately).
+    Task<DateTimeOffset?> ExtractEtaAsync(string userMessage, DateTimeOffset now, CancellationToken ct = default);
 }

@@ -165,6 +165,45 @@ public sealed class OllamaConversationAi(
         return reply;
     }
 
+    public async Task<DateTimeOffset?> ExtractEtaAsync(string userMessage, DateTimeOffset now, CancellationToken ct = default)
+    {
+        var schema = new
+        {
+            type = "object",
+            properties = new
+            {
+                etaUtc = new { type = new[] { "string", "null" } }
+            },
+            required = new[] { "etaUtc" }
+        };
+
+        // Format `referenceUtc` to match the system prompt's expected
+        // "YYYY-MM-DDTHH:MM:SSZ" — the round-trip "o" specifier emits sub-second
+        // precision and "+00:00" rather than "Z", which the prompt does not
+        // describe and the model occasionally garbles.
+        var referenceUtc = now.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture);
+        var prompt = $$"""
+            referenceUtc: {{referenceUtc}}
+            {{PromptSafety.Fence(userMessage, options.Value.MaxUserInputChars)}}
+            """;
+
+        using var json = await CallJsonAsync(AiPrompts.EtaExtractionSystem, prompt, schema, ct);
+        var root = json.RootElement;
+        if (!root.TryGetProperty("etaUtc", out var etaProp) || etaProp.ValueKind == JsonValueKind.Null)
+            return null;
+
+        var raw = etaProp.GetString();
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        if (!DateTimeOffset.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                out var eta))
+            return null;
+        // Ignore past timestamps — they're useless as a recheck schedule.
+        // EtaScheduleBuffer in the caller absorbs the boundary-equality case so
+        // `eta == now` is treated as "right now" and still schedules.
+        return eta >= now ? eta : null;
+    }
+
     public async Task<LanguageDetectionResult> DetectLanguageAsync(string userMessage, CancellationToken ct = default)
     {
         var schema = new

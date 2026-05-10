@@ -22,6 +22,13 @@ public class MatchFeedbackConfiguration : IEntityTypeConfiguration<MatchFeedback
                .IsUnique()
                .HasFilter($"\"Answer\" = '{nameof(FeedbackAnswer.Pending)}'");
 
+        // Non-partial covering index for AnyByRequestStepAsync, which scans by Step
+        // for any match under a request and intentionally includes answered rows.
+        // The partial unique index above only covers Pending rows, so this query
+        // would otherwise sequence-scan the table.
+        builder.HasIndex(f => new { f.Step, f.MatchId })
+               .HasDatabaseName("ix_match_feedback_step_match");
+
         builder
             .HasOne<Match>()
             .WithMany()

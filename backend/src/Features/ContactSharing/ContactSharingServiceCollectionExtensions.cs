@@ -8,7 +8,9 @@ public static class ContactSharingServiceCollectionExtensions
     public static IServiceCollection AddContactSharing(this IServiceCollection services)
     {
         services.AddScoped<PhoneExchanger>();
-        services.AddScoped<IEventPublisher, WolverineEventPublisher>();
+        services.AddScoped<WolverineEventPublisher>();
+        services.AddScoped<IEventPublisher>(sp => sp.GetRequiredService<WolverineEventPublisher>());
+        services.AddScoped<IEventBus>(sp => sp.GetRequiredService<WolverineEventPublisher>());
         return services;
     }
 }

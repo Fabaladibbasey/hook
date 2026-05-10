@@ -29,6 +29,15 @@ public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
             .OrderByDescending(f => f.PromptedAt)
             .FirstOrDefaultAsync(ct);
 
+    // Per-request dedupe for Step1: returns true if any feedback row of the given step
+    // exists for ANY match under this request (covers Pending and answered). Used by
+    // Step1FeedbackHandler so multi-PICK clients receive a single Step1 prompt instead
+    // of one per match.
+    public Task<bool> AnyByRequestStepAsync(Guid requestId, FeedbackStep step, CancellationToken ct = default) =>
+        db.MatchFeedback.AnyAsync(
+            f => f.Step == step && db.Matches.Any(m => m.Id == f.MatchId && m.RequestId == requestId),
+            ct);
+
     public async Task<bool> TryClaimPendingAsync(
         Guid feedbackId, FeedbackAnswer answer, DateTimeOffset now, CancellationToken ct = default)
     {
@@ -37,6 +46,21 @@ public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
             .ExecuteUpdateAsync(u => u
                 .SetProperty(f => f.Answer, answer)
                 .SetProperty(f => f.RepliedAt, now), ct);
+        return rows == 1;
+    }
+
+    // Atomic claim variant for AwaitingEta — keeps the captured ETA on the same row
+    // and the same UPDATE so a concurrent fire can't see the answer flip without the
+    // ETA, or vice-versa.
+    public async Task<bool> TryClaimPendingWithEtaAsync(
+        Guid feedbackId, FeedbackAnswer answer, DateTimeOffset etaUtc, DateTimeOffset now, CancellationToken ct = default)
+    {
+        var rows = await db.MatchFeedback
+            .Where(f => f.Id == feedbackId && f.Answer == FeedbackAnswer.Pending)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(f => f.Answer, answer)
+                .SetProperty(f => f.RepliedAt, now)
+                .SetProperty(f => f.EtaUtc, etaUtc), ct);
         return rows == 1;
     }
 

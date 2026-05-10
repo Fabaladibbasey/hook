@@ -139,8 +139,18 @@ public sealed class DevPipelineFixture : IAsyncLifetime
                 b.UseSetting("Dev:Providers:ReferenceLng", refLng);
                 b.UseSetting("Dev:Providers:TtlHours", "24");
                 b.UseSetting("Retention:Enabled", "false");
+                // Zero Step1 feedback delay so Wolverine's scheduler dispatches the prompt
+                // synchronously (in-memory transport with TimeSpan.Zero); otherwise the
+                // +30 min production default would mean the prompt never fires inside a
+                // test run. Step2 publishes immediately on Step1=Yes (no separate knob).
+                b.UseSetting("Feedback:Step1InitialDelay", "00:00:00");
                 b.UseSetting("Wolverine:DefaultExecutionTimeoutSeconds", "10");
                 b.UseSetting("Wolverine:DynamicCodegen", "true");
+                // Belt+braces: keep Wolverine in-memory in tests so scheduled feedback
+                // envelopes don't bleed across the per-shard databases via the durable
+                // outbox. Program.cs already gates durable on IsProduction, but pin it
+                // explicitly so reordering can't accidentally flip it on.
+                b.UseSetting("Wolverine:Durable", "false");
                 b.ConfigureTestServices(s =>
                 {
                     s.RemoveAll<IConversationAi>();

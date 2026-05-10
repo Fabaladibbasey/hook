@@ -8,15 +8,25 @@ public sealed class FakeConversationAi : IConversationAi
 {
     private readonly Dictionary<string, IntentDetectionResult> _intentOverrides = new(StringComparer.OrdinalIgnoreCase);
 
+    public int DetectIntentCalls { get; private set; }
+    public int ExtractEtaCalls { get; private set; }
+
     /// <summary>Force a specific (intent, confidence) for a given exact input — useful
     /// for integration tests that need to drive low-confidence disambiguation paths.</summary>
     public void OverrideIntent(string userMessage, IntentDetectionResult result) =>
         _intentOverrides[userMessage] = result;
 
-    public void ResetOverrides() => _intentOverrides.Clear();
+    public void ResetOverrides()
+    {
+        _intentOverrides.Clear();
+        _etaOverrides.Clear();
+        DetectIntentCalls = 0;
+        ExtractEtaCalls = 0;
+    }
 
     public Task<IntentDetectionResult> DetectIntentAsync(string userMessage, CancellationToken ct = default)
     {
+        DetectIntentCalls++;
         if (_intentOverrides.TryGetValue(userMessage, out var overridden))
             return Task.FromResult(overridden);
 
@@ -92,6 +102,39 @@ public sealed class FakeConversationAi : IConversationAi
 
         var language = hasArabic ? "ar" : hasCjk ? "zh" : hasLatin ? "en" : "en";
         return Task.FromResult(new LanguageDetectionResult(language, 0.7));
+    }
+
+    private readonly Dictionary<string, DateTimeOffset?> _etaOverrides = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Override the ETA returned for a specific exact input so integration tests
+    /// can drive the InProgress→ETA path without touching Ollama.</summary>
+    public void OverrideEta(string userMessage, DateTimeOffset? eta) =>
+        _etaOverrides[userMessage] = eta;
+
+    public Task<DateTimeOffset?> ExtractEtaAsync(string userMessage, DateTimeOffset now, CancellationToken ct = default)
+    {
+        ExtractEtaCalls++;
+        if (_etaOverrides.TryGetValue(userMessage, out var overridden))
+            return Task.FromResult(overridden);
+
+        var lower = Normalize(userMessage);
+
+        // Heuristic only covers relative "in N (minutes|hours|days)" forms — that's
+        // enough to drive the InProgress→ETA path without booting Ollama. Absolute
+        // phrases ("tomorrow at 5pm", "Friday morning") are intentionally NOT
+        // handled; tests that need those should call OverrideEta with the exact
+        // user input + the desired DateTimeOffset.
+        var rel = Regex.Match(lower, @"\bin\s+(?<n>\d+)\s+(?<u>min|mins|minute|minutes|hr|hrs|hour|hours|day|days)\b");
+        if (rel.Success && int.TryParse(rel.Groups["n"].Value, out var n))
+        {
+            var unit = rel.Groups["u"].Value;
+            var span = unit.StartsWith("min") ? TimeSpan.FromMinutes(n)
+                : unit.StartsWith("hr") || unit.StartsWith("hour") ? TimeSpan.FromHours(n)
+                : TimeSpan.FromDays(n);
+            return Task.FromResult<DateTimeOffset?>(now + span);
+        }
+
+        return Task.FromResult<DateTimeOffset?>(null);
     }
 
     private static string Normalize(string text) =>

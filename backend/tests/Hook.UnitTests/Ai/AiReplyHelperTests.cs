@@ -130,5 +130,6 @@ public class AiReplyHelperTests
         public Task<ServiceExtractionResult> ExtractServicesAsync(string userMessage, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<ServiceJudgeResult> JudgeServiceMatchAsync(string proposedSlug, IReadOnlyList<string> candidateSlugs, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<LanguageDetectionResult> DetectLanguageAsync(string userMessage, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<DateTimeOffset?> ExtractEtaAsync(string userMessage, DateTimeOffset now, CancellationToken ct = default) => throw new NotSupportedException();
     }
 }

@@ -26,6 +26,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Serilog;
 using Wolverine;
+using Wolverine.Postgresql;
 
 // Bootstrap logger captured at process start; UseSerilog freezes it on first host build.
 // Test shards serialize the first host build (DevPipelineFixture.HostInitLock) to avoid
@@ -91,6 +92,19 @@ try
     builder.Services.AddProblemDetails();
     builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
+    // Dev default so the Step1 feedback prompt surfaces in minutes instead of the
+    // 30-minute production cadence during local hacking. Step2 is now published
+    // immediately on Step1=Yes (Pillar A — no separate delay knob), so only Step1
+    // is overridden here. Devs can still override via env or appsettings.Development.json.
+    if (builder.Environment.IsDevelopment())
+    {
+        // IsNullOrWhiteSpace catches the (admittedly unlikely) "   " case as well as
+        // truly-unset; keeping the dev override to a 2-min cadence so the prompt
+        // fires inside a single hacking session.
+        if (string.IsNullOrWhiteSpace(builder.Configuration["Feedback:Step1InitialDelay"]))
+            builder.Configuration["Feedback:Step1InitialDelay"] = "00:02:00";
+    }
+
     builder.Host.UseWolverine(opts =>
     {
         // Wolverine's default 60s handler timeout preempts Ollama cold-start inference
@@ -117,6 +131,17 @@ try
             && builder.Configuration.GetValue<bool>("Wolverine:DynamicCodegen"))
         {
             opts.CodeGeneration.TypeLoadMode = JasperFx.CodeGeneration.TypeLoadMode.Dynamic;
+        }
+
+        // Persist scheduled messages (and the durable outbox) to Postgres in production so
+        // jobs like Step1/Step2 feedback prompts survive restarts. Non-production stays
+        // in-memory unless Wolverine:Durable=true is set explicitly (keeps tests fast and
+        // sidesteps cross-test bleed in Pipeline-N shards).
+        var durable = builder.Environment.IsProduction()
+            || builder.Configuration.GetValue<bool>("Wolverine:Durable");
+        if (durable)
+        {
+            opts.PersistMessagesWithPostgresql(connectionString, schemaName: "wolverine");
         }
     });
 

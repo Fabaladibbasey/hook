@@ -211,14 +211,14 @@ Fired on first of:
 
 ### Step 2 — "Was the job completed?"
 
-- Fired **20h after** Step 1 client reply (kept inside the new window opened by Step 1's reply, not 24h).
-- If Step 2 answer = `IN PROGRESS` → re-ask 48h later, then drop.
-- If Step 1 = `NO` → skip Step 2.
+- Fired **immediately** on `Step 1 = Yes` for single-pick (Pillar A — no separate +20h delay knob). Multi-pick goes through an `IdentifyWinner` step first so `Step 2` targets the actual completing match.
+- If `Step 2 = IN PROGRESS` → bot asks for an ETA (Pillar B). The captured ETA drives the next `Step2FeedbackCheck` at `eta + EtaScheduleBuffer`. If no parseable ETA arrives within `ParseRetryWindow` (1h), fall back to `Step2InProgressRecheckDelay` (default 20h) and try once more.
+- If `Step 1 = NO` → skip Step 2.
 
 ### Suppression
 
-- Max one Step 1 prompt per match.
-- If client doesn't reply to Step 1 within 48h → mark feedback as `skipped`, do not pester.
+- Max one Step 1 prompt per request (`AnyByRequestStepAsync` per-request dedupe — covers multi-PICK).
+- Stale inbounds against a Step1/Step2 Pending row past `Feedback:ParseRetryWindow` (default 1h) are dropped silently — no AI fallback, no retry hint. Long-term sweeping of Pending rows is a separate concern.
 
 ### Implementation
 

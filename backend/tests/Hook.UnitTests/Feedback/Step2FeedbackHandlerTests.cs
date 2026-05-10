@@ -17,7 +17,7 @@ namespace Hook.UnitTests.Feedback;
 public class Step2FeedbackHandlerTests
 {
     [Fact]
-    public async Task Handle_PriorMissing_NoOp()
+    public async Task Handle_MatchMissing_NoOp()
     {
         var deps = new Deps();
         var handler = deps.Build();
@@ -29,57 +29,13 @@ public class Step2FeedbackHandlerTests
     }
 
     [Fact]
-    public async Task Handle_PriorWrongStep_NoOp()
-    {
-        var deps = new Deps();
-        var prior = new MatchFeedback { MatchId = Guid.NewGuid(), Step = FeedbackStep.JobCompleted };
-        deps.Feedback.Stored[prior.Id] = prior;
-
-        var handler = deps.Build();
-        await handler.Handle(new Step2FeedbackCheck(prior.Id), CancellationToken.None);
-
-        Assert.Empty(deps.Whatsapp.Sent);
-        Assert.Empty(deps.Feedback.Added);
-    }
-
-    [Fact]
-    public async Task Handle_PriorAnswerNotYes_NoOp()
-    {
-        var deps = new Deps();
-        var prior = new MatchFeedback { MatchId = Guid.NewGuid(), Step = FeedbackStep.DidYouFind };
-        prior.Answer = FeedbackAnswer.No;
-        deps.Feedback.Stored[prior.Id] = prior;
-
-        var handler = deps.Build();
-        await handler.Handle(new Step2FeedbackCheck(prior.Id), CancellationToken.None);
-
-        Assert.Empty(deps.Whatsapp.Sent);
-        Assert.Empty(deps.Feedback.Added);
-    }
-
-    [Fact]
-    public async Task Handle_MatchDeleted_NoOp()
-    {
-        var deps = new Deps();
-        var prior = new MatchFeedback { MatchId = Guid.NewGuid(), Step = FeedbackStep.DidYouFind };
-        prior.Answer = FeedbackAnswer.Yes;
-        deps.Feedback.Stored[prior.Id] = prior;
-
-        var handler = deps.Build();
-        await handler.Handle(new Step2FeedbackCheck(prior.Id), CancellationToken.None);
-
-        Assert.Empty(deps.Whatsapp.Sent);
-        Assert.Empty(deps.Feedback.Added);
-    }
-
-    [Fact]
     public async Task Handle_HappyPath_ReservesBeforeSending()
     {
         var deps = new Deps();
-        var prior = SeedPriorYes(deps);
+        var match = SeedMatch(deps);
         var handler = deps.Build();
 
-        await handler.Handle(new Step2FeedbackCheck(prior.Id), CancellationToken.None);
+        await handler.Handle(new Step2FeedbackCheck(match.Id), CancellationToken.None);
 
         Assert.Single(deps.Feedback.Added);
         Assert.Single(deps.Whatsapp.Sent);
@@ -92,10 +48,10 @@ public class Step2FeedbackHandlerTests
     {
         var deps = new Deps();
         deps.Feedback.TryAddResult = false;
-        var prior = SeedPriorYes(deps);
+        var match = SeedMatch(deps);
         var handler = deps.Build();
 
-        await handler.Handle(new Step2FeedbackCheck(prior.Id), CancellationToken.None);
+        await handler.Handle(new Step2FeedbackCheck(match.Id), CancellationToken.None);
 
         Assert.Empty(deps.Whatsapp.Sent);
         Assert.Equal(0, deps.Ai.GenerateCalls);
@@ -104,22 +60,103 @@ public class Step2FeedbackHandlerTests
     }
 
     [Fact]
+    public async Task Handle_AiReturnsNull_DeletesPendingRow()
+    {
+        var deps = new Deps();
+        deps.Ai.ReturnBlank = true;
+        var match = SeedMatch(deps);
+        var handler = deps.Build();
+
+        await handler.Handle(new Step2FeedbackCheck(match.Id), CancellationToken.None);
+
+        Assert.Single(deps.Feedback.Added);
+        Assert.Single(deps.Feedback.Deleted);
+        Assert.Equal(deps.Feedback.Added[0].Id, deps.Feedback.Deleted[0]);
+        Assert.Empty(deps.Whatsapp.Sent);
+    }
+
+    [Fact]
     public async Task Handle_WhatsappSendThrows_DeletesPendingAndRethrows()
     {
         var deps = new Deps();
         deps.Whatsapp.ThrowOnSend = new InvalidOperationException("transport down");
-        var prior = SeedPriorYes(deps);
+        var match = SeedMatch(deps);
         var handler = deps.Build();
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            handler.Handle(new Step2FeedbackCheck(prior.Id), CancellationToken.None));
+            handler.Handle(new Step2FeedbackCheck(match.Id), CancellationToken.None));
 
         Assert.Single(deps.Feedback.Added);
         Assert.Single(deps.Feedback.Deleted);
         Assert.Equal(deps.Feedback.Added[0].Id, deps.Feedback.Deleted[0]);
     }
 
-    private static MatchFeedback SeedPriorYes(Deps deps)
+    [Fact]
+    public async Task Handle_AlreadyCompletedYes_DoesNotRePrompt()
+    {
+        // A stale Step2FeedbackCheck arriving after the user already replied YES to
+        // JobCompleted must not insert a fresh Pending row and re-prompt. The partial
+        // unique index only blocks concurrent Pending fires; the latest-answer guard
+        // catches the stale-recheck case.
+        var deps = new Deps();
+        var match = SeedMatch(deps);
+        deps.Feedback.LatestJobCompleted = new MatchFeedback
+        {
+            MatchId = match.Id,
+            Step = FeedbackStep.JobCompleted,
+            Answer = FeedbackAnswer.Yes
+        };
+        var handler = deps.Build();
+
+        await handler.Handle(new Step2FeedbackCheck(match.Id), CancellationToken.None);
+
+        Assert.Empty(deps.Whatsapp.Sent);
+        Assert.Empty(deps.Feedback.Added);
+        Assert.Empty(deps.CallOrder);
+    }
+
+    [Fact]
+    public async Task Handle_AlreadyCompletedNo_DoesNotRePrompt()
+    {
+        var deps = new Deps();
+        var match = SeedMatch(deps);
+        deps.Feedback.LatestJobCompleted = new MatchFeedback
+        {
+            MatchId = match.Id,
+            Step = FeedbackStep.JobCompleted,
+            Answer = FeedbackAnswer.No
+        };
+        var handler = deps.Build();
+
+        await handler.Handle(new Step2FeedbackCheck(match.Id), CancellationToken.None);
+
+        Assert.Empty(deps.Whatsapp.Sent);
+        Assert.Empty(deps.Feedback.Added);
+    }
+
+    [Fact]
+    public async Task Handle_PreviousJobCompletedInProgress_StillPrompts()
+    {
+        // An earlier JobCompleted answered "InProgress" is NOT terminal — the user
+        // is still working, and this recheck is intentional. Only Yes/No should
+        // suppress the re-prompt.
+        var deps = new Deps();
+        var match = SeedMatch(deps);
+        deps.Feedback.LatestJobCompleted = new MatchFeedback
+        {
+            MatchId = match.Id,
+            Step = FeedbackStep.JobCompleted,
+            Answer = FeedbackAnswer.InProgress
+        };
+        var handler = deps.Build();
+
+        await handler.Handle(new Step2FeedbackCheck(match.Id), CancellationToken.None);
+
+        Assert.Single(deps.Whatsapp.Sent);
+        Assert.Single(deps.Feedback.Added);
+    }
+
+    private static Match SeedMatch(Deps deps)
     {
         var match = new Match
         {
@@ -134,11 +171,7 @@ public class Step2FeedbackHandlerTests
             new Location(13.45, -16.6), "Banjul",
             "req-test", 5.0, DateTimeOffset.UtcNow, false);
         deps.Requests.Stored[match.RequestId] = request;
-
-        var prior = new MatchFeedback { MatchId = match.Id, Step = FeedbackStep.DidYouFind };
-        prior.Answer = FeedbackAnswer.Yes;
-        deps.Feedback.Stored[prior.Id] = prior;
-        return prior;
+        return match;
     }
 
     private sealed class Deps
@@ -163,7 +196,6 @@ public class Step2FeedbackHandlerTests
 
     private sealed class FakeFeedbackRepository(List<string> callOrder) : IFeedbackRepository
     {
-        public Dictionary<Guid, MatchFeedback> Stored { get; } = new();
         public List<MatchFeedback> Added { get; } = new();
         public List<Guid> Deleted { get; } = new();
         public bool TryAddResult { get; set; } = true;
@@ -172,7 +204,7 @@ public class Step2FeedbackHandlerTests
             Task.FromResult<MatchFeedback?>(null);
 
         public Task<MatchFeedback?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
-            Task.FromResult(Stored.TryGetValue(id, out var f) ? f : null);
+            Task.FromResult<MatchFeedback?>(null);
 
         public Task AddAsync(MatchFeedback feedback, CancellationToken ct = default)
         {
@@ -191,10 +223,18 @@ public class Step2FeedbackHandlerTests
             Task.FromResult<MatchFeedback?>(null);
 
         public Task<MatchFeedback?> GetLatestByMatchAndStepAsync(Guid matchId, FeedbackStep step, CancellationToken ct = default) =>
-            Task.FromResult<MatchFeedback?>(null);
+            Task.FromResult(step == FeedbackStep.JobCompleted ? LatestJobCompleted : null);
+
+        public Task<bool> AnyByRequestStepAsync(Guid requestId, FeedbackStep step, CancellationToken ct = default) =>
+            Task.FromResult(false);
 
         public Task<bool> TryClaimPendingAsync(Guid feedbackId, FeedbackAnswer answer, DateTimeOffset now, CancellationToken ct = default) =>
             Task.FromResult(true);
+
+        public Task<bool> TryClaimPendingWithEtaAsync(Guid feedbackId, FeedbackAnswer answer, DateTimeOffset etaUtc, DateTimeOffset now, CancellationToken ct = default) =>
+            Task.FromResult(true);
+
+        public MatchFeedback? LatestJobCompleted { get; set; }
 
         public Task<bool> TryAddPendingAsync(MatchFeedback feedback, CancellationToken ct = default)
         {
@@ -239,6 +279,7 @@ public class Step2FeedbackHandlerTests
     private sealed class FakeAi : IConversationAi
     {
         public int GenerateCalls;
+        public bool ReturnBlank { get; set; }
 
         public Task<IntentDetectionResult> DetectIntentAsync(string userMessage, CancellationToken ct = default) =>
             Task.FromResult(new IntentDetectionResult(IntentKind.Unknown, 0.5, "en", "fake"));
@@ -255,11 +296,14 @@ public class Step2FeedbackHandlerTests
         public Task<string> GenerateReplyAsync(ReplyContext context, CancellationToken ct = default)
         {
             GenerateCalls++;
-            return Task.FromResult("ok");
+            return Task.FromResult(ReturnBlank ? string.Empty : "ok");
         }
 
         public Task<LanguageDetectionResult> DetectLanguageAsync(string userMessage, CancellationToken ct = default) =>
             Task.FromResult(new LanguageDetectionResult("en", 1.0));
+
+        public Task<DateTimeOffset?> ExtractEtaAsync(string userMessage, DateTimeOffset now, CancellationToken ct = default) =>
+            Task.FromResult<DateTimeOffset?>(null);
     }
 
     private sealed class FakeWhatsapp(List<string> callOrder) : IWhatsappClient

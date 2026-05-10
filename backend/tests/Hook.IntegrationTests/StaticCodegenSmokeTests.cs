@@ -1,9 +1,9 @@
+using Hook.Features.Ai;
+using Hook.TestHelpers;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Hook.Features.Ai;
-using Hook.TestHelpers;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Shouldly;
 using Wolverine;

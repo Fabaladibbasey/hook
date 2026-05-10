@@ -6,8 +6,10 @@ obj/
 .vs/
 .vscode/launch.json
 bin-alt/
+bin-alt-tests/
 obj-alt/
 obj-test/
+obj-alt-tests/
 
 ## Build output
 publish/

@@ -51,9 +51,13 @@ With 3 numbers available, these scenarios — previously dev-only or impractical
 - Manual seed/reseed: `POST /dev/providers/seed`, `DELETE /dev/providers/{phone}`.
 - Test coordinates: SF `(37.7749, -122.4194)`. Dev coordinates: Banjul `(13.4549, -16.5790)`. Cross-coords scenarios use this split.
 
-### Time-driven flows (4h / 20h / 22h / 23h / 24h)
+### Time-driven flows (Step1 +30m / 22h / 24h)
 
-System has scheduled events: `Step1FeedbackCheck` (+4h or +23h), `Step2FeedbackCheck` (+20h or +48h), `IdleReminderCheck` (+20m), `IdleEndCheck` (+30m), hard-expire (+24h), `ProviderRefreshCheck` (+22h).
+Pillar A / Pillar B feedback model:
+- **Pillar A (Step1)**: `Step1FeedbackCheck` scheduled at `Feedback:Step1InitialDelay` (default 30 min) after the match completes (`ContactExchanged` or `ChatRoutingRequested`). Per-request dedupe — only one Step1 prompt regardless of how many matches were picked. Step1 = "Did you find a provider?".
+- **Pillar B (Step2)**: published *immediately* on `Step1=Yes` for single-pick. Multi-pick requires the `IdentifyWinner` step first. `Step2=InProgress` triggers an `AwaitingEta` step; the captured ETA drives the next `Step2FeedbackCheck` at `eta + EtaScheduleBuffer`. If no parseable ETA arrives within `ParseRetryWindow` (1h), fall back to `Step2InProgressRecheckDelay` (default 20h).
+
+Other scheduled events: `IdleReminderCheck` (+20m), `IdleEndCheck` (+30m), hard-expire (+24h), `ProviderRefreshCheck` (+22h).
 
 **Both modes:** publish the scheduled event directly via `IMessageBus.PublishAsync` instead of waiting. Two options:
 
@@ -795,30 +799,35 @@ Both finalize the request and publish `ServiceRequestCreated`.
 
 ## § 7. Feedback
 
-### FB-001 — Step1 prompt fires at +4h after contact share  [P0] [both]
+### FB-001 — Step1 prompt fires at Step1InitialDelay after contact share  [P0] [both]
 
 **Preconditions:** `ContactExchanged` event published (CN-001).
-**Expected:** `ContactExchangedHandler` schedules `Step1FeedbackCheck` at +4h. When fired, `Step1FeedbackHandler` adds `MatchFeedback { MatchId, Step=DidYouFind }` row. Outbound is **AI-rephrased** from `Purpose: "feedback-step-1-did-you-find"` with instruction `"Ask if the client found a service provider. Mention they can reply YES or NO."` — assert the outbound contains an interrogative + tokens YES/NO/yes/no, NOT exact text. If `AiReplyHelper.TryGenerateAsync` returns null, **no outbound sent** (XC-004 path).
+**Expected:** `ContactExchangedHandler` schedules `Step1FeedbackCheck` at `Feedback:Step1InitialDelay` (default 30 min in prod, 2 min in dev). When fired, `Step1FeedbackHandler` first calls `feedback.AnyByRequestStepAsync` (per-request dedupe — one prompt per request even if multiple matches were picked); then reserves a `MatchFeedback { MatchId, Step=DidYouFind }` Pending row via the partial unique index. Outbound is **AI-rephrased** from `Purpose: "feedback-step-1-did-you-find"` with instruction `"Ask if the client found a service provider. Mention they can reply YES or NO."` — assert the outbound contains an interrogative + tokens YES/NO/yes/no, NOT exact text. If `AiReplyHelper.TryGenerateAsync` returns null, the Pending row is deleted and **no outbound sent** (XC-004 path).
 **Dev exec:** publish `Step1FeedbackCheck { matchId }` directly.
 **Non-dev exec:** same.
 
-### FB-002 — Step1 fires on chat ended (manual or idle)  [P1] [both]
+### FB-002 — Step1 routes through ChatRoutingFeedbackScheduler for chat-routed matches  [P1] [both]
 
-**Preconditions:** chat session transitions to Ended.
-**Expected:** Step1 prompt sent at chat-end (subject to handler — verify event subscription). Suppression: max one per match.
+**Preconditions:** match resolved via `ChatRoutingRequested` (one or both parties withheld phone consent).
+**Expected:** `ChatRoutingFeedbackScheduler` (Feedback slice) mirrors `ContactExchangedHandler` and schedules the same `Step1FeedbackCheck`. Step1 prompt fires regardless of which exchange path resolved the match.
 **Dev exec / Non-dev exec:** standard.
 
-### FB-003 — Step1 fires at +23h before chat hard-expire  [P1] [both]
+### FB-003 — Per-request dedupe on multi-pick  [P1] [both]
 
-**Preconditions:** chat at 23h since creation; no Step1 yet.
-**Expected:** Step1 prompt sent (still inside Meta 24h window). `analysis.md §17`.
+**Preconditions:** client picked N>1 matches (PICK ALL).
+**Expected:** `ContactExchangedHandler` fires `Step1FeedbackCheck` once per match, but `Step1FeedbackHandler.AnyByRequestStepAsync` short-circuits N-1 of them. Exactly one Step1 prompt sent per request.
 **Dev exec / Non-dev exec:** standard.
 
-### FB-004 — Step1 YES → Step2 +20h  [P1] [both]
+### FB-004 — Step1 YES (single-pick) → Step2 fires immediately  [P1] [both]
 
-**Preconditions:** Step1 pending.
-**Expected:** client replies `"yes"` → `MatchFeedback.Answer=Yes, RepliedAt=now`. `Step2FeedbackCheck` scheduled at +20h.
+**Preconditions:** Step1 pending; one match picked.
+**Expected:** `"yes"` → `MatchFeedback.Answer=Yes, RepliedAt=now`. `FeedbackResponseService` publishes `Step2FeedbackCheck(matchId)` synchronously (no scheduled delay — Pillar A).
 **Dev exec / Non-dev exec:** standard.
+
+### FB-004b — Step1 YES (multi-pick) → IdentifyWinner step  [P1] [both]
+
+**Preconditions:** Step1 pending; >1 matches picked.
+**Expected:** `"yes"` → bot reserves an `IdentifyWinner` Pending row, sends `"Which provider worked out? Reply with the number — 1) +220...XX, 2) +220...YY"` (positions match the original `MatchPresenter` `PICK 1/2/3` order: `Score DESC, DistanceKm, CreatedAt, Id`). Only after the prompt sends successfully does Step1 flip to `Yes` — a send failure leaves Step1 Pending so the next inbound retries. The user's positional reply (`"2"`) claims `IdentifyWinner.Answer=WinnerSelected` and publishes `Step2FeedbackCheck(winnerMatch.Id)` for that specific match — `ProviderStats` credit lands on the winner only.
 
 ### FB-005 — Step1 NO → no Step2  [P1] [both]
 
@@ -826,16 +835,16 @@ Both finalize the request and publish `ServiceRequestCreated`.
 **Expected:** `"no"` → `Answer=No`. **No** Step2 scheduled.
 **Dev exec / Non-dev exec:** standard.
 
-### FB-006 — Step1 unrelated reply  [P2] [both]
+### FB-006 — Step1 unrelated reply within retry window  [P2] [both]
 
 **Preconditions:** Step1 pending.
-**Expected:** unrecognised text routes through `LazyIntent.GetAsync`; if AI returns `Confirmation` / `Rejection`, treated as YES/NO. Otherwise no answer recorded.
-**Dev exec / Non-dev exec:** test with `"maybe"`, `"thanks"`, etc.
+**Expected:** unrecognised text first hits `ParseAnswer`; on miss, the handler short-circuits if `now - PromptedAt > ParseRetryWindow` (default 1h) — no AI call, no claim, silent. Within window: `LazyIntent.GetAsync` runs; `Confirmation`/`Rejection` map to YES/NO; otherwise the bot sends a single `"Sorry, didn't catch that. Reply YES if you found a provider, or NO if you didn't."` retry hint and waits.
+**Note:** `"in progress"` at Step1 specifically resolves to `null` (not `InProgress`) — Step1 only takes Yes/No, the user is hinted instead of silently claimed.
 
-### FB-007 — Step2 IN_PROGRESS → reschedule +48h  [P1] [both]
+### FB-007 — Step2 IN_PROGRESS → ETA prompt → ETA-driven recheck  [P1] [both]
 
 **Preconditions:** Step2 pending.
-**Expected:** `"in progress"` reply → `Step2FeedbackCheck` scheduled +48h. No `ProviderStats` change yet.
+**Expected:** `"in progress"` claims `Step2.Answer=InProgress` and reserves a fresh `AwaitingEta` Pending row. Bot sends `"Got it — when do you think it'll be done? e.g. 'in 3 hours' or 'tomorrow at 5pm'."`. Next inbound is parsed by `IConversationAi.ExtractEtaAsync`; on a parseable future ETA within `MaxEtaHorizon` (7d), the AwaitingEta row claims `EtaCaptured` with `EtaUtc` populated and `Step2FeedbackCheck` is scheduled at `etaUtc + EtaScheduleBuffer`. Unparseable past `ParseRetryWindow` (1h) → claim `Skipped`, fall back to `Step2InProgressRecheckDelay` (20h). No `ProviderStats` change at this step.
 **Dev exec / Non-dev exec:** standard.
 
 ### FB-008 — Step2 YES → ProviderStats success+1  [P1] [both]
@@ -851,12 +860,11 @@ Both finalize the request and publish `ServiceRequestCreated`.
 **Expected:** `"no"` → `RecordOutcome(success: false)`. `CompletedJobs++`, `SuccessCount` unchanged.
 **Dev exec / Non-dev exec:** standard.
 
-### FB-010 — Step1 no reply within 48h → skipped  [P2] [both]
+### FB-010 — Stale Step1 reply past ParseRetryWindow  [P2] [both]
 
-**Preconditions:** Step1 sent 48h+ ago, no reply.
-**Expected:** `MatchFeedback.Status=Skipped`. No further prompts. (Implementation may be a separate cleanup job — verify.)
-**Dev exec:** psql backdate; trigger cleanup handler.
-**Non-dev exec:** same.
+**Preconditions:** Step1 pending; `now - PromptedAt > Feedback:ParseRetryWindow` (default 1h).
+**Expected:** any unrecognised reply is dropped silently — no AI call, no retry hint, no claim. The Pending row stays Pending. (Long-term sweep is a separate concern; the per-inbound handler bounds retry-noise via the parse window, not 48h.)
+**Dev exec:** backdate `MatchFeedback.PromptedAt` via psql; inject garbage reply; assert outbox empty + `intent.GetAsync` not called.
 
 ### FB-011 — Pending feedback routing precedence  [P1] [both]
 
@@ -864,10 +872,10 @@ Both finalize the request and publish `ServiceRequestCreated`.
 **Expected:** any inbound text routes to `FeedbackResponseService.HandleAsync` BEFORE intent detection. Verified via log `"Route → FeedbackResponseService (pending feedback)"`.
 **Dev exec / Non-dev exec:** standard.
 
-### FB-012 — Step3 (4h after match shown, no chat created, share=true)  [P2] [both]
+### FB-012 — Step1 schedule fires for share=true direct path  [P2] [both]
 
-**Preconditions:** match presented and contact shared but no chat created (share=true direct path).
-**Expected:** Step1 fires at +4h after match presentation (via `ContactExchangedHandler` schedule). Same as FB-001 but pinned to share=true path explicitly.
+**Preconditions:** match presented and contact shared (share=true), no chat created.
+**Expected:** Step1 fires at `Feedback:Step1InitialDelay` after `ContactExchanged` (via `ContactExchangedHandler`). Same handler chain as FB-001; this scenario simply pins the share=true variant explicitly so the chat-routed path (FB-002) is not the only documented entry point.
 **Dev exec / Non-dev exec:** standard.
 
 ---

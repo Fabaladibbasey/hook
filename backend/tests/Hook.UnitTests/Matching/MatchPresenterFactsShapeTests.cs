@@ -173,6 +173,8 @@ public class MatchPresenterFactsShapeTests
         }
         public Task<LanguageDetectionResult> DetectLanguageAsync(string userMessage, CancellationToken ct = default) =>
             Task.FromResult(new LanguageDetectionResult("en", 1));
+        public Task<DateTimeOffset?> ExtractEtaAsync(string userMessage, DateTimeOffset now, CancellationToken ct = default) =>
+            Task.FromResult<DateTimeOffset?>(null);
     }
 
     private sealed class CapturingWhatsapp(ReplyCapture capture) : IWhatsappClient

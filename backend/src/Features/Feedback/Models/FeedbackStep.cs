@@ -3,7 +3,9 @@ namespace Hook.Features.Feedback.Models;
 public enum FeedbackStep
 {
     DidYouFind,
-    JobCompleted
+    IdentifyWinner,
+    JobCompleted,
+    AwaitingEta
 }
 
 public enum FeedbackAnswer
@@ -12,5 +14,7 @@ public enum FeedbackAnswer
     Yes,
     No,
     InProgress,
-    Skipped
+    Skipped,
+    WinnerSelected,
+    EtaCaptured
 }

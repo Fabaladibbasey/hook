@@ -224,4 +224,32 @@ internal static class AiPrompts
         Detect the language of the message. Return ISO 639-1 lowercase code with a confidence
         between 0 and 1. Default to "en" if uncertain.
         """;
+
+    public const string EtaExtractionSystem = SafetyPreamble +
+        // TODO(timezone): the rules below assume the client's clock-time phrases
+        // ("5pm", "tomorrow morning") are in UTC. For non-UTC clients this can pick
+        // the wrong day or wrong hour for the recheck. A real fix needs per-client
+        // timezone hint (geocode → tz, or stored tz on ServiceRequest).
+        """
+        Extract the future point-in-time the user has stated for when a job will be done.
+
+        You are given the current UTC instant (referenceUtc) as ISO-8601, and a short
+        user message. Return the ETA as ISO-8601 UTC ("YYYY-MM-DDTHH:MM:SSZ") or null
+        if the message contains no parseable future time.
+
+        - Phrases like "in 2 hours", "in 30 minutes", "in 3 days" are relative — add
+          to referenceUtc.
+        - Phrases like "tomorrow 5pm", "5pm", "Friday morning", "next monday at 9"
+          are absolute clock times — interpret in UTC. If the implied time is already
+          past relative to referenceUtc, advance by one day so the ETA is in the future.
+        - "today" with no time → noon UTC of the same date as referenceUtc.
+        - "tomorrow" with no time → noon UTC of the day after referenceUtc.
+        - "tonight" → 20:00 UTC of the same date.
+        - "morning" → 09:00, "afternoon" → 14:00, "evening" → 18:00, "night" → 21:00 UTC.
+        - If the user says they are "done" / "finished" / "just now" → null (they
+          aren't giving an ETA, they are reporting completion).
+        - If unsure, return null.
+
+        Return JSON only.
+        """;
 }
