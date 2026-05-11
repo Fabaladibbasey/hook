@@ -1,6 +1,6 @@
 # Hook — Operations Run Book
 
-Production deploy uses Docker Compose on a single VPS, behind Caddy with auto Let's Encrypt.
+Production deploy targets a single Hetzner Cloud VPS (`hook.drop.africa`) running Docker Compose behind Caddy with auto Let's Encrypt. The workflow lives at `.github/workflows/deploy-hetzner.yml` and is named to leave room for future deploy-to-other-VPS workflows.
 
 ## Stack
 
@@ -57,7 +57,6 @@ See `.env.example` for the full list. Categories:
 | WhatsApp           | `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_GRAPH_API_VERSION` |
 | Ollama             | `OLLAMA_BASE_URL` (default `http://ollama:11434`), `OLLAMA_MODEL` (default `qwen2.5:3b`) |
 | Google geocoding   | `GOOGLE_GEOCODING_API_KEY`                                             |
-| Chat               | `CHAT_TOKEN_SIGNING_KEY` (≥32-byte base64)                             |
 | Seq / logs         | `SEQ_FIRSTRUN_ADMINPASSWORDHASH`, `SEQ_INGEST_API_KEY` (optional), `SEQ_URL` (default `http://seq:5341`), `LOGS_DOMAIN`, `LOGS_BASIC_AUTH_USER`, `LOGS_BASIC_AUTH_HASH` |
 | Backups            | `BACKUP_RETENTION_DAYS` (default 14)                                   |
 
@@ -113,7 +112,7 @@ For schema rollback, restore from the latest pre-deploy `pg_dump` (see Backups a
 ## CI / CD
 
 - **CI** (`.github/workflows/ci.yml`): build + test on every push/PR. Postgres service container is provisioned for integration tests.
-- **Deploy** (`.github/workflows/deploy.yml`): on push to `main` or tag `v*`:
+- **Deploy** (`.github/workflows/deploy-hetzner.yml`): on push to `main` or tag `v*`:
   1. Build multi-stage image, push to GHCR with tags `:<sha>` and `:latest`.
   2. SSH into VPS, `docker compose pull api`, `up -d`, prune.
   3. Curl `/healthz` until 200 (10×5s).

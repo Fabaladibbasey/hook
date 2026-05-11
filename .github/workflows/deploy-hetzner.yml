@@ -1,4 +1,4 @@
-name: Deploy
+name: Deploy to Hetzner
 
 on:
   workflow_run:
@@ -15,7 +15,7 @@ on:
         default: ""
 
 concurrency:
-  group: deploy-prod
+  group: deploy-hetzner-prod
   cancel-in-progress: false
 
 permissions:

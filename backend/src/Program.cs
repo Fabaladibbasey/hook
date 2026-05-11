@@ -147,18 +147,20 @@ try
 
     var app = builder.Build();
 
-    if (app.Environment.IsDevelopment() || app.Environment.IsStaging())
     {
         await using var scope = app.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
         await db.Database.MigrateAsync();
 
-        var seedOpts = scope.ServiceProvider
-            .GetRequiredService<IOptions<DevProviderSeedOptions>>().Value;
-        if (seedOpts.Enabled && seedOpts.AutoSeed)
+        if (app.Environment.IsDevelopment() || app.Environment.IsStaging())
         {
-            var seeder = scope.ServiceProvider.GetRequiredService<DevProviderSeeder>();
-            await seeder.SeedAsync();
+            var seedOpts = scope.ServiceProvider
+                .GetRequiredService<IOptions<DevProviderSeedOptions>>().Value;
+            if (seedOpts.Enabled && seedOpts.AutoSeed)
+            {
+                var seeder = scope.ServiceProvider.GetRequiredService<DevProviderSeeder>();
+                await seeder.SeedAsync();
+            }
         }
     }
 
