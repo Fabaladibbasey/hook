@@ -72,6 +72,9 @@ try
     builder.Services.AddMetaTemplates();
     builder.Services.AddObservability();
 
+    builder.Services.AddReverseProxy()
+        .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
+
     builder.Services.AddRateLimiter(opts =>
     {
         opts.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -201,6 +204,7 @@ try
         app.MapDevProviders();
     }
     app.MapChat();
+    app.MapReverseProxy();
     app.UseDefaultFiles();
     app.UseStaticFiles();
     app.MapHub<ChatHub>("/hubs/chat");

@@ -56,6 +56,7 @@
     <PackageReference Include="WolverineFx" Version="5.35.2" />
     <PackageReference Include="WolverineFx.EntityFrameworkCore" Version="5.35.2" />
     <PackageReference Include="WolverineFx.Postgresql" Version="5.35.2" />
+    <PackageReference Include="Yarp.ReverseProxy" Version="2.3.0" />
   </ItemGroup>
 
 </Project>

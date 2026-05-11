@@ -31,8 +31,28 @@
     }
 }
 
-# To expose the Seq dashboard at a separate hostname, drop a sibling file
-# named `Caddyfile.logs` here and `caddy reload`; it should define a site
-# block keyed on {$LOGS_DOMAIN} with basic_auth + reverse_proxy seq:80.
-# Kept out of the base Caddyfile so deploys with LOGS_DOMAIN unset don't
-# fail to parse.
+seq.hook.drop.africa {
+    encode zstd gzip
+
+    reverse_proxy api:8080 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    @websockets {
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+    reverse_proxy @websockets api:8080
+
+    tls {
+        protocols tls1.2 tls1.3
+    }
+
+    log {
+        output stdout
+        format console
+    }
+}
