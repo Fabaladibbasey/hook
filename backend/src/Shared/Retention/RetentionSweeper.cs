@@ -26,7 +26,8 @@ public sealed class RetentionSweeper(
                 new ReadOnlyDictionary<string, int>(new Dictionary<string, int>()));
         }
 
-        var cutoff = clock.GetUtcNow() - TimeSpan.FromDays(opts.RetentionDays);
+        var nowUtc = clock.GetUtcNow();
+        var cutoff = nowUtc - TimeSpan.FromDays(opts.RetentionDays);
 
         var sweeps = new (string Key, Func<Task<int>> Run)[]
         {

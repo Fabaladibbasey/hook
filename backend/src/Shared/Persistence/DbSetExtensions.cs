@@ -35,26 +35,37 @@ public static class DbSetExtensions
 
     /// <summary>
     /// Insert <paramref name="entity"/> and SaveChanges; return false if a 23505
-    /// (unique violation) on <paramref name="constraintName"/> raced us. Wraps the
-    /// "partial unique index + 23505 catch" idiom so call sites stay one-line.
+    /// (unique violation) on any of <paramref name="constraintNames"/> raced us.
+    /// Uses a savepoint when an outer transaction is present, so a lost race does
+    /// not poison the enclosing Wolverine handler transaction. Pass multiple names
+    /// when one insert can race against more than one partial unique index.
     /// </summary>
     public static async Task<bool> TryInsertUniqueAsync<T>(
         this DbContext db,
         T entity,
-        string constraintName,
+        IReadOnlyList<string> constraintNames,
         CancellationToken ct = default) where T : class
     {
+        var outer = db.Database.CurrentTransaction;
+        var savepoint = outer is null ? null : $"try_insert_{Guid.NewGuid():N}";
+        if (savepoint is not null && outer is not null)
+            await outer.CreateSavepointAsync(savepoint, ct);
+
         await db.AddAsync(entity, ct);
         try
         {
             await db.SaveChangesAsync(ct);
+            if (savepoint is not null && outer is not null)
+                await outer.ReleaseSavepointAsync(savepoint, ct);
             return true;
         }
         catch (DbUpdateException ex) when (
             ex.InnerException is Npgsql.PostgresException { SqlState: "23505" } pg
-            && pg.ConstraintName == constraintName)
+            && constraintNames.Contains(pg.ConstraintName))
         {
             db.Entry(entity).State = EntityState.Detached;
+            if (savepoint is not null && outer is not null)
+                await outer.RollbackToSavepointAsync(savepoint, ct);
             return false;
         }
     }

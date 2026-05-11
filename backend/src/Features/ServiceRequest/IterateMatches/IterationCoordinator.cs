@@ -52,7 +52,6 @@ public sealed class IterationCoordinator(
         }
 
         request.CurrentRadiusKm = Math.Min(request.CurrentRadiusKm * opts.RadiusExpansionFactor, opts.MaxRadiusKm);
-        await requests.SaveChangesAsync(ct);
 
         var batch = await matching.RunForRequestAsync(request.Id, ct);
         if (batch is null || batch.Scored.Count == 0)
@@ -80,7 +79,6 @@ public sealed class IterationCoordinator(
             var nextRadius = Math.Min(request.CurrentRadiusKm * opts.RadiusExpansionFactor, opts.MaxRadiusKm);
             request.CurrentRadiusKm = nextRadius;
             request.AutoExpandedOnce = true;
-            await requests.SaveChangesAsync(ct);
 
             var second = await matching.RunForRequestAsync(request.Id, ct);
             if (second is { Scored.Count: > 0 })

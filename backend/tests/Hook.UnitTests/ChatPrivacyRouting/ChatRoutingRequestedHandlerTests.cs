@@ -6,12 +6,13 @@ using Hook.Features.ChatSession.ParticipantAggregate;
 using Hook.Features.ChatSession.SessionAggregate;
 using Hook.Features.ContactSharing.Events;
 using Hook.Features.Matching.MatchAggregate;
-using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Phone;
+using Hook.Shared.Pipeline.PostCommitSends;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
+using Wolverine;
 using MatchEntity = Hook.Features.Matching.MatchAggregate.Match;
 
 namespace Hook.UnitTests.ChatPrivacyRouting;
@@ -37,7 +38,7 @@ public class ChatRoutingRequestedHandlerTests
 
     private readonly Mock<IMatchRepository> _matchesMock;
     private readonly Mock<IChatRepository> _chatsMock;
-    private readonly Mock<IWhatsappClient> _whatsappMock;
+    private readonly Mock<IMessageBus> _busMock;
     private readonly TimeProvider _clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-05-09T12:00:00Z"));
     private readonly IOptions<ChatOptions> _chatOptions =
         Options.Create(new ChatOptions { PublicChatBaseUrl = "https://hook.test" });
@@ -48,6 +49,8 @@ public class ChatRoutingRequestedHandlerTests
         _matchesMock.Setup(x => x.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid id, CancellationToken _) =>
                 _matches.TryGetValue(id, out var m) ? m : null);
+        _matchesMock.Setup(x => x.TryClaimChatRoutingAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
         _chatsMock = new Mock<IChatRepository>();
         _chatsMock.Setup(x => x.AddSessionAsync(It.IsAny<ChatSession>(), It.IsAny<CancellationToken>()))
@@ -56,10 +59,14 @@ public class ChatRoutingRequestedHandlerTests
         _chatsMock.Setup(x => x.AddParticipantsAsync(It.IsAny<IEnumerable<ChatParticipant>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        _whatsappMock = new Mock<IWhatsappClient>();
-        _whatsappMock.Setup(x => x.SendTextAsync(It.IsAny<PhoneNumber>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Callback<PhoneNumber, string, CancellationToken>((to, body, _) => _sent.Add((to.Value, body)))
-            .ReturnsAsync("msg-1");
+        _busMock = new Mock<IMessageBus>();
+        _busMock.Setup(x => x.PublishAsync(It.IsAny<SendWhatsAppTextRequested>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions>((msg, _) =>
+            {
+                var req = (SendWhatsAppTextRequested)msg;
+                _sent.Add((req.To.Value, req.Text));
+            })
+            .Returns(ValueTask.CompletedTask);
     }
 
     private MatchEntity SeedMatch()
@@ -77,7 +84,7 @@ public class ChatRoutingRequestedHandlerTests
     private ChatRoutingRequestedHandler Build()
     {
         var factory = new ChatSessionFactory(_chatsMock.Object, _chatOptions, _clock);
-        return new ChatRoutingRequestedHandler(factory, _matchesMock.Object, _whatsappMock.Object,
+        return new ChatRoutingRequestedHandler(factory, _matchesMock.Object,
             NullLogger<ChatRoutingRequestedHandler>.Instance);
     }
 
@@ -86,7 +93,7 @@ public class ChatRoutingRequestedHandlerTests
     {
         var match = SeedMatch();
 
-        await Build().Handle(MakeEvt(match.Id, clientConsented: false, providerConsented: false), CancellationToken.None);
+        await Build().Handle(MakeEvt(match.Id, clientConsented: false, providerConsented: false), _busMock.Object, CancellationToken.None);
 
         var client = _sent.Single(s => s.To == ClientPhone);
         var provider = _sent.Single(s => s.To == ProviderPhone);
@@ -101,7 +108,7 @@ public class ChatRoutingRequestedHandlerTests
     {
         var match = SeedMatch();
 
-        await Build().Handle(MakeEvt(match.Id, clientConsented: true, providerConsented: false), CancellationToken.None);
+        await Build().Handle(MakeEvt(match.Id, clientConsented: true, providerConsented: false), _busMock.Object, CancellationToken.None);
 
         var client = _sent.Single(s => s.To == ClientPhone);
         var provider = _sent.Single(s => s.To == ProviderPhone);
@@ -115,7 +122,7 @@ public class ChatRoutingRequestedHandlerTests
     {
         var match = SeedMatch();
 
-        await Build().Handle(MakeEvt(match.Id, clientConsented: false, providerConsented: true), CancellationToken.None);
+        await Build().Handle(MakeEvt(match.Id, clientConsented: false, providerConsented: true), _busMock.Object, CancellationToken.None);
 
         var client = _sent.Single(s => s.To == ClientPhone);
         var provider = _sent.Single(s => s.To == ProviderPhone);
@@ -133,7 +140,7 @@ public class ChatRoutingRequestedHandlerTests
         {
             var match = SeedMatch();
 
-            await Build().Handle(MakeEvt(match.Id, clientConsented: false, providerConsented: false), CancellationToken.None);
+            await Build().Handle(MakeEvt(match.Id, clientConsented: false, providerConsented: false), _busMock.Object, CancellationToken.None);
 
             var provider = _sent.Single(s => s.To == ProviderPhone);
             Assert.Contains("?q=13.45,-16.6", provider.Body);
@@ -151,7 +158,7 @@ public class ChatRoutingRequestedHandlerTests
         var match = SeedMatch();
         match.ChatId = Guid.NewGuid();
 
-        await Build().Handle(MakeEvt(match.Id, clientConsented: false, providerConsented: false), CancellationToken.None);
+        await Build().Handle(MakeEvt(match.Id, clientConsented: false, providerConsented: false), _busMock.Object, CancellationToken.None);
 
         Assert.Empty(_sent);
         Assert.Empty(_sessions);
@@ -160,7 +167,7 @@ public class ChatRoutingRequestedHandlerTests
     [Fact]
     public async Task Handle_MatchMissing_DoesNotSendOrCreateLinks()
     {
-        await Build().Handle(MakeEvt(Guid.NewGuid(), clientConsented: false, providerConsented: false), CancellationToken.None);
+        await Build().Handle(MakeEvt(Guid.NewGuid(), clientConsented: false, providerConsented: false), _busMock.Object, CancellationToken.None);
 
         Assert.Empty(_sent);
         Assert.Empty(_sessions);

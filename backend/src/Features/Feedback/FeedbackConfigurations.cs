@@ -22,12 +22,14 @@ public class MatchFeedbackConfiguration : IEntityTypeConfiguration<MatchFeedback
                .IsUnique()
                .HasFilter($"\"Answer\" = '{nameof(FeedbackAnswer.Pending)}'");
 
-        // Non-partial covering index for AnyByRequestStepAsync, which scans by Step
-        // for any match under a request and intentionally includes answered rows.
-        // The partial unique index above only covers Pending rows, so this query
-        // would otherwise sequence-scan the table.
-        builder.HasIndex(f => new { f.Step, f.MatchId })
-               .HasDatabaseName("ix_match_feedback_step_match");
+        // Per-request dedupe for Step1: multi-PICK fans out N concurrent Step1
+        // handlers; this partial unique forces all but one to fail at insert time.
+        // Includes answered rows so a late sibling fired after Step1 was answered
+        // also collides.
+        builder.HasIndex(f => new { f.RequestId, f.Step })
+               .HasDatabaseName(FeedbackConstants.RequestStep1UniqueIndexName)
+               .IsUnique()
+               .HasFilter($"\"Step\" = '{nameof(FeedbackStep.DidYouFind)}'");
 
         builder
             .HasOne<Match>()

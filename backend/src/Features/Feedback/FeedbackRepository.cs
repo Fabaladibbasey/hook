@@ -8,6 +8,12 @@ namespace Hook.Features.Feedback;
 
 public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
 {
+    private static readonly string[] PendingConstraints =
+    [
+        FeedbackConstants.PendingUniqueIndexName,
+        FeedbackConstants.RequestStep1UniqueIndexName,
+    ];
+
     public Task<MatchFeedback?> GetLatestPendingForClientAsync(string clientPhone, CancellationToken ct = default) =>
         db.MatchFeedback
             .Where(f => f.Answer == FeedbackAnswer.Pending
@@ -28,15 +34,6 @@ public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
             .Where(f => f.MatchId == matchId && f.Step == step)
             .OrderByDescending(f => f.PromptedAt)
             .FirstOrDefaultAsync(ct);
-
-    // Per-request dedupe for Step1: returns true if any feedback row of the given step
-    // exists for ANY match under this request (covers Pending and answered). Used by
-    // Step1FeedbackHandler so multi-PICK clients receive a single Step1 prompt instead
-    // of one per match.
-    public Task<bool> AnyByRequestStepAsync(Guid requestId, FeedbackStep step, CancellationToken ct = default) =>
-        db.MatchFeedback.AnyAsync(
-            f => f.Step == step && db.Matches.Any(m => m.Id == f.MatchId && m.RequestId == requestId),
-            ct);
 
     public async Task<bool> TryClaimPendingAsync(
         Guid feedbackId, FeedbackAnswer answer, DateTimeOffset now, CancellationToken ct = default)
@@ -68,7 +65,7 @@ public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
         await db.MatchFeedback.AddAsync(feedback, ct);
 
     public Task<bool> TryAddPendingAsync(MatchFeedback feedback, CancellationToken ct = default) =>
-        db.TryInsertUniqueAsync(feedback, FeedbackConstants.PendingUniqueIndexName, ct);
+        db.TryInsertUniqueAsync(feedback, PendingConstraints, ct);
 
     public async Task<bool> DeletePendingAsync(Guid feedbackId, CancellationToken ct = default)
     {

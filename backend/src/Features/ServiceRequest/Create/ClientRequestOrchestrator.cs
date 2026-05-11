@@ -6,9 +6,9 @@ using Hook.Features.Matching;
 using Hook.Features.ProviderAvailability.AvailabilityAggregate;
 using Hook.Features.ServiceRequest.RequestAggregate;
 using Hook.Features.ServiceTaxonomy.ResolveSlug;
-using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Models;
 using Hook.Features.Whatsapp.Phone;
+using Hook.Shared.Pipeline.PostCommitSends;
 using Microsoft.Extensions.Options;
 using Wolverine;
 using Location = Hook.Features.Geocoding.Models.Location;
@@ -22,7 +22,6 @@ public sealed class ClientRequestOrchestrator(
     IConversationAi ai,
     SlugResolver slugResolver,
     GeocodingService geocoding,
-    IWhatsappClient whatsapp,
     IMessageBus bus,
     IOptions<MatchingOptions> matchingOptions,
     TimeProvider clock,
@@ -55,8 +54,8 @@ public sealed class ClientRequestOrchestrator(
                     // Location fields preserved on draft so YES skips straight to AwaitingDescription.
                     await drafts.UpsertAsync(draft, ct);
                     logger.LogDebug("Slug switch → {Slug} for {Phone}", canonical.CanonicalSlug, phone.Mask());
-                    await whatsapp.SendTextAsync(phone,
-                        $"Switching to {canonical.CanonicalSlug.Replace('-', ' ')}. Reply YES to confirm or NO to choose another.", ct);
+                    await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+                        $"Switching to {canonical.CanonicalSlug.Replace('-', ' ')}. Reply YES to confirm or NO to choose another."));
                     return;
                 }
             }
@@ -98,8 +97,8 @@ public sealed class ClientRequestOrchestrator(
             // and only landed here because the LLM-classified intent edged over the
             // confidence threshold. The REGISTER hint keeps the door open without
             // restarting the conversation.
-            await whatsapp.SendTextAsync(phone,
-                "What service do you need? (e.g. plumber, carpenter, computer repair) — or reply REGISTER if you're offering services instead.", ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+                "What service do you need? (e.g. plumber, carpenter, computer repair) — or reply REGISTER if you're offering services instead."));
             await drafts.UpsertAsync(draft, ct);
             return;
         }
@@ -108,7 +107,7 @@ public sealed class ClientRequestOrchestrator(
         draft.DraftServiceSlug = canonical.CanonicalSlug;
         draft.Step = ClientRequestStep.ConfirmService;
         await drafts.UpsertAsync(draft, ct);
-        await whatsapp.SendTextAsync(phone, $"Do you need {canonical.CanonicalSlug.Replace('-', ' ')}? Reply YES or NO — YES to confirm, NO to choose another service.", ct);
+        await bus.PublishAsync(new SendWhatsAppTextRequested(phone, $"Do you need {canonical.CanonicalSlug.Replace('-', ' ')}? Reply YES or NO — YES to confirm, NO to choose another service."));
     }
 
     // "no I want carpentry", "no actually plumbing" — the leading "no" rejects
@@ -149,14 +148,14 @@ public sealed class ClientRequestOrchestrator(
             {
                 draft.Step = ClientRequestStep.AwaitingDescription;
                 await drafts.UpsertAsync(draft, ct);
-                await whatsapp.SendTextAsync(phone,
-                    $"Got it. Using your saved location: {draft.DraftFormattedAddress}. Want to add a description? Send it now or reply SKIP.", ct);
+                await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+                    $"Got it. Using your saved location: {draft.DraftFormattedAddress}. Want to add a description? Send it now or reply SKIP."));
                 return;
             }
 
             draft.Step = ClientRequestStep.AwaitingLocation;
             await drafts.UpsertAsync(draft, ct);
-            await whatsapp.SendTextAsync(phone, "Send your location pin (or type your address).", ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Send your location pin (or type your address)."));
             return;
         }
         if (intent.Intent == IntentKind.Rejection)
@@ -164,11 +163,11 @@ public sealed class ClientRequestOrchestrator(
             draft.DraftServiceSlug = string.Empty;
             draft.Step = ClientRequestStep.AwaitingService;
             await drafts.UpsertAsync(draft, ct);
-            await whatsapp.SendTextAsync(phone,
-                "What service do you need? Or reply REGISTER if you're offering services instead.", ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+                "What service do you need? Or reply REGISTER if you're offering services instead."));
             return;
         }
-        await whatsapp.SendTextAsync(phone, $"Please reply YES or NO — YES to confirm {draft.DraftServiceSlug.Replace('-', ' ')}, NO to choose another service.", ct);
+        await bus.PublishAsync(new SendWhatsAppTextRequested(phone, $"Please reply YES or NO — YES to confirm {draft.DraftServiceSlug.Replace('-', ' ')}, NO to choose another service."));
     }
 
     private async Task CollectLocationAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
@@ -180,7 +179,7 @@ public sealed class ClientRequestOrchestrator(
             draft.DraftFormattedAddress = loc.Address ?? loc.Name ?? "(GPS pin)";
             draft.Step = ClientRequestStep.AwaitingDescription;
             await drafts.UpsertAsync(draft, ct);
-            await whatsapp.SendTextAsync(phone, "Got your location. Want to add a short description? Send it now or reply SKIP.", ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Got your location. Want to add a short description? Send it now or reply SKIP."));
             return;
         }
 
@@ -189,7 +188,7 @@ public sealed class ClientRequestOrchestrator(
             var geocoded = await geocoding.GeocodeAsync(message.Text!, ct);
             if (geocoded is null)
             {
-                await whatsapp.SendTextAsync(phone, "Couldn't find that address. Please send your GPS pin (📎 → Location).", ct);
+                await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Couldn't find that address. Please send your GPS pin (📎 → Location)."));
                 await drafts.UpsertAsync(draft, ct);
                 return;
             }
@@ -198,11 +197,11 @@ public sealed class ClientRequestOrchestrator(
             draft.DraftFormattedAddress = geocoded.FormattedAddress;
             draft.Step = ClientRequestStep.ConfirmLocation;
             await drafts.UpsertAsync(draft, ct);
-            await whatsapp.SendTextAsync(phone, $"Found: '{geocoded.FormattedAddress}'. Reply YES to confirm or send your GPS pin.", ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, $"Found: '{geocoded.FormattedAddress}'. Reply YES to confirm or send your GPS pin."));
             return;
         }
 
-        await whatsapp.SendTextAsync(phone, "Send your location pin or type your address.", ct);
+        await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Send your location pin or type your address."));
     }
 
     private async Task ConfirmLocationAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
@@ -214,7 +213,7 @@ public sealed class ClientRequestOrchestrator(
             draft.DraftFormattedAddress = loc.Address ?? loc.Name ?? "(GPS pin)";
             draft.Step = ClientRequestStep.AwaitingDescription;
             await drafts.UpsertAsync(draft, ct);
-            await whatsapp.SendTextAsync(phone, "Got your location. Want to add a description? Send it now or reply SKIP.", ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Got your location. Want to add a description? Send it now or reply SKIP."));
             return;
         }
         var quick = QuickIntent.Detect(message.Text);
@@ -225,10 +224,10 @@ public sealed class ClientRequestOrchestrator(
         {
             draft.Step = ClientRequestStep.AwaitingDescription;
             await drafts.UpsertAsync(draft, ct);
-            await whatsapp.SendTextAsync(phone, "Want to add a description? Send it now or reply SKIP.", ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Want to add a description? Send it now or reply SKIP."));
             return;
         }
-        await whatsapp.SendTextAsync(phone, "Reply YES to confirm or send your GPS pin.", ct);
+        await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Reply YES to confirm or send your GPS pin."));
     }
 
     private async Task CollectDescriptionAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
@@ -243,8 +242,8 @@ public sealed class ClientRequestOrchestrator(
         {
             logger.LogWarning("Incomplete client draft for {Phone}", phone.Mask());
             await drafts.DeleteAsync(phone.Value, ct);
-            await whatsapp.SendTextAsync(phone,
-                "Couldn't save your request — some details were missing. Reply with what service you need to start over.", ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+                "Couldn't save your request — some details were missing. Reply with what service you need to start over."));
             return;
         }
 
@@ -259,8 +258,8 @@ public sealed class ClientRequestOrchestrator(
             logger.LogDebug("Rejecting same-service dual-role request for {Phone} slug={Slug}",
                 phone.Mask(), draft.DraftServiceSlug);
             await drafts.DeleteAsync(phone.Value, ct);
-            await whatsapp.SendTextAsync(phone,
-                $"You're listed as a {human} provider. To request {human} instead, reply LEAVE to unlist first, then send your request again.", ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+                $"You're listed as a {human} provider. To request {human} instead, reply LEAVE to unlist first, then send your request again."));
             return;
         }
 
@@ -269,8 +268,8 @@ public sealed class ClientRequestOrchestrator(
         // so SharePhoneNumber is set atomically with creation.
         draft.Step = ClientRequestStep.AwaitingPhoneShareConsent;
         await drafts.UpsertAsync(draft, ct);
-        await whatsapp.SendTextAsync(phone,
-            "One more thing — should we share your phone number with selected providers? Reply YES or NO.", ct);
+        await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+            "One more thing — should we share your phone number with selected providers? Reply YES or NO."));
     }
 
     private async Task CollectPhoneShareConsentAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
@@ -282,8 +281,8 @@ public sealed class ClientRequestOrchestrator(
 
         if (intent.Intent != IntentKind.Confirmation && intent.Intent != IntentKind.Rejection)
         {
-            await whatsapp.SendTextAsync(phone,
-                "Should we share your phone number with selected providers? Reply YES or NO.", ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+                "Should we share your phone number with selected providers? Reply YES or NO."));
             return;
         }
 
@@ -294,8 +293,8 @@ public sealed class ClientRequestOrchestrator(
         {
             logger.LogWarning("Consent received with incomplete draft for {Phone}", phone.Mask());
             await drafts.DeleteAsync(phone.Value, ct);
-            await whatsapp.SendTextAsync(phone,
-                "Couldn't save your request — some details were missing. Reply with what service you need to start over.", ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+                "Couldn't save your request — some details were missing. Reply with what service you need to start over."));
             return;
         }
 
@@ -312,10 +311,9 @@ public sealed class ClientRequestOrchestrator(
                 sharePhoneNumber: consent);
 
             await requests.AddAsync(request, ct);
-            await requests.SaveChangesAsync(ct);
             await drafts.DeleteAsync(phone.Value, ct);
 
-            await whatsapp.SendTextAsync(phone, "Looking for nearby providers…", ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Looking for nearby providers…"));
             await bus.PublishAsync(new ServiceRequestCreated(request.Id));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -326,8 +324,8 @@ public sealed class ClientRequestOrchestrator(
         {
             logger.LogError(ex, "Failed to finalize client request for {Phone}", phone.Mask());
             await drafts.DeleteAsync(phone.Value, ct);
-            await whatsapp.SendTextAsync(phone,
-                "Couldn't save your request right now. Reply with what service you need (e.g. 'I need a plumber') to try again.", ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+                "Couldn't save your request right now. Reply with what service you need (e.g. 'I need a plumber') to try again."));
         }
     }
 

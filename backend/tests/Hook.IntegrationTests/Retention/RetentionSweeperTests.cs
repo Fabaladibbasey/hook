@@ -50,7 +50,9 @@ public sealed class RetentionSweeperTests : PipelineTestBase
             SweepInterval = configured.SweepInterval,
             StartupDelay = configured.StartupDelay
         });
-        return new RetentionSweeper(db, enabled, TimeProvider.System,
+        return new RetentionSweeper(
+            db, enabled,
+            TimeProvider.System,
             NullLogger<RetentionSweeper>.Instance);
     }
 
@@ -125,10 +127,10 @@ public sealed class RetentionSweeperTests : PipelineTestBase
         var sweeper = Resolve(scope.ServiceProvider);
         var result = await sweeper.RunOnceAsync(CancellationToken.None);
 
-        Assert.True(result.DeletedByTable[RetentionTableKeys.ChatSessions] >= 1);
-        Assert.True(result.DeletedByTable[RetentionTableKeys.ServiceRequests] >= 1);
-        Assert.True(result.DeletedByTable[RetentionTableKeys.GeocodeCache] >= 1);
-        Assert.True(result.DeletedByTable[RetentionTableKeys.WhatsappContacts] >= 1);
+        Assert.Equal(1, result.DeletedByTable[RetentionTableKeys.ChatSessions]);
+        Assert.Equal(1, result.DeletedByTable[RetentionTableKeys.ServiceRequests]);
+        Assert.Equal(1, result.DeletedByTable[RetentionTableKeys.GeocodeCache]);
+        Assert.Equal(1, result.DeletedByTable[RetentionTableKeys.WhatsappContacts]);
         Assert.True(result.DeletedByTable.ContainsKey(RetentionTableKeys.MatchFeedback));
         Assert.False(result.DeletedByTable.ContainsKey("provider_stats"));
 
@@ -186,11 +188,13 @@ public sealed class RetentionSweeperTests : PipelineTestBase
         var ancient = DateTimeOffset.UtcNow - TimeSpan.FromDays(opts.RetentionDays + 23);
 
         var (_, oldMatch) = await SeedRequestAndMatchAsync(db, fresh);
+        var (_, oldMatch2) = await SeedRequestAndMatchAsync(db, fresh);
         var (_, freshMatch) = await SeedRequestAndMatchAsync(db, fresh);
 
         var oldAnswered = new MatchFeedback
         {
             MatchId = oldMatch.Id,
+            RequestId = oldMatch.RequestId,
             Step = FeedbackStep.DidYouFind,
             Answer = FeedbackAnswer.Yes,
             PromptedAt = ancient,
@@ -198,13 +202,15 @@ public sealed class RetentionSweeperTests : PipelineTestBase
         };
         var oldPending = new MatchFeedback
         {
-            MatchId = oldMatch.Id,
+            MatchId = oldMatch2.Id,
+            RequestId = oldMatch2.RequestId,
             Step = FeedbackStep.DidYouFind,
             PromptedAt = old
         };
         var recent = new MatchFeedback
         {
             MatchId = freshMatch.Id,
+            RequestId = freshMatch.RequestId,
             Step = FeedbackStep.JobCompleted,
             Answer = FeedbackAnswer.Yes,
             PromptedAt = fresh,
@@ -220,7 +226,7 @@ public sealed class RetentionSweeperTests : PipelineTestBase
         var sweeper = Resolve(scope.ServiceProvider);
         var result = await sweeper.RunOnceAsync(CancellationToken.None);
 
-        Assert.True(result.DeletedByTable[RetentionTableKeys.MatchFeedback] >= 2);
+        Assert.Equal(2, result.DeletedByTable[RetentionTableKeys.MatchFeedback]);
         Assert.False(await db.MatchFeedback.AsNoTracking().AnyAsync(f => f.Id == oldAnswered.Id));
         Assert.False(await db.MatchFeedback.AsNoTracking().AnyAsync(f => f.Id == oldPending.Id));
         Assert.True(await db.MatchFeedback.AsNoTracking().AnyAsync(f => f.Id == recent.Id));
@@ -249,6 +255,7 @@ public sealed class RetentionSweeperTests : PipelineTestBase
         var feedback = new MatchFeedback
         {
             MatchId = match.Id,
+            RequestId = match.RequestId,
             Step = FeedbackStep.DidYouFind,
             Answer = FeedbackAnswer.Yes,
             PromptedAt = fresh
@@ -356,7 +363,9 @@ public sealed class RetentionSweeperTests : PipelineTestBase
         {
             var disabledOpts = Options.Create(new RetentionOptions { Enabled = false });
             var sweeper = new RetentionSweeper(
-                db, disabledOpts, TimeProvider.System, NullLogger<RetentionSweeper>.Instance);
+                db, disabledOpts,
+                TimeProvider.System,
+                NullLogger<RetentionSweeper>.Instance);
 
             var result = await sweeper.RunOnceAsync(CancellationToken.None);
 

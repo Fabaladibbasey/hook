@@ -5,10 +5,10 @@ using Hook.Features.Feedback.AggregateStats;
 using Hook.Features.Feedback.Models;
 using Hook.Features.Feedback.ProviderStatsAggregate;
 using Hook.Features.Matching.MatchAggregate;
-using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Models;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Core;
+using Hook.Shared.Pipeline.PostCommitSends;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
@@ -90,14 +90,13 @@ public class FeedbackResponseServiceTests
     private readonly Mock<IMatchRepository> _matchesMock = new();
     private readonly Mock<IConversationAi> _aiMock = new();
     private readonly Mock<IEventBus> _busMock = new();
-    private readonly Mock<IWhatsappClient> _whatsappMock = new();
+    private readonly Mock<Wolverine.IMessageBus> _messageBusMock = new();
     private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 5, 10, 12, 0, 0, TimeSpan.Zero));
     private readonly FeedbackOptions _options = new();
 
     private bool _tryAddResult = true;
     private bool _tryClaimResult = true;
     private ProviderStats? _lastUpsertedStats;
-    private Exception? _whatsappThrowOnSend;
 
     public FeedbackResponseServiceTests()
     {
@@ -155,17 +154,17 @@ public class FeedbackResponseServiceTests
                 _scheduled.Add((inv.Arguments[0], (TimeSpan)inv.Arguments[1]))))
             .Returns(Task.CompletedTask);
 
-        _whatsappMock.Setup(x => x.SendTextAsync(It.IsAny<PhoneNumber>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns((PhoneNumber to, string body, CancellationToken _) =>
+        _messageBusMock.Setup(x => x.PublishAsync(It.IsAny<SendWhatsAppTextRequested>(), It.IsAny<Wolverine.DeliveryOptions>()))
+            .Callback<object, Wolverine.DeliveryOptions>((msg, _) =>
             {
-                if (_whatsappThrowOnSend is not null) throw _whatsappThrowOnSend;
-                _sent.Add((to, body));
-                return Task.FromResult("msg-1");
-            });
+                var req = (SendWhatsAppTextRequested)msg;
+                _sent.Add((req.To, req.Text));
+            })
+            .Returns(ValueTask.CompletedTask);
     }
 
     private FeedbackResponseService Build() =>
-        new(_feedbackMock.Object, _matchesMock.Object, _aiMock.Object, _busMock.Object, _whatsappMock.Object,
+        new(_feedbackMock.Object, _matchesMock.Object, _aiMock.Object, _busMock.Object, _messageBusMock.Object,
             Microsoft.Extensions.Options.Options.Create(_options),
             _clock,
             NullLogger<FeedbackResponseService>.Instance);
@@ -209,6 +208,7 @@ public class FeedbackResponseServiceTests
         return new MatchFeedback
         {
             MatchId = anchor.Id,
+            RequestId = anchor.RequestId,
             Step = step,
             PromptedAt = promptedAt ?? _clock.GetUtcNow()
         };
@@ -228,7 +228,7 @@ public class FeedbackResponseServiceTests
     [Fact]
     public async Task HandleAsync_UnknownStep_ThrowsInvalidOperation()
     {
-        var pending = new MatchFeedback { MatchId = Guid.NewGuid(), Step = (FeedbackStep)999 };
+        var pending = new MatchFeedback { MatchId = Guid.NewGuid(), RequestId = Guid.NewGuid(), Step = (FeedbackStep)999 };
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             Build().HandleAsync(NewInbound("yes"), pending, Intent("yes"), CancellationToken.None));
@@ -283,23 +283,6 @@ public class FeedbackResponseServiceTests
         Assert.Equal(FeedbackAnswer.Yes, _claimed[0].Answer);
         // No Step2 publish — winner identification is still required.
         Assert.Empty(_published);
-    }
-
-    [Fact]
-    public async Task DidYouFind_YesMultiPick_SendThrows_LeavesStep1PendingAndDeletesIdentifyWinner()
-    {
-        var pending = SeedPendingForStep(FeedbackStep.DidYouFind);
-        _matches[pending.MatchId].PickedAt = DateTimeOffset.UtcNow;
-        SeedSibling(pending.MatchId, "+2204445678");
-        _whatsappThrowOnSend = new InvalidOperationException("transport down");
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            Build().HandleAsync(NewInbound("yes"), pending, Intent("yes"), CancellationToken.None));
-
-        // IdentifyWinner row was added then deleted; Step1 stays Pending (no claim).
-        Assert.Single(_added);
-        Assert.Single(_deleted);
-        Assert.Empty(_claimed);
     }
 
     [Fact]
@@ -504,19 +487,6 @@ public class FeedbackResponseServiceTests
         Assert.Equal(FeedbackStep.AwaitingEta, _added[0].Step);
         Assert.Single(_sent);
         Assert.Contains("when do you think", _sent[0].Body);
-    }
-
-    [Fact]
-    public async Task JobCompleted_InProgress_SendThrows_DeletesAwaitingEta()
-    {
-        var pending = SeedPendingForStep(FeedbackStep.JobCompleted);
-        _whatsappThrowOnSend = new InvalidOperationException("transport down");
-
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            Build().HandleAsync(NewInbound("in progress"), pending, Intent("in progress"), CancellationToken.None));
-
-        Assert.Single(_added);
-        Assert.Single(_deleted);
     }
 
     [Fact]

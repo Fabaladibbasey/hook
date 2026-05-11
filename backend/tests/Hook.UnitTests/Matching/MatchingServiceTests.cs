@@ -38,10 +38,6 @@ public class MatchingServiceTests
             .ReturnsAsync(Array.Empty<MatchEntity>());
         _matchesMock.Setup(x => x.AddRangeAsync(It.IsAny<IEnumerable<MatchEntity>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        _matchesMock.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        _requestsMock.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
     }
 
     private MatchingService Build(MatchingOptions? opts = null) =>

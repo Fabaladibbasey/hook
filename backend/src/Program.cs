@@ -26,6 +26,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Serilog;
 using Wolverine;
+using Wolverine.EntityFrameworkCore;
 using Wolverine.Postgresql;
 
 // Bootstrap logger captured at process start; UseSerilog freezes it on first host build.
@@ -47,7 +48,12 @@ try
     var connectionString = builder.Configuration.GetConnectionString("HookDb")
         ?? throw new InvalidOperationException("Connection string 'HookDb' is not configured.");
 
-    builder.Services.AddDbContext<HookDbContext>(options =>
+    // AddDbContextWithWolverineIntegration installs a model customizer that
+    // requires Wolverine.RDBMS.DatabaseSettings in DI — paired with
+    // PersistMessagesWithPostgresql in the UseWolverine block so every
+    // environment (including tests) gets the EF transactional outbox.
+    // Per-test isolation relies on each fixture using its own Postgres database.
+    builder.Services.AddDbContextWithWolverineIntegration<HookDbContext>(options =>
         options.UseNpgsql(connectionString, npgsql =>
         {
             npgsql.UseNetTopologySuite();
@@ -133,16 +139,16 @@ try
             opts.CodeGeneration.TypeLoadMode = JasperFx.CodeGeneration.TypeLoadMode.Dynamic;
         }
 
-        // Persist scheduled messages (and the durable outbox) to Postgres in production so
-        // jobs like Step1/Step2 feedback prompts survive restarts. Non-production stays
-        // in-memory unless Wolverine:Durable=true is set explicitly (keeps tests fast and
-        // sidesteps cross-test bleed in Pipeline-N shards).
-        var durable = builder.Environment.IsProduction()
-            || builder.Configuration.GetValue<bool>("Wolverine:Durable");
-        if (durable)
-        {
-            opts.PersistMessagesWithPostgresql(connectionString, schemaName: "wolverine");
-        }
+        // Durable persistence is required for the EF transactional outbox —
+        // every environment (including tests) uses it so scheduled messages
+        // survive restarts and handlers run inside an EF transaction with the
+        // outgoing envelope written in the same commit (BeginTransaction ->
+        // handler -> SaveChanges -> CommitTransaction). Per-test isolation
+        // relies on each fixture using its own Postgres database; the
+        // wolverine.* schema lives inside the same DB and tears down with it.
+        opts.PersistMessagesWithPostgresql(connectionString, schemaName: "wolverine");
+        opts.UseEntityFrameworkCoreTransactions();
+        opts.Policies.AutoApplyTransactions();
     });
 
     var app = builder.Build();

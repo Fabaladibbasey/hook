@@ -4,6 +4,7 @@ using Hook.Features.Feedback.ProviderStatsAggregate;
 using Hook.Features.Geocoding.Models;
 using Hook.Features.Matching.MatchAggregate;
 using Hook.Features.ServiceRequest.RequestAggregate;
+using Hook.Shared.Persistence;
 using Hook.Shared.Persistence.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -142,6 +143,7 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         var fb = new MatchFeedback
         {
             MatchId = match.Id,
+            RequestId = match.RequestId,
             Step = FeedbackStep.DidYouFind,
             Answer = FeedbackAnswer.Yes,
             RepliedAt = DateTimeOffset.UtcNow
@@ -162,36 +164,38 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         var (_, match) = await SeedMatchAsync(db, clientPhone);
 
         var first = await repo.TryAddPendingAsync(
-            new MatchFeedback { MatchId = match.Id, Step = FeedbackStep.DidYouFind });
+            new MatchFeedback { MatchId = match.Id, RequestId = match.RequestId, Step = FeedbackStep.DidYouFind });
         Assert.True(first);
 
         await using var scope2 = _fx.Factory.Services.CreateAsyncScope();
         var repo2 = scope2.ServiceProvider.GetRequiredService<IFeedbackRepository>();
         var second = await repo2.TryAddPendingAsync(
-            new MatchFeedback { MatchId = match.Id, Step = FeedbackStep.DidYouFind });
+            new MatchFeedback { MatchId = match.Id, RequestId = match.RequestId, Step = FeedbackStep.DidYouFind });
         Assert.False(second);
     }
 
     [Fact]
-    public async Task TryAddPendingAsync_AfterAnswered_AllowsNewPending()
+    public async Task TryAddPendingAsync_AfterStep1Answered_BlocksLateStep1ForSameRequest()
     {
-        // The partial unique index applies only to Answer = 'Pending'. Once the first
-        // row transitions out of Pending (claimed), a second Pending insert must succeed.
+        // ux_match_feedback_request_step1 is filtered on Step=DidYouFind only (not Answer),
+        // so once a Step1 row exists for a RequestId — pending or answered — a second
+        // Step1 insert must fail. This locks late-arriving Step1FeedbackCheck siblings
+        // out after one already won.
         var clientPhone = UniquePhone();
         await using var scope = _fx.Factory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
         var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
         var (_, match) = await SeedMatchAsync(db, clientPhone);
 
-        var entry = new MatchFeedback { MatchId = match.Id, Step = FeedbackStep.DidYouFind };
+        var entry = new MatchFeedback { MatchId = match.Id, RequestId = match.RequestId, Step = FeedbackStep.DidYouFind };
         Assert.True(await repo.TryAddPendingAsync(entry));
         Assert.True(await repo.TryClaimPendingAsync(entry.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow));
 
         await using var scope2 = _fx.Factory.Services.CreateAsyncScope();
         var repo2 = scope2.ServiceProvider.GetRequiredService<IFeedbackRepository>();
         var again = await repo2.TryAddPendingAsync(
-            new MatchFeedback { MatchId = match.Id, Step = FeedbackStep.DidYouFind });
-        Assert.True(again);
+            new MatchFeedback { MatchId = match.Id, RequestId = match.RequestId, Step = FeedbackStep.DidYouFind });
+        Assert.False(again);
     }
 
     [Fact]
@@ -203,7 +207,7 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
         var (_, match) = await SeedMatchAsync(db, clientPhone);
 
-        var entry = new MatchFeedback { MatchId = match.Id, Step = FeedbackStep.DidYouFind };
+        var entry = new MatchFeedback { MatchId = match.Id, RequestId = match.RequestId, Step = FeedbackStep.DidYouFind };
         await repo.TryAddPendingAsync(entry);
 
         Assert.True(await repo.TryClaimPendingAsync(entry.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow));
@@ -219,12 +223,12 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
         var (_, match) = await SeedMatchAsync(db, clientPhone);
 
-        var pending = new MatchFeedback { MatchId = match.Id, Step = FeedbackStep.DidYouFind };
+        var pending = new MatchFeedback { MatchId = match.Id, RequestId = match.RequestId, Step = FeedbackStep.DidYouFind };
         await repo.TryAddPendingAsync(pending);
         Assert.True(await repo.DeletePendingAsync(pending.Id));
 
         // Re-create + claim, then DeletePendingAsync should NOT remove the now-answered row.
-        var answered = new MatchFeedback { MatchId = match.Id, Step = FeedbackStep.DidYouFind };
+        var answered = new MatchFeedback { MatchId = match.Id, RequestId = match.RequestId, Step = FeedbackStep.DidYouFind };
         await repo.TryAddPendingAsync(answered);
         await repo.TryClaimPendingAsync(answered.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow);
         Assert.False(await repo.DeletePendingAsync(answered.Id));
@@ -247,12 +251,14 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         var older = new MatchFeedback
         {
             MatchId = olderMatch.Id,
+            RequestId = olderMatch.RequestId,
             Step = FeedbackStep.DidYouFind,
             PromptedAt = DateTimeOffset.UtcNow - TimeSpan.FromHours(2)
         };
         var newer = new MatchFeedback
         {
             MatchId = newerMatch.Id,
+            RequestId = newerMatch.RequestId,
             Step = FeedbackStep.DidYouFind,
             PromptedAt = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5)
         };
@@ -281,5 +287,73 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         db.Matches.Add(match);
         await db.SaveChangesAsync();
         return (request, match);
+    }
+
+    private static async Task<Match> SeedExtraMatchForRequestAsync(
+        HookDbContext db, Guid requestId)
+    {
+        var match = new Match
+        {
+            RequestId = requestId,
+            ProviderPhone = $"+220{Guid.NewGuid().ToString("N")[..8]}",
+            ServiceSlug = "plumbing"
+        };
+        db.Matches.Add(match);
+        await db.SaveChangesAsync();
+        return match;
+    }
+
+    [Fact]
+    public async Task TryAddPending_LateSiblingAfterAnsweredStep1_Rejected()
+    {
+        var clientPhone = UniquePhone();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var (request, firstMatch) = await SeedMatchAsync(db, clientPhone);
+        var secondMatch = await SeedExtraMatchForRequestAsync(db, request.Id);
+
+        var firstEntry = new MatchFeedback
+        {
+            MatchId = firstMatch.Id,
+            RequestId = firstMatch.RequestId,
+            Step = FeedbackStep.DidYouFind
+        };
+        Assert.True(await repo.TryAddPendingAsync(firstEntry));
+        Assert.True(await repo.TryClaimPendingAsync(firstEntry.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow));
+
+        // Late sibling for the same request — broader partial unique includes answered rows.
+        var sibling = new MatchFeedback
+        {
+            MatchId = secondMatch.Id,
+            RequestId = secondMatch.RequestId,
+            Step = FeedbackStep.DidYouFind
+        };
+        Assert.False(await repo.TryAddPendingAsync(sibling));
+    }
+
+    [Fact]
+    public async Task TryAddPending_LosingRace_DoesNotPoisonOuterTransaction()
+    {
+        var clientPhone = UniquePhone();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var (_, match) = await SeedMatchAsync(db, clientPhone);
+
+        await using var tx = await db.Database.BeginTransactionAsync();
+
+        Assert.True(await db.TryInsertUniqueAsync(
+            new MatchFeedback { MatchId = match.Id, RequestId = match.RequestId, Step = FeedbackStep.DidYouFind },
+            new[] { FeedbackConstants.PendingUniqueIndexName, FeedbackConstants.RequestStep1UniqueIndexName }));
+
+        Assert.False(await db.TryInsertUniqueAsync(
+            new MatchFeedback { MatchId = match.Id, RequestId = match.RequestId, Step = FeedbackStep.DidYouFind },
+            new[] { FeedbackConstants.PendingUniqueIndexName, FeedbackConstants.RequestStep1UniqueIndexName }));
+
+        // Outer tx must still be usable — a poisoned tx would throw here.
+        var count = await db.MatchFeedback.CountAsync();
+        Assert.True(count >= 1);
+
+        await tx.CommitAsync();
     }
 }

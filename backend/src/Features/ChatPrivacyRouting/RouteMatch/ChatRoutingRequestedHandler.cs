@@ -1,8 +1,9 @@
 using System.Globalization;
 using Hook.Features.ChatSession;
 using Hook.Features.ContactSharing.Events;
-using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Phone;
+using Hook.Shared.Pipeline.PostCommitSends;
+using Wolverine;
 using IMatchRepository = Hook.Features.Matching.MatchAggregate.IMatchRepository;
 
 namespace Hook.Features.ChatPrivacyRouting.RouteMatch;
@@ -10,10 +11,9 @@ namespace Hook.Features.ChatPrivacyRouting.RouteMatch;
 public sealed class ChatRoutingRequestedHandler(
     ChatSessionFactory factory,
     IMatchRepository matches,
-    IWhatsappClient whatsapp,
     ILogger<ChatRoutingRequestedHandler> logger)
 {
-    public async Task Handle(ChatRoutingRequested evt, CancellationToken ct)
+    public async Task Handle(ChatRoutingRequested evt, IMessageBus bus, CancellationToken ct)
     {
         var match = await matches.GetAsync(evt.MatchId, ct);
         if (match is null)
@@ -28,8 +28,11 @@ public sealed class ChatRoutingRequestedHandler(
         }
 
         var links = await factory.CreateAsync(evt.ClientPhone, evt.ProviderPhone, ct);
-        match.ChatId = links.ChatId;
-        await matches.SaveChangesAsync(ct);
+        if (!await matches.TryClaimChatRoutingAsync(match.Id, links.ChatId, ct))
+        {
+            logger.LogDebug("ChatRouting: match {MatchId} lost the claim — peer already routed", evt.MatchId);
+            return;
+        }
 
         var mapsUrl = string.Format(
             CultureInfo.InvariantCulture,
@@ -43,21 +46,14 @@ public sealed class ChatRoutingRequestedHandler(
         var clientBody = evt.ClientConsented
             ? $"{prefix}the other party prefers a private chat. Open: {links.ClientUrl}"
             : $"{prefix}your private chat is ready. Open: {links.ClientUrl}";
-
         var providerBody = evt.ProviderConsented
             ? $"{match.ServiceSlug} client at {evt.RequesterAddress} ({mapsUrl}) prefers a private chat. Open: {links.ProviderUrl}"
             : $"{match.ServiceSlug} client at {evt.RequesterAddress} ({mapsUrl}) wants to chat. Open: {links.ProviderUrl}";
 
-        var sends = new List<Task>(2);
         if (PhoneNumber.TryParse(evt.ClientPhone, out var client))
-        {
-            sends.Add(whatsapp.SendTextAsync(client, clientBody, ct));
-        }
+            await bus.PublishAsync(new SendWhatsAppTextRequested(client, clientBody));
         if (providerParsed)
-        {
-            sends.Add(whatsapp.SendTextAsync(provider, providerBody, ct));
-        }
-        if (sends.Count > 0) await Task.WhenAll(sends);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(provider, providerBody));
 
         logger.LogInformation("Chat routing complete for match {MatchId}, chat {ChatId}", evt.MatchId, links.ChatId);
     }

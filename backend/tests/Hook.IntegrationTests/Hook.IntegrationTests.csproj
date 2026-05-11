@@ -24,6 +24,18 @@
     <ProjectReference Include="..\Hook.TestHelpers\Hook.TestHelpers.csproj" />
   </ItemGroup>
 
+  <!-- Wolverine's source generator emits Wolverine.Generated.GeneratedWolverineTypeLoader
+       as an internal sealed class in every assembly with handlers. Hook.dll also
+       generates one; InternalsVisibleTo("Hook.IntegrationTests") makes Hook's copy
+       visible at compile time → CS0436 "type imported from Hook conflicts with local
+       type". Wolverine's CompositeWolverineTypeLoader handles both copies at runtime;
+       removing the analyzer is not viable here because the test assembly contains
+       handlers (AutoApplyTransactionsHandler) that Wolverine discovers via the
+       source-generated type manifest. Suppress CS0436 only. -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CS0436</NoWarn>
+  </PropertyGroup>
+
   <ItemGroup>
     <None Update="xunit.runner.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

@@ -9,5 +9,3 @@ public sealed record Step1FeedbackCheck(Guid MatchId);
 // flight already wrote.
 [MessageIdentity("Step2FeedbackCheck", Version = 1)]
 public sealed record Step2FeedbackCheck(Guid MatchId);
-
-public sealed record ChatEndedDomainEvent(Guid ChatId);

@@ -49,5 +49,13 @@ public sealed class MatchRepository(HookDbContext db) : IMatchRepository
         return rows == 1;
     }
 
+    public async Task<bool> TryClaimChatRoutingAsync(Guid matchId, Guid chatId, CancellationToken ct = default)
+    {
+        var rows = await db.Matches
+            .Where(m => m.Id == matchId && m.ChatId == null)
+            .ExecuteUpdateAsync(u => u.SetProperty(m => m.ChatId, chatId), ct);
+        return rows == 1;
+    }
+
     public Task SaveChangesAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
 }
