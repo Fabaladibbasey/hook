@@ -20,8 +20,13 @@
     <FrontendDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../../frontend'))</FrontendDir>
   </PropertyGroup>
 
+  <!--
+    Run before AssignTargetPaths so the generated wwwroot/ files are picked
+    up by the SDK's static-web-assets collection. ComputeFilesToPublish runs
+    after asset collection, which left wwwroot/ out of the published image.
+  -->
   <Target Name="BuildFrontend"
-          BeforeTargets="ComputeFilesToPublish"
+          BeforeTargets="AssignTargetPaths"
           Condition="'$(SkipFrontendBuild)' != 'true'">
     <Message Importance="high" Text="Building frontend in $(FrontendDir)" />
     <Exec Command="npm ci" WorkingDirectory="$(FrontendDir)" />
