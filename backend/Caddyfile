@@ -31,26 +31,8 @@
     }
 }
 
-{$LOGS_DOMAIN} {
-    encode zstd gzip
-
-    basic_auth {
-        {$LOGS_BASIC_AUTH_USER} {$LOGS_BASIC_AUTH_HASH}
-    }
-
-    reverse_proxy seq:80 {
-        header_up Host {host}
-        header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-For {remote_host}
-        header_up X-Forwarded-Proto {scheme}
-    }
-
-    tls {
-        protocols tls1.2 tls1.3
-    }
-
-    log {
-        output stdout
-        format console
-    }
-}
+# To expose the Seq dashboard at a separate hostname, drop a sibling file
+# named `Caddyfile.logs` here and `caddy reload`; it should define a site
+# block keyed on {$LOGS_DOMAIN} with basic_auth + reverse_proxy seq:80.
+# Kept out of the base Caddyfile so deploys with LOGS_DOMAIN unset don't
+# fail to parse.
