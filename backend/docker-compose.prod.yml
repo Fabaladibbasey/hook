@@ -42,6 +42,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       ConnectionStrings__HookDb: "Host=postgres;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}"
+      Chat__PublicChatBaseUrl: "https://${HOOK_DOMAIN}"
       Whatsapp__VerifyToken: ${WHATSAPP_VERIFY_TOKEN}
       Whatsapp__AppSecret: ${WHATSAPP_APP_SECRET}
       Whatsapp__PhoneNumberId: ${WHATSAPP_PHONE_NUMBER_ID}
