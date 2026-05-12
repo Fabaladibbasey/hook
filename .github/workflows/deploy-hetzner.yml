@@ -107,7 +107,13 @@ jobs:
             set -euo pipefail
             REPO_DIR="${{ secrets.PROD_DEPLOY_DIR }}"
             cd "$REPO_DIR"
-            git pull --ff-only --quiet
+            ok=0
+            for i in 1 2 3; do
+              if git pull --ff-only --quiet; then ok=1; break; fi
+              echo "git pull attempt $i failed, retrying..." >&2
+              sleep $((i * 5))
+            done
+            [ "$ok" = "1" ] || { echo "git pull failed after 3 attempts" >&2; exit 1; }
             cd "$REPO_DIR/backend"
             export HOOK_IMAGE="${{ needs.build-push.outputs.image }}"
             docker compose -f docker-compose.prod.yml --env-file .env.prod pull api
