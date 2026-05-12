@@ -22,6 +22,7 @@ using Hook.Features.Whatsapp.ReceiveWebhook;
 using Hook.Shared.Core;
 using Hook.Shared.Persistence.Data;
 using Hook.Shared.Retention;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Serilog;
@@ -80,8 +81,27 @@ try
         opts.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
         opts.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
         {
+            var path = ctx.Request.Path;
+
+            // YARP-proxied Seq UI: not an attack surface, loads many assets + polls.
+            if (ctx.Request.Host.Host.Equals("seq.hook.drop.africa", StringComparison.OrdinalIgnoreCase))
+                return RateLimitPartition.GetNoLimiter("seq");
+
+            // Meta WhatsApp webhook: HMAC-validated + message-level dedup already.
+            // Meta posts from a small IP pool, so IP-partition would funnel all traffic
+            // through one bucket. Per-phone throttling lives in PerPhoneLimiter.
+            if (path.StartsWithSegments("/webhooks/whatsapp"))
+                return RateLimitPartition.GetNoLimiter("webhook");
+
+            // SignalR negotiate + long-poll: long-lived connection, not bursty per-request.
+            if (path.StartsWithSegments("/hubs/chat"))
+                return RateLimitPartition.GetNoLimiter("hub");
+
             var token = ctx.Request.Query["token"].ToString();
-            var key = !string.IsNullOrEmpty(token) ? $"t:{token}" : $"ip:{ctx.Connection.RemoteIpAddress}";
+            var key = !string.IsNullOrEmpty(token)
+                ? $"t:{token}"
+                : $"ip:{ctx.Connection.RemoteIpAddress}";
+
             return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
             {
                 Window = TimeSpan.FromSeconds(5),
@@ -167,6 +187,14 @@ try
         }
     }
 
+    app.UseForwardedHeaders(new ForwardedHeadersOptions
+    {
+        ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+        // Caddy is the only network ingress in prod; clear default allow-list so
+        // X-Forwarded-For from the docker bridge is accepted.
+        KnownIPNetworks = { },
+        KnownProxies = { }
+    });
     app.UseExceptionHandler();
     app.UseObservability();
     app.UseRateLimiter();
