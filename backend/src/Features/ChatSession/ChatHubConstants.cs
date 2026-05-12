@@ -2,6 +2,7 @@ namespace Hook.Features.ChatSession;
 
 internal static class ChatHubConstants
 {
+    public const string HubPath = "/hubs/chat";
     public const int MaxCiphertextBytes = 5000;
     public const int NonceBytes = 12;
     public const int MaxPublicKeyBytes = 200;

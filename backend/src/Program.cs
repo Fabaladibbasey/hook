@@ -1,4 +1,3 @@
-using System.Threading.RateLimiting;
 using Hook;
 using Hook.Features.Ai;
 using Hook.Features.ChatLifecycle;
@@ -22,7 +21,6 @@ using Hook.Features.Whatsapp.ReceiveWebhook;
 using Hook.Shared.Core;
 using Hook.Shared.Persistence.Data;
 using Hook.Shared.Retention;
-using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Serilog;
@@ -76,41 +74,7 @@ try
     builder.Services.AddReverseProxy()
         .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
 
-    builder.Services.AddRateLimiter(opts =>
-    {
-        opts.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-        opts.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
-        {
-            var path = ctx.Request.Path;
-
-            // YARP-proxied Seq UI: not an attack surface, loads many assets + polls.
-            if (ctx.Request.Host.Host.Equals("seq.hook.drop.africa", StringComparison.OrdinalIgnoreCase))
-                return RateLimitPartition.GetNoLimiter("seq");
-
-            // Meta WhatsApp webhook: HMAC-validated + message-level dedup already.
-            // Meta posts from a small IP pool, so IP-partition would funnel all traffic
-            // through one bucket. Per-phone throttling lives in PerPhoneLimiter.
-            if (path.StartsWithSegments("/webhooks/whatsapp"))
-                return RateLimitPartition.GetNoLimiter("webhook");
-
-            // SignalR negotiate + long-poll: long-lived connection, not bursty per-request.
-            if (path.StartsWithSegments("/hubs/chat"))
-                return RateLimitPartition.GetNoLimiter("hub");
-
-            var token = ctx.Request.Query["token"].ToString();
-            var key = !string.IsNullOrEmpty(token)
-                ? $"t:{token}"
-                : $"ip:{ctx.Connection.RemoteIpAddress}";
-
-            return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
-            {
-                Window = TimeSpan.FromSeconds(5),
-                PermitLimit = 3,
-                QueueLimit = 5,
-                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
-            });
-        });
-    });
+    builder.Services.AddGlobalRateLimiter(builder.Configuration);
 
     builder.Services.AddProblemDetails();
     builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
@@ -187,13 +151,17 @@ try
         }
     }
 
-    app.UseForwardedHeaders(new ForwardedHeadersOptions
+    // Dev runs Kestrel directly with no proxy; trust forwarded headers only outside Development.
+    if (!builder.Environment.IsDevelopment())
     {
-        ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
-        // Caddy is the only network ingress in prod; clear default allow-list so
-        // X-Forwarded-For from the docker bridge is accepted.
-        KnownIPNetworks = { },
-        KnownProxies = { }
+        app.UseForwardedHeaders(ForwardedHeadersConfigurator.Build(builder.Configuration));
+    }
+
+    // Token-in-URL pattern leaks via Referer; strip referrer on all responses.
+    app.Use(async (ctx, next) =>
+    {
+        ctx.Response.Headers["Referrer-Policy"] = "no-referrer";
+        await next();
     });
     app.UseExceptionHandler();
     app.UseObservability();
@@ -235,7 +203,7 @@ try
     app.MapReverseProxy();
     app.UseDefaultFiles();
     app.UseStaticFiles();
-    app.MapHub<ChatHub>("/hubs/chat");
+    app.MapHub<ChatHub>(ChatHubConstants.HubPath);
     app.MapFallbackToFile("index.html");
 
     await app.RunAsync();
@@ -261,15 +229,16 @@ namespace Hook
         public static string Scrub(string queryString)
         {
             if (string.IsNullOrEmpty(queryString)) return queryString;
-            var qs = queryString.StartsWith('?') ? queryString[1..] : queryString;
-            var rewritten = string.Join('&', qs.Split('&').Select(part =>
+            var hasPrefix = queryString.StartsWith('?');
+            var body = hasPrefix ? queryString[1..] : queryString;
+            var rewritten = string.Join('&', body.Split('&').Select(part =>
             {
                 var eq = part.IndexOf('=');
                 if (eq < 0) return part;
                 var name = part[..eq];
                 return SensitiveKeys.Contains(name) ? $"{name}=***" : part;
             }));
-            return queryString.StartsWith('?') ? "?" + rewritten : rewritten;
+            return hasPrefix ? "?" + rewritten : rewritten;
         }
     }
 }

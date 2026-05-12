@@ -187,6 +187,7 @@ When a participant opens their chat link a second time → prior session revoked
 **Implementation:**
 
 - **Phase 1 (single instance):** .NET built-in `System.Threading.RateLimiting.PartitionedRateLimiter<string, string>`, partition key = phone parsed from webhook body. In-memory store. Direct API (not middleware) — partition key lives in body, not route.
+- **Edge layer (global limiter):** a per-request fixed-window bucket runs in middleware before the per-phone layer ever sees the message. It is keyed on `t:<token>` (length-capped at 128 chars) when the request carries `?token=`, otherwise on `ip:<RemoteIpAddress>`. Bypass branches: `/webhooks/whatsapp` (named concurrency policy + HMAC), `/hubs/chat` (long-lived transport), and any host listed in `RateLimit:BypassHosts` (YARP-proxied internal UIs, e.g. Seq).
 - **Phase 2 (scale-out):** swap to Redis backend. Either `RedisRateLimiting` NuGet or custom Lua token-bucket script via `StackExchange.Redis`.
 - **Migration trigger:** adding 2nd app instance behind LB, or restart-safety becomes critical.
 

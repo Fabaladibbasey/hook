@@ -119,6 +119,40 @@ For schema rollback, restore from the latest pre-deploy `pg_dump` (see Backups a
 - **Required secrets** (GitHub repo → Settings → Secrets → Actions, environment `production`):
   `PROD_SSH_HOST`, `PROD_SSH_USER`, `PROD_SSH_KEY`, `PROD_SSH_PORT` (optional), `PROD_DEPLOY_DIR`, `PROD_DOMAIN`.
 
+## Rate limiting
+
+Two layers protect the API surface:
+
+- **Global limiter** (`Features/RateLimiting/GlobalRateLimitPartitioner`) — fixed-window
+  bucket (`RateLimit:GlobalPermitLimit` requests per `RateLimit:GlobalWindowSeconds`)
+  applied to every unmatched request. Partition key is either `t:<token>` (length-capped
+  at 128 chars) when the request carries `?token=`, otherwise `ip:<RemoteIpAddress>`.
+  The length cap bounds dictionary growth so spraying tokens cannot exhaust memory.
+- **Webhook concurrency limiter** (`webhook-concurrency` policy) — caps simultaneous
+  POSTs to `/webhooks/whatsapp` at `RateLimit:WebhookConcurrencyLimit` permits with
+  `RateLimit:WebhookQueueLimit` queued. HMAC validation + 64 KB request-size cap on
+  the same endpoint stop large-body amplification.
+
+**Bypass list** (no limiter applied):
+
+| Branch                                  | Why                                                          |
+|-----------------------------------------|--------------------------------------------------------------|
+| `/webhooks/whatsapp`                    | Already gated by named concurrency policy + HMAC.            |
+| `/hubs/chat`                            | Long-lived SignalR transport; per-message limits live in hub.|
+| Host listed in `RateLimit:BypassHosts`  | YARP-proxied internal UIs (e.g. Seq).                        |
+
+**Per-phone limiter** (`PerPhoneLimiter`) is registered in DI for future webhook
+integration. Today its only consumer is its own unit tests — wiring it into the
+inbound flow is tracked separately.
+
+**Forwarded headers trust scope**
+
+Production sits behind Caddy on a private docker bridge. `ForwardedHeaders:KnownNetworks`
+defaults to `172.16.0.0/12` (the docker default bridge subnet). `ForwardLimit=1` so
+only the last hop's `X-Forwarded-For` entry is honored — a real bridge client cannot
+smuggle a forged external IP through multi-hop parsing. The block is gated on
+`!IsDevelopment()`; dev runs Kestrel directly with no proxy.
+
 ## Troubleshooting
 
 | Symptom                         | Likely cause / first check                                         |

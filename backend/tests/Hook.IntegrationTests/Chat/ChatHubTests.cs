@@ -1,7 +1,6 @@
 using System.Net.Http.Json;
 using Hook.Features.ChatSession;
 using Hook.Features.ChatSession.ParticipantAggregate;
-using Hook.Features.ChatSession.SessionAggregate;
 using Hook.Shared.Persistence.Data;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.SignalR.Client;
