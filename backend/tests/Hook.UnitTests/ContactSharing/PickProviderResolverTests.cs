@@ -120,7 +120,7 @@ public class PickProviderResolverTests
     [Fact]
     public void Resolve_EmptyMatchList_ReturnsEmpty()
     {
-        var picked = PickProviderResolver.Resolve("PICK ALL", Array.Empty<Match>());
+        var picked = PickProviderResolver.Resolve("PICK ALL", []);
         Assert.Empty(picked);
     }
 

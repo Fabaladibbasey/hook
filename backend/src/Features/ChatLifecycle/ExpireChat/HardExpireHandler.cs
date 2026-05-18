@@ -22,7 +22,7 @@ public sealed class HardExpireHandler(
         }
 
         await bus.PublishAsync(new BroadcastChatEventRequested(
-            evt.ChatId, "ChatExpired", """{"reason":"24h-expired"}"""));
+            evt.ChatId, ChatHubEvents.ChatExpired, new ChatExpiredPayload("24h-expired")));
 
         logger.LogInformation("Chat {ChatId} hard-expired", evt.ChatId);
     }

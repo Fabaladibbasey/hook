@@ -17,6 +17,15 @@ public sealed class MatchRepository(HookDbContext db) : IMatchRepository
             .ThenBy(m => m.Id)
             .ToListAsync(ct);
 
+    public async Task<IReadOnlyList<Match>> GetPickedForRequestAsync(Guid requestId, CancellationToken ct = default) =>
+        await db.Matches
+            .Where(m => m.RequestId == requestId && m.PickedAt != null)
+            .OrderByDescending(m => m.Score)
+            .ThenBy(m => m.DistanceKm)
+            .ThenBy(m => m.CreatedAt)
+            .ThenBy(m => m.Id)
+            .ToListAsync(ct);
+
     public async Task AddAsync(Match match, CancellationToken ct = default) =>
         await db.Matches.AddAsync(match, ct);
 

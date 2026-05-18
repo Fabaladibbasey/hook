@@ -1,6 +1,7 @@
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
 using Hook.Features.Whatsapp;
+using Wolverine.Attributes;
 
 namespace Hook.Features.Feedback.Step2Prompt;
 
@@ -10,11 +11,12 @@ public sealed class Step2PromptDispatchHandler(
     IFeedbackRepository feedback,
     ILogger<Step2PromptDispatchHandler> logger)
 {
+    [NonTransactional]
     public async Task Handle(Step2PromptDispatchRequested evt, CancellationToken ct)
     {
         var ctx = new ReplyContext(
             Purpose: "feedback-step-2-job-completed",
-            RecentTurns: Array.Empty<ConversationTurn>(),
+            RecentTurns: [],
             LanguageHint: "en",
             Facts: new Dictionary<string, string>
             {

@@ -48,10 +48,8 @@ public sealed class ChatRepository(HookDbContext db) : IChatRepository
     public Task AddParticipantsAsync(IEnumerable<ChatParticipant> participants, CancellationToken ct = default) =>
         db.ChatParticipants.AddRangeAsync(participants, ct);
 
-    private static readonly string[] MessageConstraints = [ChatHubConstants.ChatMessagesPrimaryKey];
-
     public Task<bool> TryAddMessageAsync(ChatMessage message, CancellationToken ct = default) =>
-        db.TryInsertUniqueAsync(message, MessageConstraints, ct);
+        db.TryInsertUniqueAsync(message, ct, ChatHubConstants.ChatMessagesPrimaryKey);
 
     public async Task AddAccessLogAsync(ChatAccessLog log, CancellationToken ct = default) =>
         await db.ChatAccessLogs.AddAsync(log, ct);

@@ -18,7 +18,7 @@ public class MatchingServiceTests
     private readonly Mock<IMatchRepository> _matchesMock = new();
     private IReadOnlyList<string>? _capturedExcludes;
     private double? _capturedRadius;
-    private IReadOnlyList<ProviderCandidate> _queryResult = Array.Empty<ProviderCandidate>();
+    private IReadOnlyList<ProviderCandidate> _queryResult = [];
 
     public MatchingServiceTests()
     {
@@ -35,7 +35,7 @@ public class MatchingServiceTests
             .ReturnsAsync(() => _queryResult);
 
         _matchesMock.Setup(x => x.GetForRequestAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<MatchEntity>());
+            .ReturnsAsync([]);
         _matchesMock.Setup(x => x.AddRangeAsync(It.IsAny<IEnumerable<MatchEntity>>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
     }

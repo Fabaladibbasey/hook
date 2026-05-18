@@ -8,12 +8,6 @@ namespace Hook.Features.Feedback;
 
 public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
 {
-    private static readonly string[] PendingConstraints =
-    [
-        FeedbackConstants.PendingUniqueIndexName,
-        FeedbackConstants.RequestStep1UniqueIndexName,
-    ];
-
     public Task<MatchFeedback?> GetLatestPendingForClientAsync(string clientPhone, CancellationToken ct = default) =>
         db.MatchFeedback
             .Where(f => f.Answer == FeedbackAnswer.Pending
@@ -65,7 +59,9 @@ public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
         await db.MatchFeedback.AddAsync(feedback, ct);
 
     public Task<bool> TryAddPendingAsync(MatchFeedback feedback, CancellationToken ct = default) =>
-        db.TryInsertUniqueAsync(feedback, PendingConstraints, ct);
+        db.TryInsertUniqueAsync(feedback, ct,
+            FeedbackConstants.PendingUniqueIndexName,
+            FeedbackConstants.RequestStep1UniqueIndexName);
 
     public async Task<bool> DeletePendingAsync(Guid feedbackId, CancellationToken ct = default)
     {

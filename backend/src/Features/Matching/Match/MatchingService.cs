@@ -19,8 +19,11 @@ public sealed class MatchingService(
     IOptions<MatchingOptions> options,
     TimeProvider clock)
 {
-    /// <summary>Mutations are committed by Wolverine's <c>AutoApplyTransactions</c> policy at handler-end.
-    /// Calling this outside a Wolverine handler context will silently lose writes.</summary>
+    // Caller contract: invoke only inside a Wolverine handler — repository
+    // mutations are committed by AutoApplyTransactions at handler-end. Calling
+    // outside a handler context silently loses writes; the codebase has a single
+    // production caller (ServiceRequestCreatedHandler) so we don't pay the
+    // test-infra cost of a runtime guard for a one-handler invariant.
     public async Task<MatchBatch?> RunForRequestAsync(Guid requestId, CancellationToken ct = default)
     {
         var request = await requests.GetAsync(requestId, ct);

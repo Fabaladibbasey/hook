@@ -1,6 +1,7 @@
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
 using Hook.Features.Whatsapp;
+using Wolverine.Attributes;
 
 namespace Hook.Features.Feedback.Step1Prompt;
 
@@ -10,6 +11,10 @@ public sealed class Step1PromptDispatchHandler(
     IFeedbackRepository feedback,
     ILogger<Step1PromptDispatchHandler> logger)
 {
+    // AI inference takes 60-150s; the cleanup-on-null DeletePendingAsync runs
+    // its own short tx via ExecuteDeleteAsync. Opt out of AutoApplyTransactions
+    // so the handler doesn't pin a connection across the Ollama window.
+    [NonTransactional]
     public async Task Handle(Step1PromptDispatchRequested evt, CancellationToken ct)
     {
         var facts = new Dictionary<string, string> { ["service"] = evt.ServiceSlug };
@@ -26,7 +31,7 @@ public sealed class Step1PromptDispatchHandler(
 
         var ctx = new ReplyContext(
             Purpose: "feedback-step-1-did-you-find",
-            RecentTurns: Array.Empty<ConversationTurn>(),
+            RecentTurns: [],
             LanguageHint: "en",
             Facts: facts);
 

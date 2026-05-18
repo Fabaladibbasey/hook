@@ -253,7 +253,8 @@ public sealed class OllamaConversationAi(
                 new { role = "system", content = systemInstruction },
                 new { role = "user", content = userText }
             },
-            ["options"] = new { temperature = opts.Temperature }
+            ["options"] = new { temperature = opts.Temperature },
+            ["keep_alive"] = opts.KeepAlive
         };
 
         if (responseSchema is not null)

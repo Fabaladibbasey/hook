@@ -145,8 +145,7 @@ public sealed class DevPipelineFixture : IAsyncLifetime
                 // +30 min production default would mean the prompt never fires inside a
                 // test run. Step2 publishes immediately on Step1=Yes (no separate knob).
                 b.UseSetting("Feedback:Step1InitialDelay", "00:00:00");
-                b.UseSetting("Wolverine:DefaultExecutionTimeoutSeconds", "10");
-                b.UseSetting("Wolverine:DynamicCodegen", "true");
+                b.UseSetting(Shared.Persistence.WolverineConfig.ExecutionTimeoutKey, "10");
                 b.ConfigureServices(s =>
                 {
                     // Convention-based handler discovery scans Hook.dll only.
@@ -235,8 +234,8 @@ public sealed class DevPipelineFixture : IAsyncLifetime
             + " RESTART IDENTITY CASCADE;";
         await ctx.Database.ExecuteSqlRawAsync(_truncateSql);
 
-        // Wolverine's schema is created lazily on first host start; tables may not exist
-        // on the first shard reset. IF EXISTS keeps the truncate idempotent.
+        // Wolverine creates the schema during host build (before any ResetAsync call),
+        // so the unconditional TRUNCATE is safe — no IF EXISTS guard needed.
         await ctx.Database.ExecuteSqlRawAsync("""
             TRUNCATE TABLE
                 wolverine.wolverine_incoming_envelopes,

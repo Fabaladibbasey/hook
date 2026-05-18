@@ -52,7 +52,7 @@ public sealed class ProviderQueryStatsTests : PipelineTestBase
 
         var requestPoint = location.ToPoint();
         var candidates = await query.FindCandidatesAsync(
-            requestPoint, slug, radiusKm: 5, excludePhones: Array.Empty<string>(), now);
+            requestPoint, slug, radiusKm: 5, excludePhones: [], now);
 
         var hot = Assert.Single(candidates, c => c.Phone == withStats.Phone);
         var cold = Assert.Single(candidates, c => c.Phone == coldStart.Phone);
@@ -100,7 +100,7 @@ public sealed class ProviderQueryStatsTests : PipelineTestBase
 
         var requestPoint = location.ToPoint();
         var candidates = await query.FindCandidatesAsync(
-            requestPoint, slug, radiusKm: 5, excludePhones: Array.Empty<string>(), now);
+            requestPoint, slug, radiusKm: 5, excludePhones: [], now);
 
         var ranked = scorer.ScoreAndRank(candidates, radiusKm: 5, now, take: 10);
 

@@ -9,7 +9,7 @@ namespace Hook.UnitTests.Ai;
 public class AiReplyHelperTests
 {
     private static readonly ReplyContext Ctx =
-        new("present-top-matches", RecentTurns: Array.Empty<ConversationTurn>(), LanguageHint: "en");
+        new("present-top-matches", RecentTurns: [], LanguageHint: "en");
 
     private readonly Mock<IConversationAi> _aiMock = new();
 

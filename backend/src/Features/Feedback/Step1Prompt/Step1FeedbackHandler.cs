@@ -16,6 +16,14 @@ public sealed class Step1FeedbackHandler(
         var match = await matches.GetAsync(evt.MatchId, ct);
         if (match is null) return;
 
+        // Pre-migration backfill left legacy MatchFeedback rows with
+        // RequestId=Guid.Empty (EF default for the new required column). A new
+        // insert that also defaults to Guid.Empty would silently collide on the
+        // request_step1 partial unique and suppress a legitimate prompt with no
+        // log, so refuse to enter the reservation path until a repair sweep
+        // populates real RequestIds.
+        if (match.RequestId == Guid.Empty) return;
+
         var request = await requests.GetAsync(match.RequestId, ct);
         if (request is null) return;
         if (!PhoneNumber.TryParse(request.ClientPhone, out var clientPhone)) return;
@@ -30,9 +38,7 @@ public sealed class Step1FeedbackHandler(
         };
         if (!await feedback.TryAddPendingAsync(entry, ct)) return;
 
-        var picked = (await matches.GetForRequestAsync(match.RequestId, ct))
-            .Where(m => m.PickedAt is not null)
-            .ToList();
+        var picked = await matches.GetPickedForRequestAsync(match.RequestId, ct);
         var pickedFormatted = picked.Count > 1 ? PickedMatchListFormatter.Format(picked) : null;
 
         await bus.PublishAsync(new Step1PromptDispatchRequested(

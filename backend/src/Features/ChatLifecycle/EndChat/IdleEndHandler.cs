@@ -25,6 +25,6 @@ public sealed class IdleEndHandler(
         session.End(clock.GetUtcNow());
 
         await bus.PublishAsync(new BroadcastChatEventRequested(
-            evt.ChatId, "ChatEnded", """{"reason":"idle"}"""));
+            evt.ChatId, ChatHubEvents.ChatEnded, new ChatEndedPayload("idle")));
     }
 }

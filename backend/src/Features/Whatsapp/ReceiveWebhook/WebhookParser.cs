@@ -54,13 +54,13 @@ public static class WebhookParser
 
         var (kind, text, location) = type switch
         {
-            "text" => (InboundMessageKind.Text, ExtractText(msg), (InboundLocation?)null),
-            "location" => (InboundMessageKind.Location, (string?)null, ExtractLocation(msg)),
-            "image" => (InboundMessageKind.Image, (string?)null, (InboundLocation?)null),
-            "audio" => (InboundMessageKind.Audio, (string?)null, (InboundLocation?)null),
-            "document" => (InboundMessageKind.Document, (string?)null, (InboundLocation?)null),
-            "interactive" => (InboundMessageKind.Interactive, ExtractInteractive(msg), (InboundLocation?)null),
-            "reaction" => (InboundMessageKind.Reaction, (string?)null, (InboundLocation?)null),
+            "text" => (InboundMessageKind.Text, ExtractText(msg), null),
+            "location" => (InboundMessageKind.Location, null, ExtractLocation(msg)),
+            "image" => (InboundMessageKind.Image, null, null),
+            "audio" => (InboundMessageKind.Audio, null, null),
+            "document" => (InboundMessageKind.Document, null, null),
+            "interactive" => (InboundMessageKind.Interactive, ExtractInteractive(msg), null),
+            "reaction" => (InboundMessageKind.Reaction, null, null),
             _ => (InboundMessageKind.Unknown, (string?)null, (InboundLocation?)null)
         };
 

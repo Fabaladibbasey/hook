@@ -160,7 +160,7 @@ public class MatchPresenterFactsShapeTests
                     SuccessRate: 0.9 - (i * 0.01)),
                 Score: 1.0 - (i * 0.05)))
             .ToList();
-        return new MatchBatch(Guid.NewGuid(), Array.Empty<MatchEntity>(), scored);
+        return new MatchBatch(Guid.NewGuid(), [], scored);
     }
 
     private sealed record SentMessage(PhoneNumber To, string Body);

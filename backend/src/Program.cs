@@ -19,6 +19,7 @@ using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Dev;
 using Hook.Features.Whatsapp.ReceiveWebhook;
 using Hook.Shared.Core;
+using Hook.Shared.Persistence;
 using Hook.Shared.Persistence.Data;
 using Hook.Shared.Retention;
 using Microsoft.EntityFrameworkCore;
@@ -105,7 +106,7 @@ try
         // OllamaOptions.TimeoutSeconds plus a small buffer so HttpClient.Timeout governs.
         // Tests override via "Wolverine:DefaultExecutionTimeoutSeconds" since the test
         // fixture swaps in an in-memory IConversationAi.
-        var overrideSeconds = builder.Configuration.GetValue<int?>("Wolverine:DefaultExecutionTimeoutSeconds");
+        var overrideSeconds = builder.Configuration.GetValue<int?>(WolverineConfig.ExecutionTimeoutKey);
         if (overrideSeconds is int seconds && seconds > 0 && seconds <= 3600)
         {
             opts.DefaultExecutionTimeout = TimeSpan.FromSeconds(seconds);
@@ -118,22 +119,13 @@ try
             opts.DefaultExecutionTimeout = TimeSpan.FromSeconds(ollamaTimeout + 30);
         }
 
-        // Tests opt into runtime IL emission (TypeLoadMode.Dynamic) to avoid the
-        // per-handler static-codegen file write. Restricted to Development environments (including Staging) + Test.
-        if (!builder.Environment.IsProduction()
-            && builder.Configuration.GetValue<bool>("Wolverine:DynamicCodegen"))
-        {
-            opts.CodeGeneration.TypeLoadMode = JasperFx.CodeGeneration.TypeLoadMode.Dynamic;
-        }
+        // Dynamic IL emission to avoid Wolverine 6's ServiceLocationPolicy.NotAllowed
+        // breaking opaque DI registrations (AddDbContext, AddHttpClient<T,Impl>).
+        opts.CodeGeneration.TypeLoadMode = JasperFx.CodeGeneration.TypeLoadMode.Dynamic;
 
-        // Durable persistence is required for the EF transactional outbox —
-        // every environment (including tests) uses it so scheduled messages
-        // survive restarts and handlers run inside an EF transaction with the
-        // outgoing envelope written in the same commit (BeginTransaction ->
-        // handler -> SaveChanges -> CommitTransaction). Per-test isolation
-        // relies on each fixture using its own Postgres database; the
-        // wolverine.* schema lives inside the same DB and tears down with it.
-        opts.PersistMessagesWithPostgresql(connectionString, schemaName: "wolverine");
+        // Durable outbox in every environment so scheduled messages survive
+        // restarts and handler commits stay atomic with outgoing envelopes.
+        opts.PersistMessagesWithPostgresql(connectionString, schemaName: WolverineConfig.Schema);
         opts.UseEntityFrameworkCoreTransactions();
         opts.Policies.AutoApplyTransactions();
     });

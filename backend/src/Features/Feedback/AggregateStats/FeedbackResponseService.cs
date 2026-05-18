@@ -98,9 +98,10 @@ public sealed class FeedbackResponseService(
             return;
         }
 
-        // Multi-pick: reserve IdentifyWinner FIRST, send prompt, only THEN claim Step1.
-        // If the send throws Step1 stays Pending so the next inbound retries — claiming
-        // Step1 first would orphan the user.
+        // Multi-pick: reserve IdentifyWinner first, then publish the prompt envelope
+        // and claim Step1. Reserve-then-publish guarantees that on retry the Pending
+        // row is already there and TryAddPendingAsync's unique-collision short-circuits
+        // cleanly.
         var winner = new MatchFeedback
         {
             MatchId = pending.MatchId,
@@ -288,12 +289,12 @@ public sealed class FeedbackResponseService(
     private async Task<IReadOnlyList<Hook.Features.Matching.MatchAggregate.Match>> GetPickedMatchesAsync(Guid anchorMatchId, CancellationToken ct)
     {
         var anchor = await matches.GetAsync(anchorMatchId, ct);
-        if (anchor is null) return Array.Empty<Hook.Features.Matching.MatchAggregate.Match>();
+        if (anchor is null) return [];
         // Repository orders by Score DESC, DistanceKm, CreatedAt, Id — same as the
         // MatchPresenter "PICK 1/2/3" enumeration the client originally saw, so a
-        // positional reply ("2") still resolves to the right Match.
-        var siblings = await matches.GetForRequestAsync(anchor.RequestId, ct);
-        return siblings.Where(m => m.PickedAt is not null).ToList();
+        // positional reply ("2") still resolves to the right Match. Filter is in
+        // SQL via ix_matches_request_picked_at.
+        return await matches.GetPickedForRequestAsync(anchor.RequestId, ct);
     }
 
     private async Task SendRetryHintIfFreshAsync(

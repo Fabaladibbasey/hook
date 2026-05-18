@@ -32,7 +32,7 @@ public static class PickProviderResolver
 
     public static IReadOnlyList<PickedMatch> Resolve(string text, IReadOnlyList<MatchEntity> matches)
     {
-        if (matches.Count == 0) return Array.Empty<PickedMatch>();
+        if (matches.Count == 0) return [];
 
         if (AllRegex.IsMatch(text))
             return [.. matches.Select((m, i) => new PickedMatch(m, i + 1))];
@@ -49,7 +49,7 @@ public static class PickProviderResolver
         // Last-4 fragment fallback runs only when the user explicitly typed "pick".
         // Without the keyword, an incidental digit run ("1234 main st") could
         // exchange contact info without intent.
-        if (!PickKeywordRegex.IsMatch(text)) return Array.Empty<PickedMatch>();
+        if (!PickKeywordRegex.IsMatch(text)) return [];
 
         var fragmentIdx = MatchByLastFourFragmentIndex(text, matches);
         return fragmentIdx < 0
@@ -67,7 +67,7 @@ public static class PickProviderResolver
     private static IReadOnlyList<int> ParseIndices(string text, int count)
     {
         var match = IndexListRegex.Match(text);
-        if (!match.Success) return Array.Empty<int>();
+        if (!match.Success) return [];
 
         var seen = new HashSet<int>();
         var ordered = new List<int>();

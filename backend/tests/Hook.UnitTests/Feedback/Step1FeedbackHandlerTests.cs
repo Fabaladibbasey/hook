@@ -46,6 +46,13 @@ public class Step1FeedbackHandlerTests
                     throw new InvalidOperationException($"missing seed for {requestId}");
                 return list;
             });
+        _matchesMock.Setup(x => x.GetPickedForRequestAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid requestId, CancellationToken _) =>
+            {
+                if (!_requestMatches.TryGetValue(requestId, out var list))
+                    return [];
+                return list.Where(m => m.PickedAt is not null).ToList();
+            });
 
         _requestsMock.Setup(x => x.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid id, CancellationToken _) =>
@@ -115,6 +122,26 @@ public class Step1FeedbackHandlerTests
 
         Assert.Single(_added);
         Assert.Equal(match.RequestId, _added[0].RequestId);
+    }
+
+    [Fact]
+    public async Task Handle_RequestIdEmpty_ExitsBeforeReservation()
+    {
+        // Pre-migration backfill leaves MatchFeedback rows with RequestId=Guid.Empty
+        // and likewise some Match rows; entering reservation here would collide on
+        // the request_step1 partial unique with a default-Guid insert.
+        var match = new MatchEntity
+        {
+            RequestId = Guid.Empty,
+            ProviderPhone = "+2203331234",
+            ServiceSlug = "plumbing"
+        };
+        _matches[match.Id] = match;
+
+        await Build().Handle(new Step1FeedbackCheck(match.Id), _busMock.Object, CancellationToken.None);
+
+        Assert.Empty(_added);
+        Assert.Empty(_published);
     }
 
     [Fact]

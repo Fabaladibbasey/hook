@@ -133,7 +133,12 @@ public class FeedbackResponseServiceTests
         _matchesMock.Setup(x => x.GetForRequestAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid requestId, CancellationToken _) =>
                 _requestMatches.TryGetValue(requestId, out var l)
-                    ? (IReadOnlyList<MatchEntity>)l
+                    ? l
+                    : Array.Empty<MatchEntity>());
+        _matchesMock.Setup(x => x.GetPickedForRequestAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid requestId, CancellationToken _) =>
+                _requestMatches.TryGetValue(requestId, out var l)
+                    ? l.Where(m => m.PickedAt is not null).ToList()
                     : Array.Empty<MatchEntity>());
 
         // Default AI behavior: Unknown intent, no ETA. Tests override per-input as needed.

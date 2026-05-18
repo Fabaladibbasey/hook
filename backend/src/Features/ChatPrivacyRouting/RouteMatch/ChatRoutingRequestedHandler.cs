@@ -27,12 +27,17 @@ public sealed class ChatRoutingRequestedHandler(
             return;
         }
 
-        var links = await factory.CreateAsync(evt.ClientPhone, evt.ProviderPhone, ct);
-        if (!await matches.TryClaimChatRoutingAsync(match.Id, links.ChatId, ct))
+        // Reserve the claim with a pre-allocated ChatId before allocating the session
+        // + 2 ChatParticipant rows. Race-loser exits with zero writes; the previous
+        // order rolled back 4-5 inserts through the AutoApplyTransactions tx.
+        var chatId = Guid.NewGuid();
+        if (!await matches.TryClaimChatRoutingAsync(match.Id, chatId, ct))
         {
             logger.LogDebug("ChatRouting: match {MatchId} lost the claim — peer already routed", evt.MatchId);
             return;
         }
+
+        var links = await factory.CreateAsync(chatId, evt.ClientPhone, evt.ProviderPhone, ct);
 
         var mapsUrl = string.Format(
             CultureInfo.InvariantCulture,

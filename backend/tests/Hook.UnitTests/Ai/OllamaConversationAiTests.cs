@@ -52,7 +52,7 @@ public class OllamaConversationAiTests
     }
 
     private static ReplyContext ReplyCtx(string purpose) =>
-        new(purpose, RecentTurns: Array.Empty<ConversationTurn>(), LanguageHint: "en");
+        new(purpose, RecentTurns: [], LanguageHint: "en");
 
     private sealed class ScriptedHandler(string content) : HttpMessageHandler
     {
