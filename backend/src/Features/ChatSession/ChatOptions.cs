@@ -15,5 +15,5 @@ public class ChatOptions
     [Range(1, 168)]
     public int HardExpiryHours { get; init; } = 24;
 
-    public string PublicChatBaseUrl { get; init; } = "http://localhost:5000";
+    public string PublicChatBaseUrl { get; init; } = "http://localhost:5173";
 }

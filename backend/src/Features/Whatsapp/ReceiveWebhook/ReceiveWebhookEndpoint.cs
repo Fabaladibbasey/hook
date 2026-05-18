@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Hook.Features.RateLimiting;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using Wolverine;
 
@@ -6,12 +8,15 @@ namespace Hook.Features.Whatsapp.ReceiveWebhook;
 
 public static class ReceiveWebhookEndpoint
 {
+    public const string Path = "/webhooks/whatsapp";
+
     public static IEndpointRouteBuilder MapWhatsappWebhook(this IEndpointRouteBuilder routes)
     {
-        var group = routes.MapGroup("/webhooks/whatsapp");
+        var group = routes.MapGroup(Path);
 
         group.MapGet("", HandleVerification);
-        group.MapPost("", HandleInbound);
+        group.MapPost("", HandleInbound)
+            .RequireRateLimiting(RateLimitingServiceCollectionExtensions.WebhookConcurrencyPolicy);
 
         return routes;
     }
@@ -35,6 +40,7 @@ public static class ReceiveWebhookEndpoint
         return Results.StatusCode(StatusCodes.Status403Forbidden);
     }
 
+    [RequestSizeLimit(64 * 1024)]
     private static async Task<IResult> HandleInbound(
         HttpRequest request,
         IOptions<WhatsappOptions> options,

@@ -1,7 +1,6 @@
 using System.Globalization;
 using Hook.Features.ChatPrivacyRouting.RouteMatch;
 using Hook.Features.ChatSession;
-using Hook.Features.ChatSession.AccessLog;
 using Hook.Features.ChatSession.ParticipantAggregate;
 using Hook.Features.ChatSession.SessionAggregate;
 using Hook.Features.ContactSharing.Events;

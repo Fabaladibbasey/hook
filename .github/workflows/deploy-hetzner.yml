@@ -1,4 +1,4 @@
-name: Deploy
+name: Deploy to Hetzner
 
 on:
   workflow_run:
@@ -15,7 +15,7 @@ on:
         default: ""
 
 concurrency:
-  group: deploy-prod
+  group: deploy-hetzner-prod
   cancel-in-progress: false
 
 permissions:
@@ -104,11 +104,24 @@ jobs:
           key: ${{ secrets.PROD_SSH_KEY }}
           port: ${{ secrets.PROD_SSH_PORT || 22 }}
           script: |
-            set -e
-            cd ${{ secrets.PROD_DEPLOY_DIR }}/backend
+            set -euo pipefail
+            REPO_DIR="${{ secrets.PROD_DEPLOY_DIR }}"
+            cd "$REPO_DIR"
+            ok=0
+            for i in 1 2 3; do
+              if git pull --ff-only --quiet; then ok=1; break; fi
+              echo "git pull attempt $i failed, retrying..." >&2
+              sleep $((i * 5))
+            done
+            [ "$ok" = "1" ] || { echo "git pull failed after 3 attempts" >&2; exit 1; }
+            cd "$REPO_DIR/backend"
             export HOOK_IMAGE="${{ needs.build-push.outputs.image }}"
             docker compose -f docker-compose.prod.yml --env-file .env.prod pull api
             docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+            # Bind-mounted config files (Caddyfile, etc.) don't trigger a
+            # compose recreate when they change on the host; restart caddy
+            # explicitly so it picks up Caddyfile edits from the git pull.
+            docker compose -f docker-compose.prod.yml --env-file .env.prod restart caddy
             docker image prune -f
 
       - name: Smoke probe

@@ -31,19 +31,21 @@
     }
 }
 
-{$LOGS_DOMAIN} {
+seq.hook.drop.africa {
     encode zstd gzip
 
-    basic_auth {
-        {$LOGS_BASIC_AUTH_USER} {$LOGS_BASIC_AUTH_HASH}
-    }
-
-    reverse_proxy seq:80 {
+    reverse_proxy api:8080 {
         header_up Host {host}
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
     }
+
+    @websockets {
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+    reverse_proxy @websockets api:8080
 
     tls {
         protocols tls1.2 tls1.3

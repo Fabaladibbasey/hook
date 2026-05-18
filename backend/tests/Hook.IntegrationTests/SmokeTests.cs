@@ -40,6 +40,7 @@ public sealed class HookAppFixture : IAsyncLifetime
                 b.UseSetting("Whatsapp:PhoneNumberId", "PN-1");
                 b.UseSetting("Whatsapp:AccessToken", "token");
                 b.UseSetting("GoogleGeocoding:ApiKey", "k");
+                b.UseSetting("Wolverine:Durable", "false");
             });
 
         // Force host build & create schema from current model.

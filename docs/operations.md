@@ -1,6 +1,6 @@
 # Hook — Operations Run Book
 
-Production deploy uses Docker Compose on a single VPS, behind Caddy with auto Let's Encrypt.
+Production deploy targets a single Hetzner Cloud VPS (`hook.drop.africa`) running Docker Compose behind Caddy with auto Let's Encrypt. The workflow lives at `.github/workflows/deploy-hetzner.yml` and is named to leave room for future deploy-to-other-VPS workflows.
 
 ## Stack
 
@@ -57,7 +57,6 @@ See `.env.example` for the full list. Categories:
 | WhatsApp           | `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_GRAPH_API_VERSION` |
 | Ollama             | `OLLAMA_BASE_URL` (default `http://ollama:11434`), `OLLAMA_MODEL` (default `qwen2.5:3b`) |
 | Google geocoding   | `GOOGLE_GEOCODING_API_KEY`                                             |
-| Chat               | `CHAT_TOKEN_SIGNING_KEY` (≥32-byte base64)                             |
 | Seq / logs         | `SEQ_FIRSTRUN_ADMINPASSWORDHASH`, `SEQ_INGEST_API_KEY` (optional), `SEQ_URL` (default `http://seq:5341`), `LOGS_DOMAIN`, `LOGS_BASIC_AUTH_USER`, `LOGS_BASIC_AUTH_HASH` |
 | Backups            | `BACKUP_RETENTION_DAYS` (default 14)                                   |
 
@@ -113,12 +112,46 @@ For schema rollback, restore from the latest pre-deploy `pg_dump` (see Backups a
 ## CI / CD
 
 - **CI** (`.github/workflows/ci.yml`): build + test on every push/PR. Postgres service container is provisioned for integration tests.
-- **Deploy** (`.github/workflows/deploy.yml`): on push to `main` or tag `v*`:
+- **Deploy** (`.github/workflows/deploy-hetzner.yml`): on push to `main` or tag `v*`:
   1. Build multi-stage image, push to GHCR with tags `:<sha>` and `:latest`.
   2. SSH into VPS, `docker compose pull api`, `up -d`, prune.
   3. Curl `/healthz` until 200 (10×5s).
 - **Required secrets** (GitHub repo → Settings → Secrets → Actions, environment `production`):
   `PROD_SSH_HOST`, `PROD_SSH_USER`, `PROD_SSH_KEY`, `PROD_SSH_PORT` (optional), `PROD_DEPLOY_DIR`, `PROD_DOMAIN`.
+
+## Rate limiting
+
+Two layers protect the API surface:
+
+- **Global limiter** (`Features/RateLimiting/GlobalRateLimitPartitioner`) — fixed-window
+  bucket (`RateLimit:GlobalPermitLimit` requests per `RateLimit:GlobalWindowSeconds`)
+  applied to every unmatched request. Partition key is either `t:<token>` (length-capped
+  at 128 chars) when the request carries `?token=`, otherwise `ip:<RemoteIpAddress>`.
+  The length cap bounds dictionary growth so spraying tokens cannot exhaust memory.
+- **Webhook concurrency limiter** (`webhook-concurrency` policy) — caps simultaneous
+  POSTs to `/webhooks/whatsapp` at `RateLimit:WebhookConcurrencyLimit` permits with
+  `RateLimit:WebhookQueueLimit` queued. HMAC validation + 64 KB request-size cap on
+  the same endpoint stop large-body amplification.
+
+**Bypass list** (no limiter applied):
+
+| Branch                                  | Why                                                          |
+|-----------------------------------------|--------------------------------------------------------------|
+| `/webhooks/whatsapp`                    | Already gated by named concurrency policy + HMAC.            |
+| `/hubs/chat`                            | Long-lived SignalR transport; per-message limits live in hub.|
+| Host listed in `RateLimit:BypassHosts`  | YARP-proxied internal UIs (e.g. Seq).                        |
+
+**Per-phone limiter** (`PerPhoneLimiter`) is registered in DI for future webhook
+integration. Today its only consumer is its own unit tests — wiring it into the
+inbound flow is tracked separately.
+
+**Forwarded headers trust scope**
+
+Production sits behind Caddy on a private docker bridge. `ForwardedHeaders:KnownNetworks`
+defaults to `172.16.0.0/12` (the docker default bridge subnet). `ForwardLimit=1` so
+only the last hop's `X-Forwarded-For` entry is honored — a real bridge client cannot
+smuggle a forged external IP through multi-hop parsing. The block is gated on
+`!IsDevelopment()`; dev runs Kestrel directly with no proxy.
 
 ## Troubleshooting
 

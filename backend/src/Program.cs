@@ -1,4 +1,3 @@
-using System.Threading.RateLimiting;
 using Hook;
 using Hook.Features.Ai;
 using Hook.Features.ChatLifecycle;
@@ -78,22 +77,10 @@ try
     builder.Services.AddMetaTemplates();
     builder.Services.AddObservability();
 
-    builder.Services.AddRateLimiter(opts =>
-    {
-        opts.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-        opts.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
-        {
-            var token = ctx.Request.Query["token"].ToString();
-            var key = !string.IsNullOrEmpty(token) ? $"t:{token}" : $"ip:{ctx.Connection.RemoteIpAddress}";
-            return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
-            {
-                Window = TimeSpan.FromSeconds(5),
-                PermitLimit = 3,
-                QueueLimit = 5,
-                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
-            });
-        });
-    });
+    builder.Services.AddReverseProxy()
+        .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
+
+    builder.Services.AddGlobalRateLimiter(builder.Configuration);
 
     builder.Services.AddProblemDetails();
     builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
@@ -153,21 +140,35 @@ try
 
     var app = builder.Build();
 
-    if (app.Environment.IsDevelopment() || app.Environment.IsStaging())
     {
         await using var scope = app.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
         await db.Database.MigrateAsync();
 
-        var seedOpts = scope.ServiceProvider
-            .GetRequiredService<IOptions<DevProviderSeedOptions>>().Value;
-        if (seedOpts.Enabled && seedOpts.AutoSeed)
+        if (app.Environment.IsDevelopment() || app.Environment.IsStaging())
         {
-            var seeder = scope.ServiceProvider.GetRequiredService<DevProviderSeeder>();
-            await seeder.SeedAsync();
+            var seedOpts = scope.ServiceProvider
+                .GetRequiredService<IOptions<DevProviderSeedOptions>>().Value;
+            if (seedOpts.Enabled && seedOpts.AutoSeed)
+            {
+                var seeder = scope.ServiceProvider.GetRequiredService<DevProviderSeeder>();
+                await seeder.SeedAsync();
+            }
         }
     }
 
+    // Dev runs Kestrel directly with no proxy; trust forwarded headers only outside Development.
+    if (!builder.Environment.IsDevelopment())
+    {
+        app.UseForwardedHeaders(ForwardedHeadersConfigurator.Build(builder.Configuration));
+    }
+
+    // Token-in-URL pattern leaks via Referer; strip referrer on all responses.
+    app.Use(async (ctx, next) =>
+    {
+        ctx.Response.Headers["Referrer-Policy"] = "no-referrer";
+        await next();
+    });
     app.UseExceptionHandler();
     app.UseObservability();
     app.UseRateLimiter();
@@ -205,9 +206,10 @@ try
         app.MapDevProviders();
     }
     app.MapChat();
+    app.MapReverseProxy();
     app.UseDefaultFiles();
     app.UseStaticFiles();
-    app.MapHub<ChatHub>("/hubs/chat");
+    app.MapHub<ChatHub>(ChatHubConstants.HubPath);
     app.MapFallbackToFile("index.html");
 
     await app.RunAsync();
@@ -233,15 +235,16 @@ namespace Hook
         public static string Scrub(string queryString)
         {
             if (string.IsNullOrEmpty(queryString)) return queryString;
-            var qs = queryString.StartsWith('?') ? queryString[1..] : queryString;
-            var rewritten = string.Join('&', qs.Split('&').Select(part =>
+            var hasPrefix = queryString.StartsWith('?');
+            var body = hasPrefix ? queryString[1..] : queryString;
+            var rewritten = string.Join('&', body.Split('&').Select(part =>
             {
                 var eq = part.IndexOf('=');
                 if (eq < 0) return part;
                 var name = part[..eq];
                 return SensitiveKeys.Contains(name) ? $"{name}=***" : part;
             }));
-            return queryString.StartsWith('?') ? "?" + rewritten : rewritten;
+            return hasPrefix ? "?" + rewritten : rewritten;
         }
     }
 }
