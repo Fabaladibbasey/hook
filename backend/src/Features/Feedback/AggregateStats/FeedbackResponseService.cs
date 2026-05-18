@@ -4,11 +4,12 @@ using Hook.Features.Ai.Models;
 using Hook.Features.Feedback.Models;
 using Hook.Features.Feedback.ProviderStatsAggregate;
 using Hook.Features.Matching.MatchAggregate;
-using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Models;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Core;
+using Hook.Shared.Pipeline.PostCommitSends;
 using Microsoft.Extensions.Options;
+using Wolverine;
 
 namespace Hook.Features.Feedback.AggregateStats;
 
@@ -17,7 +18,7 @@ public sealed class FeedbackResponseService(
     IMatchRepository matches,
     IConversationAi ai,
     IEventBus events,
-    IWhatsappClient whatsapp,
+    IMessageBus bus,
     IOptions<FeedbackOptions> options,
     TimeProvider clock,
     ILogger<FeedbackResponseService> logger)
@@ -97,22 +98,20 @@ public sealed class FeedbackResponseService(
             return;
         }
 
-        // Multi-pick: reserve IdentifyWinner FIRST, send prompt, only THEN claim Step1.
-        // If the send throws Step1 stays Pending so the next inbound retries — claiming
-        // Step1 first would orphan the user.
-        var winner = new MatchFeedback { MatchId = pending.MatchId, Step = FeedbackStep.IdentifyWinner };
+        // Multi-pick: reserve IdentifyWinner first, then publish the prompt envelope
+        // and claim Step1. Reserve-then-publish guarantees that on retry the Pending
+        // row is already there and TryAddPendingAsync's unique-collision short-circuits
+        // cleanly.
+        var winner = new MatchFeedback
+        {
+            MatchId = pending.MatchId,
+            RequestId = pending.RequestId,
+            Step = FeedbackStep.IdentifyWinner
+        };
         if (!await feedback.TryAddPendingAsync(winner, ct)) return;
 
         var prompt = $"Which provider worked out? Reply with the number — {PickedMatchListFormatter.Format(picked)}.";
-        try
-        {
-            await whatsapp.SendTextAsync(msg.From, prompt, ct);
-        }
-        catch
-        {
-            await SafeDeletePendingAsync(winner.Id, "IdentifyWinner", ct);
-            throw;
-        }
+        await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From, prompt));
 
         await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Yes, now, ct);
     }
@@ -173,19 +172,16 @@ public sealed class FeedbackResponseService(
             // Pillar B: reserve AwaitingEta and ask the client when they expect to
             // finish. The next inbound is routed through HandleAwaitingEtaAsync;
             // failure to parse falls back to Step2InProgressRecheckDelay.
-            var eta = new MatchFeedback { MatchId = pending.MatchId, Step = FeedbackStep.AwaitingEta };
+            var eta = new MatchFeedback
+            {
+                MatchId = pending.MatchId,
+                RequestId = pending.RequestId,
+                Step = FeedbackStep.AwaitingEta
+            };
             if (!await feedback.TryAddPendingAsync(eta, ct)) return;
 
-            try
-            {
-                await whatsapp.SendTextAsync(msg.From,
-                    "Got it — when do you think it'll be done? e.g. 'in 3 hours' or 'tomorrow at 5pm'.", ct);
-            }
-            catch
-            {
-                await SafeDeletePendingAsync(eta.Id, "AwaitingEta", ct);
-                throw;
-            }
+            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+                "Got it — when do you think it'll be done? e.g. 'in 3 hours' or 'tomorrow at 5pm'."));
             return;
         }
 
@@ -230,8 +226,8 @@ public sealed class FeedbackResponseService(
 
         if (now - pending.PromptedAt <= opts.ParseRetryWindow)
         {
-            await whatsapp.SendTextAsync(msg.From,
-                "Sorry, didn't catch that. When do you think the job will be done? e.g. 'in 3 hours' or 'tomorrow at 5pm'.", ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+                "Sorry, didn't catch that. When do you think the job will be done? e.g. 'in 3 hours' or 'tomorrow at 5pm'."));
             return;
         }
 
@@ -293,12 +289,12 @@ public sealed class FeedbackResponseService(
     private async Task<IReadOnlyList<Hook.Features.Matching.MatchAggregate.Match>> GetPickedMatchesAsync(Guid anchorMatchId, CancellationToken ct)
     {
         var anchor = await matches.GetAsync(anchorMatchId, ct);
-        if (anchor is null) return Array.Empty<Hook.Features.Matching.MatchAggregate.Match>();
+        if (anchor is null) return [];
         // Repository orders by Score DESC, DistanceKm, CreatedAt, Id — same as the
         // MatchPresenter "PICK 1/2/3" enumeration the client originally saw, so a
-        // positional reply ("2") still resolves to the right Match.
-        var siblings = await matches.GetForRequestAsync(anchor.RequestId, ct);
-        return siblings.Where(m => m.PickedAt is not null).ToList();
+        // positional reply ("2") still resolves to the right Match. Filter is in
+        // SQL via ix_matches_request_picked_at.
+        return await matches.GetPickedForRequestAsync(anchor.RequestId, ct);
     }
 
     private async Task SendRetryHintIfFreshAsync(
@@ -307,14 +303,7 @@ public sealed class FeedbackResponseService(
         // Bound the spammy retry prompt to ParseRetryWindow so a forgotten Pending row
         // can't re-arm "didn't catch that" replies indefinitely on every inbound.
         if (now - pending.PromptedAt > opts.ParseRetryWindow) return;
-        await whatsapp.SendTextAsync(msg.From, $"Sorry, didn't catch that. {hint}", ct);
-    }
-
-    private async Task SafeDeletePendingAsync(Guid feedbackId, string label, CancellationToken ct)
-    {
-        var deleted = await feedback.DeletePendingAsync(feedbackId, ct);
-        if (!deleted)
-            logger.LogWarning("DeletePendingAsync returned false for {Label} {FeedbackId}", label, feedbackId);
+        await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From, $"Sorry, didn't catch that. {hint}"));
     }
 
     private async Task RecordOutcomeAsync(Guid matchId, FeedbackAnswer answer, DateTimeOffset now, CancellationToken ct)

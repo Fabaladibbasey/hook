@@ -17,5 +17,4 @@ public interface IChatRepository
     Task AddParticipantsAsync(IEnumerable<ChatParticipant> participants, CancellationToken ct = default);
     Task<bool> TryAddMessageAsync(ChatMessage message, CancellationToken ct = default);
     Task AddAccessLogAsync(ChatAccessLog log, CancellationToken ct = default);
-    Task SaveChangesAsync(CancellationToken ct = default);
 }

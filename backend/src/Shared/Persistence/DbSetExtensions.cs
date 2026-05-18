@@ -33,29 +33,46 @@ public static class DbSetExtensions
         return true;
     }
 
-    /// <summary>
-    /// Insert <paramref name="entity"/> and SaveChanges; return false if a 23505
-    /// (unique violation) on <paramref name="constraintName"/> raced us. Wraps the
-    /// "partial unique index + 23505 catch" idiom so call sites stay one-line.
-    /// </summary>
+    /// <summary>Insert and SaveChanges; return false on a 23505 against any of
+    /// <paramref name="constraintNames"/>. The savepoint wrapper isolates the race
+    /// from the enclosing Wolverine handler transaction.</summary>
+    public static Task<bool> TryInsertUniqueAsync<T>(
+        this DbContext db,
+        T entity,
+        CancellationToken ct = default,
+        params string[] constraintNames) where T : class =>
+        TryInsertUniqueAsync(db, entity, constraintNames, ct);
+
     public static async Task<bool> TryInsertUniqueAsync<T>(
         this DbContext db,
         T entity,
-        string constraintName,
+        IReadOnlyList<string> constraintNames,
         CancellationToken ct = default) where T : class
     {
+        var outer = db.Database.CurrentTransaction;
+        string? savepoint = null;
+        if (outer is not null)
+        {
+            savepoint = $"sp{Interlocked.Increment(ref _savepointCounter)}";
+            await outer.CreateSavepointAsync(savepoint, ct);
+        }
+
         await db.AddAsync(entity, ct);
         try
         {
             await db.SaveChangesAsync(ct);
+            if (savepoint is not null) await outer!.ReleaseSavepointAsync(savepoint, ct);
             return true;
         }
         catch (DbUpdateException ex) when (
             ex.InnerException is Npgsql.PostgresException { SqlState: "23505" } pg
-            && pg.ConstraintName == constraintName)
+            && constraintNames.Contains(pg.ConstraintName))
         {
             db.Entry(entity).State = EntityState.Detached;
+            if (savepoint is not null) await outer!.RollbackToSavepointAsync(savepoint, ct);
             return false;
         }
     }
+
+    private static long _savepointCounter;
 }

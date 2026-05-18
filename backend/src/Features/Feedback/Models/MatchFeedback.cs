@@ -4,6 +4,7 @@ public class MatchFeedback
 {
     public Guid Id { get; init; } = Guid.NewGuid();
     public required Guid MatchId { get; init; }
+    public required Guid RequestId { get; init; }
     public required FeedbackStep Step { get; init; }
     public FeedbackAnswer Answer { get; set; } = FeedbackAnswer.Pending;
     public DateTimeOffset PromptedAt { get; init; } = DateTimeOffset.UtcNow;

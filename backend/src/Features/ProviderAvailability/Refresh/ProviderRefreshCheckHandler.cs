@@ -27,7 +27,7 @@ public sealed class ProviderRefreshCheckHandler(
 
         var ctx = new ReplyContext(
             Purpose: "provider-availability-check",
-            RecentTurns: Array.Empty<ConversationTurn>(),
+            RecentTurns: [],
             LanguageHint: "en",
             Facts: new Dictionary<string, string>
             {

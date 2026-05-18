@@ -17,6 +17,15 @@ public sealed class MatchRepository(HookDbContext db) : IMatchRepository
             .ThenBy(m => m.Id)
             .ToListAsync(ct);
 
+    public async Task<IReadOnlyList<Match>> GetPickedForRequestAsync(Guid requestId, CancellationToken ct = default) =>
+        await db.Matches
+            .Where(m => m.RequestId == requestId && m.PickedAt != null)
+            .OrderByDescending(m => m.Score)
+            .ThenBy(m => m.DistanceKm)
+            .ThenBy(m => m.CreatedAt)
+            .ThenBy(m => m.Id)
+            .ToListAsync(ct);
+
     public async Task AddAsync(Match match, CancellationToken ct = default) =>
         await db.Matches.AddAsync(match, ct);
 
@@ -49,5 +58,11 @@ public sealed class MatchRepository(HookDbContext db) : IMatchRepository
         return rows == 1;
     }
 
-    public Task SaveChangesAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
+    public async Task<bool> TryClaimChatRoutingAsync(Guid matchId, Guid chatId, CancellationToken ct = default)
+    {
+        var rows = await db.Matches
+            .Where(m => m.Id == matchId && m.ChatId == null)
+            .ExecuteUpdateAsync(u => u.SetProperty(m => m.ChatId, chatId), ct);
+        return rows == 1;
+    }
 }

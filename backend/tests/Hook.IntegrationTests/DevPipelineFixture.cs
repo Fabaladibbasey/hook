@@ -15,6 +15,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
 using Testcontainers.PostgreSql;
+using Wolverine;
 
 namespace Hook.IntegrationTests;
 
@@ -144,13 +145,16 @@ public sealed class DevPipelineFixture : IAsyncLifetime
                 // +30 min production default would mean the prompt never fires inside a
                 // test run. Step2 publishes immediately on Step1=Yes (no separate knob).
                 b.UseSetting("Feedback:Step1InitialDelay", "00:00:00");
-                b.UseSetting("Wolverine:DefaultExecutionTimeoutSeconds", "10");
-                b.UseSetting("Wolverine:DynamicCodegen", "true");
-                // Belt+braces: keep Wolverine in-memory in tests so scheduled feedback
-                // envelopes don't bleed across the per-shard databases via the durable
-                // outbox. Program.cs already gates durable on IsProduction, but pin it
-                // explicitly so reordering can't accidentally flip it on.
-                b.UseSetting("Wolverine:Durable", "false");
+                b.UseSetting(Shared.Persistence.WolverineConfig.ExecutionTimeoutKey, "10");
+                b.ConfigureServices(s =>
+                {
+                    // Convention-based handler discovery scans Hook.dll only.
+                    // Include this test assembly so test-only handlers (e.g.
+                    // AutoApplyTransactionsHandler) are picked up at host build,
+                    // and force local-queue envelopes to persist in wolverine.*
+                    // so EF <-> outbox transactional joins can be asserted.
+                    s.AddSingleton<IWolverineExtension, TestPipelineWolverineExtension>();
+                });
                 b.ConfigureTestServices(s =>
                 {
                     s.RemoveAll<IConversationAi>();
@@ -230,6 +234,16 @@ public sealed class DevPipelineFixture : IAsyncLifetime
             + " RESTART IDENTITY CASCADE;";
         await ctx.Database.ExecuteSqlRawAsync(_truncateSql);
 
+        // Wolverine creates the schema during host build (before any ResetAsync call),
+        // so the unconditional TRUNCATE is safe — no IF EXISTS guard needed.
+        await ctx.Database.ExecuteSqlRawAsync("""
+            TRUNCATE TABLE
+                wolverine.wolverine_incoming_envelopes,
+                wolverine.wolverine_outgoing_envelopes,
+                wolverine.wolverine_dead_letters
+            RESTART IDENTITY CASCADE;
+            """);
+
         var seeder = scope.ServiceProvider.GetRequiredService<DevProviderSeeder>();
         await seeder.SeedAsync();
 
@@ -282,4 +296,17 @@ public abstract class PipelineTestBase : IAsyncLifetime
     public Task InitializeAsync() => _fx.ResetAsync();
 
     public Task DisposeAsync() => Task.CompletedTask;
+}
+
+internal sealed class TestPipelineWolverineExtension : IWolverineExtension
+{
+    public void Configure(WolverineOptions options)
+    {
+        options.Discovery.IncludeAssembly(typeof(DevPipelineFixture).Assembly);
+        // Local handlers normally dispatch through an in-memory queue and never
+        // touch the outbox. UseDurableLocalQueues forces local-queue envelopes
+        // to persist in wolverine.* tables, enabling EF ↔ outbox transactional
+        // join assertions in AutoApplyTransactionsTests.
+        options.Policies.UseDurableLocalQueues();
+    }
 }

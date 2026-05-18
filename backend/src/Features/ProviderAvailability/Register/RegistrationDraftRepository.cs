@@ -9,9 +9,8 @@ public sealed class RegistrationDraftRepository(HookDbContext db) : IRegistratio
     public Task<RegistrationDraft?> GetAsync(string phone, CancellationToken ct = default) =>
         db.RegistrationDrafts.FirstOrDefaultAsync(r => r.Phone == phone, ct);
 
-    public async Task UpsertAsync(RegistrationDraft draft, CancellationToken ct = default)
-    {
-        await db.RegistrationDrafts.UpsertAsync([draft.Phone], draft, (e, d) =>
+    public Task UpsertAsync(RegistrationDraft draft, CancellationToken ct = default) =>
+        db.RegistrationDrafts.UpsertAsync([draft.Phone], draft, (e, d) =>
         {
             e.Step = d.Step;
             e.DraftServices = d.DraftServices;
@@ -21,12 +20,7 @@ public sealed class RegistrationDraftRepository(HookDbContext db) : IRegistratio
             e.DraftShareContact = d.DraftShareContact;
             e.UpdatedAt = d.UpdatedAt;
         }, ct);
-        await db.SaveChangesAsync(ct);
-    }
 
-    public async Task DeleteAsync(string phone, CancellationToken ct = default)
-    {
-        if (await db.RegistrationDrafts.DeleteByKeyAsync([phone], ct))
-            await db.SaveChangesAsync(ct);
-    }
+    public Task DeleteAsync(string phone, CancellationToken ct = default) =>
+        db.RegistrationDrafts.DeleteByKeyAsync([phone], ct);
 }

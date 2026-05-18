@@ -11,6 +11,8 @@ using Hook.Features.ServiceRequest.IterateMatches;
 using Hook.Features.ServiceRequest.RequestAggregate;
 using Hook.Features.Whatsapp.Models;
 using Hook.Features.Whatsapp.Phone;
+using Hook.Shared.Pipeline.PostCommitSends;
+using Wolverine;
 using IMatchRepository = Hook.Features.Matching.MatchAggregate.IMatchRepository;
 
 namespace Hook.Features.Whatsapp.ReceiveWebhook;
@@ -24,7 +26,7 @@ public sealed class InboundRouterHandler(
     IMatchRepository matches,
     IProviderAvailabilityRepository providers,
     IConversationAi ai,
-    IWhatsappClient whatsapp,
+    IMessageBus bus,
     ClientRequestOrchestrator clientOrchestrator,
     RegistrationOrchestrator registrationOrchestrator,
     IterationCoordinator iterationCoordinator,
@@ -144,12 +146,11 @@ public sealed class InboundRouterHandler(
             if (activeRequest.Status != ServiceRequestStatus.Closed)
             {
                 activeRequest.Close();
-                await requests.SaveChangesAsync(ct);
             }
             logger.LogDebug("Route → NewRequest (closed {RequestId}, prompting) for {Phone}",
                 activeRequest.Id, masked);
-            await whatsapp.SendTextAsync(msg.From,
-                "OK — what service do you need now? Reply 'I need …' to start a new request.", ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+                "OK — what service do you need now? Reply 'I need …' to start a new request."));
             return;
         }
 
@@ -178,7 +179,7 @@ public sealed class InboundRouterHandler(
                 detected.Intent, detected.Confidence, masked);
             await ambiguousDrafts.UpsertAsync(
                 AmbiguousIntentDraft.Start(phone, text, clock.GetUtcNow()), ct);
-            await whatsapp.SendTextAsync(msg.From, DisambiguationPrompt, ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From, DisambiguationPrompt));
             return;
         }
 
@@ -204,7 +205,6 @@ public sealed class InboundRouterHandler(
                 if (activeRequest.Status != ServiceRequestStatus.Closed)
                 {
                     activeRequest.Close();
-                    await requests.SaveChangesAsync(ct);
                     logger.LogDebug("Silent supersede: closed {RequestId} for {Phone}", activeRequest.Id, masked);
                 }
                 await clientOrchestrator.HandleAsync(msg, ct);
@@ -224,7 +224,7 @@ public sealed class InboundRouterHandler(
                     var services = string.Join(", ", listedProvider.Services);
                     var ack = $"Hi! You're currently listed as a provider for {services}. " +
                               "Reply 'I need …' to request a different service yourself, or LEAVE to unlist.";
-                    await whatsapp.SendTextAsync(msg.From, ack, ct);
+                    await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From, ack));
                     logger.LogDebug("Listed-provider greet-back for {Phone}", masked);
                     return;
                 }
@@ -278,7 +278,7 @@ public sealed class InboundRouterHandler(
         if (choice is null)
         {
             logger.LogDebug("Unrecognised disambiguation reply '{Text}' from {Phone}", text, masked);
-            await whatsapp.SendTextAsync(msg.From, "Reply REQUEST if you need a service, or REGISTER if you provide one.", ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From, "Reply REQUEST if you need a service, or REGISTER if you provide one."));
             return true;
         }
 
@@ -325,7 +325,7 @@ public sealed class InboundRouterHandler(
             ? "Hi! I connect people with local service providers. REQUEST a service if you need help, or REGISTER as a provider if you offer one."
             : "I help connect people who need services with providers. Reply REQUEST if you need help, or REGISTER if you offer a service.";
         var reply = await AiReplyHelper.TryGenerateOrFallbackAsync(ai, ctx, purpose, fallback, logger, ct);
-        await whatsapp.SendTextAsync(from, reply, ct);
+        await bus.PublishAsync(new SendWhatsAppTextRequested(from, reply));
     }
 
     private async Task TryPickAsync(ServiceRequest.RequestAggregate.ServiceRequest request, string text, string maskedPhone, CancellationToken ct)
@@ -405,7 +405,7 @@ public sealed class InboundRouterHandler(
         {
             reply = $"Connected you with {freshSuccess} of {consideredTotal} providers. Reply PICK <#> or NEXT for more.";
         }
-        await whatsapp.SendTextAsync(clientPhone, reply, ct);
+        await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone, reply));
     }
 
     private static bool IsTransientPostgres(string sqlState) => sqlState switch
@@ -442,8 +442,8 @@ public sealed class InboundRouterHandler(
             return;
         }
 
-        await whatsapp.SendTextAsync(from,
-            $"Which match? Reply 1, 2, or {matchOrder.Count}.", ct);
+        await bus.PublishAsync(new SendWhatsAppTextRequested(from,
+            $"Which match? Reply 1, 2, or {matchOrder.Count}."));
     }
 
     private async Task<bool> AbandonAsync(string phone, PhoneNumber from, CancellationToken ct)
@@ -455,7 +455,7 @@ public sealed class InboundRouterHandler(
         var hadAmbiguousDraft = await ambiguousDrafts.GetAsync(phone, ct) is not null;
         if (!hadRegDraft && !hadClientDraft && !hadAmbiguousDraft) return false;
 
-        await whatsapp.SendTextAsync(from, "Session ended. Send a new message to start over.", ct);
+        await bus.PublishAsync(new SendWhatsAppTextRequested(from, "Session ended. Send a new message to start over."));
 
         if (hadRegDraft) await registrationDrafts.DeleteAsync(phone, ct);
         if (hadClientDraft) await clientDrafts.DeleteAsync(phone, ct);

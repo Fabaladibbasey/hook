@@ -16,6 +16,4 @@ public sealed class ProviderAvailabilityRepository(HookDbContext db) : IProvider
         var row = await db.ProviderAvailabilities.FirstOrDefaultAsync(p => p.Phone == phone, ct);
         if (row is not null) db.ProviderAvailabilities.Remove(row);
     }
-
-    public Task SaveChangesAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
 }

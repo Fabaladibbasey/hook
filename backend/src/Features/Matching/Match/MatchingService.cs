@@ -19,6 +19,11 @@ public sealed class MatchingService(
     IOptions<MatchingOptions> options,
     TimeProvider clock)
 {
+    // Caller contract: invoke only inside a Wolverine handler — repository
+    // mutations are committed by AutoApplyTransactions at handler-end. Calling
+    // outside a handler context silently loses writes; the codebase has a single
+    // production caller (ServiceRequestCreatedHandler) so we don't pay the
+    // test-infra cost of a runtime guard for a one-handler invariant.
     public async Task<MatchBatch?> RunForRequestAsync(Guid requestId, CancellationToken ct = default)
     {
         var request = await requests.GetAsync(requestId, ct);
@@ -63,12 +68,6 @@ public sealed class MatchingService(
 
         request.RecordShown(scored.Select(s => s.Candidate.Phone));
         if (scored.Count > 0) request.MarkMatched();
-
-        // Two saves on the shared scoped HookDbContext: the second is a cheap no-op
-        // today, but keeps the contract on each repository explicit so a future split
-        // of the persistence scope cannot silently lose request mutations.
-        await matches.SaveChangesAsync(ct);
-        await requests.SaveChangesAsync(ct);
 
         return new MatchBatch(request.Id, newMatches, scored);
     }

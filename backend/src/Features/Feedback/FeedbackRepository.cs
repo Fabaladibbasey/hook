@@ -29,15 +29,6 @@ public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
             .OrderByDescending(f => f.PromptedAt)
             .FirstOrDefaultAsync(ct);
 
-    // Per-request dedupe for Step1: returns true if any feedback row of the given step
-    // exists for ANY match under this request (covers Pending and answered). Used by
-    // Step1FeedbackHandler so multi-PICK clients receive a single Step1 prompt instead
-    // of one per match.
-    public Task<bool> AnyByRequestStepAsync(Guid requestId, FeedbackStep step, CancellationToken ct = default) =>
-        db.MatchFeedback.AnyAsync(
-            f => f.Step == step && db.Matches.Any(m => m.Id == f.MatchId && m.RequestId == requestId),
-            ct);
-
     public async Task<bool> TryClaimPendingAsync(
         Guid feedbackId, FeedbackAnswer answer, DateTimeOffset now, CancellationToken ct = default)
     {
@@ -68,7 +59,9 @@ public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
         await db.MatchFeedback.AddAsync(feedback, ct);
 
     public Task<bool> TryAddPendingAsync(MatchFeedback feedback, CancellationToken ct = default) =>
-        db.TryInsertUniqueAsync(feedback, FeedbackConstants.PendingUniqueIndexName, ct);
+        db.TryInsertUniqueAsync(feedback, ct,
+            FeedbackConstants.PendingUniqueIndexName,
+            FeedbackConstants.RequestStep1UniqueIndexName);
 
     public async Task<bool> DeletePendingAsync(Guid feedbackId, CancellationToken ct = default)
     {
@@ -84,23 +77,19 @@ public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
     public async Task UpsertStatsAsync(ProviderStats stats, CancellationToken ct = default)
     {
         var entry = db.Entry(stats);
-        if (entry.State == EntityState.Detached)
+        if (entry.State != EntityState.Detached) return;
+
+        var existing = await db.ProviderStats.FindAsync([stats.ProviderPhone], ct);
+        if (existing is null)
         {
-            var existing = await db.ProviderStats.FindAsync([stats.ProviderPhone], ct);
-            if (existing is null)
-            {
-                db.ProviderStats.Add(stats);
-            }
-            else if (!ReferenceEquals(existing, stats))
-            {
-                db.Entry(existing).CurrentValues.SetValues(stats);
-            }
+            db.ProviderStats.Add(stats);
         }
-        await db.SaveChangesAsync(ct);
+        else if (!ReferenceEquals(existing, stats))
+        {
+            db.Entry(existing).CurrentValues.SetValues(stats);
+        }
     }
 
     public Task DeleteStatsAsync(string providerPhone, CancellationToken ct = default) =>
         db.ProviderStats.Where(s => s.ProviderPhone == providerPhone).ExecuteDeleteAsync(ct);
-
-    public Task SaveChangesAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
 }

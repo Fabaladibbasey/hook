@@ -19,12 +19,14 @@ using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Dev;
 using Hook.Features.Whatsapp.ReceiveWebhook;
 using Hook.Shared.Core;
+using Hook.Shared.Persistence;
 using Hook.Shared.Persistence.Data;
 using Hook.Shared.Retention;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Serilog;
 using Wolverine;
+using Wolverine.EntityFrameworkCore;
 using Wolverine.Postgresql;
 
 // Bootstrap logger captured at process start; UseSerilog freezes it on first host build.
@@ -46,7 +48,12 @@ try
     var connectionString = builder.Configuration.GetConnectionString("HookDb")
         ?? throw new InvalidOperationException("Connection string 'HookDb' is not configured.");
 
-    builder.Services.AddDbContext<HookDbContext>(options =>
+    // AddDbContextWithWolverineIntegration installs a model customizer that
+    // requires Wolverine.RDBMS.DatabaseSettings in DI — paired with
+    // PersistMessagesWithPostgresql in the UseWolverine block so every
+    // environment (including tests) gets the EF transactional outbox.
+    // Per-test isolation relies on each fixture using its own Postgres database.
+    builder.Services.AddDbContextWithWolverineIntegration<HookDbContext>(options =>
         options.UseNpgsql(connectionString, npgsql =>
         {
             npgsql.UseNetTopologySuite();
@@ -99,7 +106,7 @@ try
         // OllamaOptions.TimeoutSeconds plus a small buffer so HttpClient.Timeout governs.
         // Tests override via "Wolverine:DefaultExecutionTimeoutSeconds" since the test
         // fixture swaps in an in-memory IConversationAi.
-        var overrideSeconds = builder.Configuration.GetValue<int?>("Wolverine:DefaultExecutionTimeoutSeconds");
+        var overrideSeconds = builder.Configuration.GetValue<int?>(WolverineConfig.ExecutionTimeoutKey);
         if (overrideSeconds is int seconds && seconds > 0 && seconds <= 3600)
         {
             opts.DefaultExecutionTimeout = TimeSpan.FromSeconds(seconds);
@@ -112,24 +119,15 @@ try
             opts.DefaultExecutionTimeout = TimeSpan.FromSeconds(ollamaTimeout + 30);
         }
 
-        // Tests opt into runtime IL emission (TypeLoadMode.Dynamic) to avoid the
-        // per-handler static-codegen file write. Restricted to Development environments (including Staging) + Test.
-        if (!builder.Environment.IsProduction()
-            && builder.Configuration.GetValue<bool>("Wolverine:DynamicCodegen"))
-        {
-            opts.CodeGeneration.TypeLoadMode = JasperFx.CodeGeneration.TypeLoadMode.Dynamic;
-        }
+        // Dynamic IL emission to avoid Wolverine 6's ServiceLocationPolicy.NotAllowed
+        // breaking opaque DI registrations (AddDbContext, AddHttpClient<T,Impl>).
+        opts.CodeGeneration.TypeLoadMode = JasperFx.CodeGeneration.TypeLoadMode.Dynamic;
 
-        // Persist scheduled messages (and the durable outbox) to Postgres in production so
-        // jobs like Step1/Step2 feedback prompts survive restarts. Non-production stays
-        // in-memory unless Wolverine:Durable=true is set explicitly (keeps tests fast and
-        // sidesteps cross-test bleed in Pipeline-N shards).
-        var durable = builder.Environment.IsProduction()
-            || builder.Configuration.GetValue<bool>("Wolverine:Durable");
-        if (durable)
-        {
-            opts.PersistMessagesWithPostgresql(connectionString, schemaName: "wolverine");
-        }
+        // Durable outbox in every environment so scheduled messages survive
+        // restarts and handler commits stay atomic with outgoing envelopes.
+        opts.PersistMessagesWithPostgresql(connectionString, schemaName: WolverineConfig.Schema);
+        opts.UseEntityFrameworkCoreTransactions();
+        opts.Policies.AutoApplyTransactions();
     });
 
     var app = builder.Build();

@@ -9,9 +9,8 @@ public sealed class ClientRequestDraftRepository(HookDbContext db) : IClientRequ
     public Task<ClientRequestDraft?> GetAsync(string phone, CancellationToken ct = default) =>
         db.ClientRequestDrafts.FirstOrDefaultAsync(r => r.Phone == phone, ct);
 
-    public async Task UpsertAsync(ClientRequestDraft draft, CancellationToken ct = default)
-    {
-        await db.ClientRequestDrafts.UpsertAsync([draft.Phone], draft, (e, d) =>
+    public Task UpsertAsync(ClientRequestDraft draft, CancellationToken ct = default) =>
+        db.ClientRequestDrafts.UpsertAsync([draft.Phone], draft, (e, d) =>
         {
             e.Step = d.Step;
             e.DraftServiceSlug = d.DraftServiceSlug;
@@ -21,12 +20,7 @@ public sealed class ClientRequestDraftRepository(HookDbContext db) : IClientRequ
             e.DraftDescription = d.DraftDescription;
             e.UpdatedAt = d.UpdatedAt;
         }, ct);
-        await db.SaveChangesAsync(ct);
-    }
 
-    public async Task DeleteAsync(string phone, CancellationToken ct = default)
-    {
-        if (await db.ClientRequestDrafts.DeleteByKeyAsync([phone], ct))
-            await db.SaveChangesAsync(ct);
-    }
+    public Task DeleteAsync(string phone, CancellationToken ct = default) =>
+        db.ClientRequestDrafts.DeleteByKeyAsync([phone], ct);
 }

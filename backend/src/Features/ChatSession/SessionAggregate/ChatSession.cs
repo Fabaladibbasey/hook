@@ -8,9 +8,12 @@ public class ChatSession
     public DateTimeOffset ExpiresAt { get; private set; }
     public DateTimeOffset LastActivityAt { get; private set; }
 
-    public static ChatSession Create(TimeSpan ttl, DateTimeOffset now) => new()
+    public static ChatSession Create(TimeSpan ttl, DateTimeOffset now) =>
+        Create(Guid.NewGuid(), ttl, now);
+
+    public static ChatSession Create(Guid id, TimeSpan ttl, DateTimeOffset now) => new()
     {
-        Id = Guid.NewGuid(),
+        Id = id,
         CreatedAt = now,
         ExpiresAt = now + ttl,
         LastActivityAt = now

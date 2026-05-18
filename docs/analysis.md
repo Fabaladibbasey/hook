@@ -218,7 +218,7 @@ Fired on first of:
 
 ### Suppression
 
-- Max one Step 1 prompt per request (`AnyByRequestStepAsync` per-request dedupe — covers multi-PICK).
+- Max one Step 1 prompt per request — partial unique index `ux_match_feedback_request_step1` on `(RequestId, Step) WHERE Step='DidYouFind'` makes N-1 sibling fan-outs lose the insert race and exit silently.
 - Stale inbounds against a Step1/Step2 Pending row past `Feedback:ParseRetryWindow` (default 1h) are dropped silently — no AI fallback, no retry hint. Long-term sweeping of Pending rows is a separate concern.
 
 ### Implementation

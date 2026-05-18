@@ -47,7 +47,7 @@ public sealed class MatchPresenter(
 
         var ctx = new ReplyContext(
             Purpose: "present-top-matches",
-            RecentTurns: Array.Empty<ConversationTurn>(),
+            RecentTurns: [],
             LanguageHint: "en",
             Facts: facts);
 

@@ -16,6 +16,4 @@ public sealed class ServiceRequestRepository(HookDbContext db) : IServiceRequest
 
     public async Task AddAsync(ServiceRequest request, CancellationToken ct = default) =>
         await db.ServiceRequests.AddAsync(request, ct);
-
-    public Task SaveChangesAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
 }

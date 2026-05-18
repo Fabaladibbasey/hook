@@ -197,6 +197,9 @@ namespace Hook.Shared.Persistence.Data.Migrations
                     b.Property<DateTimeOffset?>("RepliedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Step")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -215,8 +218,10 @@ namespace Hook.Shared.Persistence.Data.Migrations
                         .HasDatabaseName("ux_match_feedback_pending")
                         .HasFilter("\"Answer\" = 'Pending'");
 
-                    b.HasIndex("Step", "MatchId")
-                        .HasDatabaseName("ix_match_feedback_step_match");
+                    b.HasIndex("RequestId", "Step")
+                        .IsUnique()
+                        .HasDatabaseName("ux_match_feedback_request_step1")
+                        .HasFilter("\"Step\" = 'DidYouFind'");
 
                     b.ToTable("match_feedback", (string)null);
                 });

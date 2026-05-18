@@ -802,7 +802,7 @@ Both finalize the request and publish `ServiceRequestCreated`.
 ### FB-001 — Step1 prompt fires at Step1InitialDelay after contact share  [P0] [both]
 
 **Preconditions:** `ContactExchanged` event published (CN-001).
-**Expected:** `ContactExchangedHandler` schedules `Step1FeedbackCheck` at `Feedback:Step1InitialDelay` (default 30 min in prod, 2 min in dev). When fired, `Step1FeedbackHandler` first calls `feedback.AnyByRequestStepAsync` (per-request dedupe — one prompt per request even if multiple matches were picked); then reserves a `MatchFeedback { MatchId, Step=DidYouFind }` Pending row via the partial unique index. Outbound is **AI-rephrased** from `Purpose: "feedback-step-1-did-you-find"` with instruction `"Ask if the client found a service provider. Mention they can reply YES or NO."` — assert the outbound contains an interrogative + tokens YES/NO/yes/no, NOT exact text. If `AiReplyHelper.TryGenerateAsync` returns null, the Pending row is deleted and **no outbound sent** (XC-004 path).
+**Expected:** `ContactExchangedHandler` schedules `Step1FeedbackCheck` at `Feedback:Step1InitialDelay` (default 30 min in prod, 2 min in dev). When fired, `Step1FeedbackHandler` reserves a `MatchFeedback { MatchId, RequestId, Step=DidYouFind }` Pending row — the per-match partial unique index blocks same-match double-fire AND the per-request partial unique on `(RequestId, Step=DidYouFind)` blocks cross-match siblings under a multi-PICK fan-out, so the client only ever sees one Step1 prompt per request; losers exit silently. The handler then publishes `Step1PromptDispatchRequested` to the post-commit outbox. The dispatch handler runs after the publishing tx commits: AI generation + WhatsApp send + cleanup-on-AI-null (DeletePending) all happen there. Outbound is **AI-rephrased** from `Purpose: "feedback-step-1-did-you-find"` with instruction `"Ask if the client found a service provider. Mention they can reply YES or NO."` — assert the outbound contains an interrogative + tokens YES/NO/yes/no, NOT exact text. If `AiReplyHelper.TryGenerateAsync` returns null, the dispatch handler deletes the Pending row and **no outbound sent** (XC-004 path).
 **Dev exec:** publish `Step1FeedbackCheck { matchId }` directly.
 **Non-dev exec:** same.
 
@@ -815,7 +815,7 @@ Both finalize the request and publish `ServiceRequestCreated`.
 ### FB-003 — Per-request dedupe on multi-pick  [P1] [both]
 
 **Preconditions:** client picked N>1 matches (PICK ALL).
-**Expected:** `ContactExchangedHandler` fires `Step1FeedbackCheck` once per match, but `Step1FeedbackHandler.AnyByRequestStepAsync` short-circuits N-1 of them. Exactly one Step1 prompt sent per request.
+**Expected:** `ContactExchangedHandler` fires `Step1FeedbackCheck` once per match. `Step1FeedbackHandler`'s `TryAddPendingAsync` loses the partial-unique-index race on `(RequestId, Step=DidYouFind)` for N-1 of them and exits silently. Exactly one Step1 prompt dispatched per request.
 **Dev exec / Non-dev exec:** standard.
 
 ### FB-004 — Step1 YES (single-pick) → Step2 fires immediately  [P1] [both]

@@ -24,4 +24,10 @@ public class OllamaOptions
     // Hard cap on user-supplied text passed into a fenced LLM prompt. Defends against
     // prompt-stuffing / context-padding attacks.
     public int MaxUserInputChars { get; init; } = 1000;
+
+    // Ollama `keep_alive` request field. Holds the model in memory between calls
+    // so the next inbound after an idle period hits the warm path instead of
+    // paying a 20-30s reload. Accepts Ollama duration syntax: "30m", "1h",
+    // "-1" (infinite), "0" (unload immediately).
+    public string KeepAlive { get; init; } = "30m";
 }

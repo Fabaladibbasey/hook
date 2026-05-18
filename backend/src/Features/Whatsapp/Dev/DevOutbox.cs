@@ -44,7 +44,7 @@ public sealed class DevOutbox(IOptions<DevWhatsappOptions> options) : IDevOutbox
     {
         lock (_recentLock)
         {
-            if (_count == 0) return Array.Empty<DevOutboxMessage>();
+            if (_count == 0) return [];
             var snap = new DevOutboxMessage[_count];
             // Oldest is at (_head - _count) mod _ringSize.
             var start = (_head - _count + _ringSize) % _ringSize;
