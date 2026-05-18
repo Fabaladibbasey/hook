@@ -1,6 +1,9 @@
+using Hook.Shared.Domain;
+using Hook.Shared.Pipeline.PostCommitSends;
+
 namespace Hook.Features.ChatSession.SessionAggregate;
 
-public class ChatSession
+public class ChatSession : AggregateRoot
 {
     public Guid Id { get; init; } = Guid.NewGuid();
     public ChatSessionStatus Status { get; private set; } = ChatSessionStatus.Active;
@@ -25,10 +28,12 @@ public class ChatSession
         LastActivityAt = now;
     }
 
-    public void End(DateTimeOffset now)
+    public void End(DateTimeOffset now, string reason, string? endedBy = null)
     {
         Status = ChatSessionStatus.Ended;
         ExpiresAt = now;
+        RaiseDomainEvent(new BroadcastChatEventRequested(
+            Id, ChatHubEvents.ChatEnded, new ChatEndedPayload(reason, endedBy)));
     }
 
     public void Expire(DateTimeOffset now)

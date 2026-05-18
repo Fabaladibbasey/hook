@@ -314,7 +314,6 @@ public sealed class ClientRequestOrchestrator(
             await drafts.DeleteAsync(phone.Value, ct);
 
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Looking for nearby providers…"));
-            await bus.PublishAsync(new ServiceRequestCreated(request.Id));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

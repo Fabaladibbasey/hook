@@ -9,7 +9,7 @@ namespace Hook.Shared.Pipeline.PostCommitSends;
 [JsonDerivedType(typeof(ChatExpiredPayload), nameof(ChatExpiredPayload))]
 public interface IChatEventPayload;
 
-public sealed record ChatEndedPayload(string Reason) : IChatEventPayload;
+public sealed record ChatEndedPayload(string Reason, string? EndedBy = null) : IChatEventPayload;
 public sealed record ChatExpiredPayload(string Reason) : IChatEventPayload;
 
 public static class ChatHubEvents

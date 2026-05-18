@@ -1,9 +1,10 @@
+using Hook.Shared.Domain;
 using NetTopologySuite.Geometries;
 using Location = Hook.Features.Geocoding.Models.Location;
 
 namespace Hook.Features.ServiceRequest.RequestAggregate;
 
-public class ServiceRequest
+public class ServiceRequest : AggregateRoot
 {
     public Guid Id { get; init; } = Guid.NewGuid();
     public required string ClientPhone { get; init; }
@@ -14,7 +15,7 @@ public class ServiceRequest
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     public ServiceRequestStatus Status { get; private set; } = ServiceRequestStatus.Open;
 
-    public List<string> ShownProviderPhones { get; private set; } = new();
+    public List<string> ShownProviderPhones { get; private set; } = [];
     public double CurrentRadiusKm { get; set; }
     public bool AutoExpandedOnce { get; set; }
     public bool SharePhoneNumber { get; private set; }
@@ -27,7 +28,9 @@ public class ServiceRequest
         string description,
         double initialRadiusKm,
         DateTimeOffset now,
-        bool sharePhoneNumber) => new()
+        bool sharePhoneNumber)
+    {
+        var request = new ServiceRequest
         {
             Id = Guid.NewGuid(),
             ClientPhone = clientPhone,
@@ -40,6 +43,9 @@ public class ServiceRequest
             CurrentRadiusKm = initialRadiusKm,
             SharePhoneNumber = sharePhoneNumber
         };
+        request.RaiseDomainEvent(new ServiceRequestCreated(request.Id));
+        return request;
+    }
 
     public void RecordShown(IEnumerable<string> providerPhones)
     {

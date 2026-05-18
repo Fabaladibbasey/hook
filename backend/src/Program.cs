@@ -19,6 +19,7 @@ using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Dev;
 using Hook.Features.Whatsapp.ReceiveWebhook;
 using Hook.Shared.Core;
+using Hook.Shared.Domain;
 using Hook.Shared.Persistence;
 using Hook.Shared.Persistence.Data;
 using Hook.Shared.Retention;
@@ -59,6 +60,12 @@ try
             npgsql.UseNetTopologySuite();
             npgsql.MigrationsAssembly(typeof(HookDbContext).Assembly.GetName().Name);
         }));
+
+    // Wolverine scrapes raised events from tracked AggregateRoot entities and
+    // publishes them at EF tx commit — same path as direct PublishAsync, so
+    // outgoing envelopes enrol in the durable outbox alongside the entity write.
+    builder.Services.AddSingleton<IDomainEventScraper>(
+        new DomainEventScraper<AggregateRoot, IDomainEvent>(agg => agg.DequeueEvents()));
 
     builder.Services.AddWhatsapp(builder.Configuration);
     builder.Services.AddConversationAi(builder.Configuration);
@@ -127,6 +134,11 @@ try
         // restarts and handler commits stay atomic with outgoing envelopes.
         opts.PersistMessagesWithPostgresql(connectionString, schemaName: WolverineConfig.Schema);
         opts.UseEntityFrameworkCoreTransactions();
+        // Drains AggregateRoot.DequeueEvents() from tracked entities during the
+        // AutoApplyTransactions middleware commit. Note: only fires inside a Wolverine
+        // handler — non-handler SaveChanges (e.g. ChatHub.EndChat) must drain manually
+        // via IMessageBus.PublishAsync after SaveChanges.
+        opts.PublishDomainEventsFromEntityFrameworkCore();
         opts.Policies.AutoApplyTransactions();
     });
 
