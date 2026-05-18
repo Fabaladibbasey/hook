@@ -77,23 +77,19 @@ public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
     public async Task UpsertStatsAsync(ProviderStats stats, CancellationToken ct = default)
     {
         var entry = db.Entry(stats);
-        if (entry.State == EntityState.Detached)
+        if (entry.State != EntityState.Detached) return;
+
+        var existing = await db.ProviderStats.FindAsync([stats.ProviderPhone], ct);
+        if (existing is null)
         {
-            var existing = await db.ProviderStats.FindAsync([stats.ProviderPhone], ct);
-            if (existing is null)
-            {
-                db.ProviderStats.Add(stats);
-            }
-            else if (!ReferenceEquals(existing, stats))
-            {
-                db.Entry(existing).CurrentValues.SetValues(stats);
-            }
+            db.ProviderStats.Add(stats);
         }
-        await db.SaveChangesAsync(ct);
+        else if (!ReferenceEquals(existing, stats))
+        {
+            db.Entry(existing).CurrentValues.SetValues(stats);
+        }
     }
 
     public Task DeleteStatsAsync(string providerPhone, CancellationToken ct = default) =>
         db.ProviderStats.Where(s => s.ProviderPhone == providerPhone).ExecuteDeleteAsync(ct);
-
-    public Task SaveChangesAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
 }

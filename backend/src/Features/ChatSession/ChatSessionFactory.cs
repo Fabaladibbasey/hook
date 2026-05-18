@@ -23,7 +23,6 @@ public sealed class ChatSessionFactory(
 
         await chats.AddSessionAsync(session, ct);
         await chats.AddParticipantsAsync([clientParticipant, providerParticipant], ct);
-        await chats.SaveChangesAsync(ct);
 
         var baseUrl = opts.PublicChatBaseUrl.TrimEnd('/');
         return new ChatLinks(

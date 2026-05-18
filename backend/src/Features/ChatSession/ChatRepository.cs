@@ -53,6 +53,4 @@ public sealed class ChatRepository(HookDbContext db) : IChatRepository
 
     public async Task AddAccessLogAsync(ChatAccessLog log, CancellationToken ct = default) =>
         await db.ChatAccessLogs.AddAsync(log, ct);
-
-    public Task SaveChangesAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
 }

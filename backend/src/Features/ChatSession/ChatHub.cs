@@ -1,11 +1,12 @@
 using Hook.Features.ChatLifecycle;
 using Hook.Features.ChatSession.ParticipantAggregate;
 using Hook.Features.ChatSession.SessionAggregate;
+using Hook.Shared.Persistence.Data;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Hook.Features.ChatSession;
 
-public sealed class ChatHub(IChatRepository chats, ChatScheduler scheduler, ILogger<ChatHub> logger, TimeProvider clock) : Hub
+public sealed class ChatHub(IChatRepository chats, HookDbContext db, ChatScheduler scheduler, ILogger<ChatHub> logger, TimeProvider clock) : Hub
 {
     public override async Task OnConnectedAsync()
     {
@@ -65,7 +66,7 @@ public sealed class ChatHub(IChatRepository chats, ChatScheduler scheduler, ILog
         if (participant is null) return;
 
         participant.SetPublicKey(spki);
-        await chats.SaveChangesAsync();
+        await db.SaveChangesAsync();
 
         var peer = await chats.GetPeerAsync(chatId, participantId);
         if (peer?.PublicKey is { Length: > 0 } peerKey)
@@ -146,7 +147,7 @@ public sealed class ChatHub(IChatRepository chats, ChatScheduler scheduler, ILog
 
         var now = clock.GetUtcNow();
         session.Touch(now);
-        await chats.SaveChangesAsync();
+        await db.SaveChangesAsync();
         await scheduler.ScheduleIdleChecksAsync(chatId, now);
 
         await Clients.OthersInGroup(ChatGroup(chatId)).SendAsync(ChatHubConstants.Events.MessageReceived, ToWire(msg));
@@ -177,7 +178,7 @@ public sealed class ChatHub(IChatRepository chats, ChatScheduler scheduler, ILog
         }
 
         session.End(clock.GetUtcNow());
-        await chats.SaveChangesAsync();
+        await db.SaveChangesAsync();
 
         await Clients.Group(ChatGroup(chatId)).SendAsync(ChatHubConstants.Events.ChatEnded, new { reason = "user", endedBy = role });
         logger.LogInformation("Chat {ChatId} ended by {Role} ({ParticipantId})", chatId, role, participant.Id);

@@ -1,4 +1,5 @@
 using Hook.Features.ChatSession.AccessLog;
+using Hook.Shared.Persistence.Data;
 
 namespace Hook.Features.ChatSession.OpenChat;
 
@@ -9,6 +10,7 @@ public static class OpenChatEndpoint
         routes.MapGet("/api/chat/open", async (
             string token,
             IChatRepository chats,
+            HookDbContext db,
             HttpRequest request,
             ILogger<OpenChatLog> logger,
             CancellationToken ct) =>
@@ -30,7 +32,7 @@ public static class OpenChatEndpoint
                 IpAddress = ip,
                 DeviceInfo = ua
             }, ct);
-            await chats.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct);
 
             logger.LogInformation("Chat link opened: chatId={ChatId} participantId={ParticipantId}",
                 participant.ChatId, participant.Id);

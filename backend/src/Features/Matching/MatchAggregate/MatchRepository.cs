@@ -65,6 +65,4 @@ public sealed class MatchRepository(HookDbContext db) : IMatchRepository
             .ExecuteUpdateAsync(u => u.SetProperty(m => m.ChatId, chatId), ct);
         return rows == 1;
     }
-
-    public Task SaveChangesAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
 }

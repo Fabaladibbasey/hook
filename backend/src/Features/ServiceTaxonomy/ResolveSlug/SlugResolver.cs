@@ -23,7 +23,6 @@ public sealed class SlugResolver(
         if (existing is not null)
         {
             existing.RememberRawExample(rawExample ?? proposedSlug);
-            await repository.SaveChangesAsync(ct);
             return new ResolveSlugResult(existing.Slug, SlugResolution.ReturnedExisting, 1.0);
         }
 
@@ -62,7 +61,6 @@ public sealed class SlugResolver(
 
         var created = Service.Create(normalized, rawExample ?? proposedSlug);
         await repository.AddAsync(created, ct);
-        await repository.SaveChangesAsync(ct);
 
         var resolution = top is not null && topSim >= opts.AiJudgeThreshold
             ? SlugResolution.AiJudgedNew
@@ -83,7 +81,6 @@ public sealed class SlugResolver(
         {
             existing.RememberRawExample(rawExample);
         }
-        await repository.SaveChangesAsync(ct);
         return new ResolveSlugResult(slug, resolution, topSim);
     }
 

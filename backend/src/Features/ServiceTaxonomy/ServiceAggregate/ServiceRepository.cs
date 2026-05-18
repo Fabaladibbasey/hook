@@ -22,6 +22,4 @@ public sealed class ServiceRepository(HookDbContext db) : IServiceRepository
 
     public async Task AddAsync(Service service, CancellationToken ct = default) =>
         await db.Services.AddAsync(service, ct);
-
-    public Task SaveChangesAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
 }

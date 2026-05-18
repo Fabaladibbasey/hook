@@ -25,11 +25,12 @@ public sealed class ChatHubTests : PipelineTestBase
     {
         await using var scope = _fx.Factory.Services.CreateAsyncScope();
         var factory = scope.ServiceProvider.GetRequiredService<ChatSessionFactory>();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
         var clientPhone = UniquePhone();
         var providerPhone = UniquePhone();
         await factory.CreateAsync(clientPhone, providerPhone);
+        await db.SaveChangesAsync();
 
-        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
         var participants = await db.ChatParticipants
             .Where(p => p.Phone == clientPhone || p.Phone == providerPhone)
             .ToListAsync();
@@ -134,11 +135,18 @@ public sealed class ChatHubTests : PipelineTestBase
 
         var senderEcho = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var receivedTcs = new TaskCompletionSource<WireMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var providerReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         clientConn.On<object>(ChatHubConstants.Events.MessageReceived, _ => senderEcho.TrySetResult());
         providerConn.On<WireMessage>(ChatHubConstants.Events.MessageReceived, m => receivedTcs.TrySetResult(m));
+        providerConn.On<object>(ChatHubConstants.Events.HistoryLoaded, _ => providerReady.TrySetResult());
 
         await clientConn.StartAsync();
         await providerConn.StartAsync();
+
+        // HistoryLoaded fires after Groups.AddToGroupAsync in ChatHub.OnConnectedAsync, so awaiting
+        // it ensures the provider is in the broadcast group before the client sends.
+        var ready = await Task.WhenAny(providerReady.Task, Task.Delay(Timeout));
+        ready.ShouldBe(providerReady.Task);
 
         var dto = new SendMessageDto(Guid.NewGuid(), Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 1);
         await clientConn.InvokeAsync("SendMessage", dto);

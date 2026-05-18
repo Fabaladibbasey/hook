@@ -15,5 +15,4 @@ public interface IMatchRepository
     Task AddRangeAsync(IEnumerable<Match> matches, CancellationToken ct = default);
     Task<bool> TryClaimPickAsync(PickClaim claim, CancellationToken ct = default);
     Task<bool> TryClaimChatRoutingAsync(Guid matchId, Guid chatId, CancellationToken ct = default);
-    Task SaveChangesAsync(CancellationToken ct = default);
 }

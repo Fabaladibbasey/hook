@@ -29,6 +29,7 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         var stats = ProviderStats.Initial(phone, DateTimeOffset.UtcNow);
         stats.RecordOutcome(success: true, DateTimeOffset.UtcNow);
         await repo.UpsertStatsAsync(stats);
+        await db.SaveChangesAsync();
 
         var loaded = await db.ProviderStats.AsNoTracking()
             .FirstOrDefaultAsync(s => s.ProviderPhone == phone);
@@ -44,17 +45,21 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         await using (var scope = _fx.Factory.Services.CreateAsyncScope())
         {
             var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+            var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
             var initial = ProviderStats.Initial(phone, DateTimeOffset.UtcNow);
             await repo.UpsertStatsAsync(initial);
+            await db.SaveChangesAsync();
         }
 
         await using (var scope = _fx.Factory.Services.CreateAsyncScope())
         {
             var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+            var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
             var brandNew = ProviderStats.Initial(phone, DateTimeOffset.UtcNow);
             brandNew.RecordOutcome(success: true, DateTimeOffset.UtcNow);
             brandNew.RecordOutcome(success: true, DateTimeOffset.UtcNow);
             await repo.UpsertStatsAsync(brandNew);
+            await db.SaveChangesAsync();
         }
 
         await using (var scope = _fx.Factory.Services.CreateAsyncScope())
@@ -76,7 +81,9 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
 
         await using var seedScope = _fx.Factory.Services.CreateAsyncScope();
         var seedRepo = seedScope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var seedDb = seedScope.ServiceProvider.GetRequiredService<HookDbContext>();
         await seedRepo.UpsertStatsAsync(ProviderStats.Initial(phone, now));
+        await seedDb.SaveChangesAsync();
 
         // Two independent scopes load the same row, mutate, save. The second save
         // must fail because the LastUpdated concurrency token shifts on the first.
@@ -84,6 +91,8 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         await using var scopeB = _fx.Factory.Services.CreateAsyncScope();
         var repoA = scopeA.ServiceProvider.GetRequiredService<IFeedbackRepository>();
         var repoB = scopeB.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var dbA = scopeA.ServiceProvider.GetRequiredService<HookDbContext>();
+        var dbB = scopeB.ServiceProvider.GetRequiredService<HookDbContext>();
 
         var statsA = await repoA.GetStatsAsync(phone);
         var statsB = await repoB.GetStatsAsync(phone);
@@ -92,10 +101,11 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
 
         statsA!.RecordOutcome(true, now.AddSeconds(1));
         await repoA.UpsertStatsAsync(statsA);
+        await dbA.SaveChangesAsync();
 
         statsB!.RecordOutcome(false, now.AddSeconds(2));
-        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(
-            () => repoB.UpsertStatsAsync(statsB));
+        await repoB.UpsertStatsAsync(statsB);
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => dbB.SaveChangesAsync());
     }
 
     [Fact]
@@ -109,12 +119,14 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
 
         var stats = ProviderStats.Initial(phone, DateTimeOffset.UtcNow);
         await repo.UpsertStatsAsync(stats);
+        await db.SaveChangesAsync();
 
         // Re-load via the repository so it is tracked, mutate, and upsert again.
         var tracked = await repo.GetStatsAsync(phone);
         Assert.NotNull(tracked);
         tracked!.RecordOutcome(success: false, DateTimeOffset.UtcNow);
         await repo.UpsertStatsAsync(tracked);
+        await db.SaveChangesAsync();
 
         var loaded = await db.ProviderStats.AsNoTracking()
             .FirstOrDefaultAsync(s => s.ProviderPhone == phone);

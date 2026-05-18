@@ -1,4 +1,5 @@
 using Hook.Features.ProviderAvailability.AvailabilityAggregate;
+using Hook.Shared.Persistence.Data;
 using Microsoft.Extensions.Options;
 using ProviderAvailabilityEntity = Hook.Features.ProviderAvailability.AvailabilityAggregate.ProviderAvailability;
 
@@ -11,6 +12,7 @@ public sealed record DevProviderSeedReport(
 
 public sealed class DevProviderSeeder(
     IProviderAvailabilityRepository repository,
+    HookDbContext db,
     IOptions<DevProviderSeedOptions> options,
     TimeProvider clock,
     ILogger<DevProviderSeeder> logger)
@@ -53,7 +55,7 @@ public sealed class DevProviderSeeder(
             phones.Add(spec.Phone);
         }
 
-        await repository.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
 
         logger.LogInformation(
             "[DEV] Provider seed complete. Seeded={Seeded} Refreshed={Refreshed} Anchor=({Lat},{Lng})",
