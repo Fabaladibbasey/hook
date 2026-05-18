@@ -13,10 +13,10 @@ namespace Hook.UnitTests.Feedback;
 
 public class Step2FeedbackHandlerTests
 {
-    private readonly Dictionary<Guid, MatchEntity> _matches = new();
-    private readonly Dictionary<Guid, ServiceRequestEntity> _requests = new();
-    private readonly List<MatchFeedback> _added = new();
-    private readonly List<Step2PromptDispatchRequested> _published = new();
+    private readonly Dictionary<Guid, MatchEntity> _matches = [];
+    private readonly Dictionary<Guid, ServiceRequestEntity> _requests = [];
+    private readonly List<MatchFeedback> _added = [];
+    private readonly List<Step2PromptDispatchRequested> _published = [];
 
     private readonly Mock<IFeedbackRepository> _feedbackMock = new();
     private readonly Mock<IMatchRepository> _matchesMock = new();

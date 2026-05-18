@@ -4,7 +4,7 @@ public class Service
 {
     public required string Slug { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
-    public List<string> RawExamples { get; private set; } = new();
+    public List<string> RawExamples { get; private set; } = [];
 
     public void RememberRawExample(string raw)
     {

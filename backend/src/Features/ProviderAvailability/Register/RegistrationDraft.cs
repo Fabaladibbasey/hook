@@ -14,7 +14,7 @@ public class RegistrationDraft
 {
     public required string Phone { get; init; }
     public RegistrationStep Step { get; set; } = RegistrationStep.AwaitingServices;
-    public List<string> DraftServices { get; set; } = new();
+    public List<string> DraftServices { get; set; } = [];
     public double? DraftLatitude { get; set; }
     public double? DraftLongitude { get; set; }
     public string DraftFormattedAddress { get; set; } = string.Empty;

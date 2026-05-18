@@ -75,16 +75,16 @@ public class FeedbackResponseServiceTests
 
     // -- Fixture for service-level tests ---------------------------------------
 
-    private readonly Dictionary<Guid, MatchEntity> _matches = new();
-    private readonly Dictionary<Guid, List<MatchEntity>> _requestMatches = new();
+    private readonly Dictionary<Guid, MatchEntity> _matches = [];
+    private readonly Dictionary<Guid, List<MatchEntity>> _requestMatches = [];
 
-    private readonly List<MatchFeedback> _added = new();
-    private readonly List<Guid> _deleted = new();
-    private readonly List<(Guid Id, FeedbackAnswer Answer)> _claimed = new();
-    private readonly List<(Guid Id, FeedbackAnswer Answer, DateTimeOffset EtaUtc)> _claimedWithEta = new();
-    private readonly List<(PhoneNumber To, string Body)> _sent = new();
-    private readonly List<object> _published = new();
-    private readonly List<(object Message, TimeSpan Delay)> _scheduled = new();
+    private readonly List<MatchFeedback> _added = [];
+    private readonly List<Guid> _deleted = [];
+    private readonly List<(Guid Id, FeedbackAnswer Answer)> _claimed = [];
+    private readonly List<(Guid Id, FeedbackAnswer Answer, DateTimeOffset EtaUtc)> _claimedWithEta = [];
+    private readonly List<(PhoneNumber To, string Body)> _sent = [];
+    private readonly List<object> _published = [];
+    private readonly List<(object Message, TimeSpan Delay)> _scheduled = [];
 
     private readonly Mock<IFeedbackRepository> _feedbackMock = new();
     private readonly Mock<IMatchRepository> _matchesMock = new();
@@ -185,7 +185,7 @@ public class FeedbackResponseServiceTests
             ServiceSlug = "plumbing"
         };
         _matches[m.Id] = m;
-        _requestMatches[m.RequestId] = new List<MatchEntity> { m };
+        _requestMatches[m.RequestId] = [m];
         return m;
     }
 
@@ -203,7 +203,7 @@ public class FeedbackResponseServiceTests
         };
         _matches[sibling.Id] = sibling;
         // Production order: Score DESC -> sibling first, anchor second.
-        _requestMatches[anchor.RequestId] = new List<MatchEntity> { sibling, anchor };
+        _requestMatches[anchor.RequestId] = [sibling, anchor];
         return sibling;
     }
 

@@ -76,7 +76,7 @@ public class CorrelationIdMiddlewareTests
 
     private sealed class CapturingSink : ILogEventSink
     {
-        public List<LogEvent> Events { get; } = new();
+        public List<LogEvent> Events { get; } = [];
         public void Emit(LogEvent logEvent) => Events.Add(logEvent);
     }
 }

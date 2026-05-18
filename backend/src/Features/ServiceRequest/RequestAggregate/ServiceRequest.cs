@@ -14,7 +14,7 @@ public class ServiceRequest
     public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     public ServiceRequestStatus Status { get; private set; } = ServiceRequestStatus.Open;
 
-    public List<string> ShownProviderPhones { get; private set; } = new();
+    public List<string> ShownProviderPhones { get; private set; } = [];
     public double CurrentRadiusKm { get; set; }
     public bool AutoExpandedOnce { get; set; }
     public bool SharePhoneNumber { get; private set; }

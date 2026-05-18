@@ -31,9 +31,9 @@ public class ChatRoutingRequestedHandlerTests
     private const double Lon = -16.6;
     private const int MatchPosition = 2;
 
-    private readonly Dictionary<Guid, MatchEntity> _matches = new();
-    private readonly List<ChatSession> _sessions = new();
-    private readonly List<(string To, string Body)> _sent = new();
+    private readonly Dictionary<Guid, MatchEntity> _matches = [];
+    private readonly List<ChatSession> _sessions = [];
+    private readonly List<(string To, string Body)> _sent = [];
 
     private readonly Mock<IMatchRepository> _matchesMock;
     private readonly Mock<IChatRepository> _chatsMock;
