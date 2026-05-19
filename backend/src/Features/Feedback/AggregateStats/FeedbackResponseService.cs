@@ -102,12 +102,8 @@ public sealed class FeedbackResponseService(
         // and claim Step1. Reserve-then-publish guarantees that on retry the Pending
         // row is already there and TryAddPendingAsync's unique-collision short-circuits
         // cleanly.
-        var winner = new MatchFeedback
-        {
-            MatchId = pending.MatchId,
-            RequestId = pending.RequestId,
-            Step = FeedbackStep.IdentifyWinner
-        };
+        var winner = MatchFeedback.CreatePending(
+            pending.MatchId, pending.RequestId, FeedbackStep.IdentifyWinner, now);
         if (!await feedback.TryAddPendingAsync(winner, ct)) return;
 
         var prompt = $"Which provider worked out? Reply with the number — {PickedMatchListFormatter.Format(picked)}.";
@@ -172,12 +168,8 @@ public sealed class FeedbackResponseService(
             // Pillar B: reserve AwaitingEta and ask the client when they expect to
             // finish. The next inbound is routed through HandleAwaitingEtaAsync;
             // failure to parse falls back to Step2InProgressRecheckDelay.
-            var eta = new MatchFeedback
-            {
-                MatchId = pending.MatchId,
-                RequestId = pending.RequestId,
-                Step = FeedbackStep.AwaitingEta
-            };
+            var eta = MatchFeedback.CreatePending(
+                pending.MatchId, pending.RequestId, FeedbackStep.AwaitingEta, now);
             if (!await feedback.TryAddPendingAsync(eta, ct)) return;
 
             await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,

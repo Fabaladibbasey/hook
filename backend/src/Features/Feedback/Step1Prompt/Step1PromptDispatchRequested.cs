@@ -8,4 +8,4 @@ public sealed record Step1PromptDispatchRequested(
     Guid RequestId,
     PhoneNumber ClientPhone,
     string ServiceSlug,
-    string? PickedFormatted);
+    string PickedFormatted);

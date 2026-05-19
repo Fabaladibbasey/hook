@@ -1,4 +1,5 @@
 using Hook.Features.Geocoding.Models;
+using Hook.Features.ServiceRequest;
 using Hook.Features.ServiceRequest.RequestAggregate;
 using Shouldly;
 
@@ -36,6 +37,21 @@ public class ServiceRequestTests
             sharePhoneNumber: true);
 
         request.SharePhoneNumber.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Create_RaisesServiceRequestCreated()
+    {
+        var request = Features.ServiceRequest.RequestAggregate.ServiceRequest.Create(
+            "+12025550123", "plumbing", new Location(0, 0), "x", string.Empty, 5, DateTimeOffset.UtcNow,
+            sharePhoneNumber: false);
+
+        var events = request.DequeueEvents();
+        events.Count.ShouldBe(1);
+        var evt = events[0].ShouldBeOfType<ServiceRequestCreated>();
+        evt.RequestId.ShouldBe(request.Id);
+
+        request.DequeueEvents().Count.ShouldBe(0);
     }
 
     [Fact]

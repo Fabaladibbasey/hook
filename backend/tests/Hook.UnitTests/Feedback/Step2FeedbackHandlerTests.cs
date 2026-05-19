@@ -51,23 +51,29 @@ public class Step2FeedbackHandlerTests
             .Returns(ValueTask.CompletedTask);
     }
 
+    private readonly TimeProvider _clock = TimeProvider.System;
+
     private Step2FeedbackHandler Build() =>
-        new(_feedbackMock.Object, _matchesMock.Object, _requestsMock.Object);
+        new(_feedbackMock.Object, _matchesMock.Object, _requestsMock.Object, _clock);
 
     private MatchEntity SeedMatch()
     {
-        var match = new MatchEntity
-        {
-            RequestId = Guid.NewGuid(),
-            ProviderPhone = "+2203331234",
-            ServiceSlug = "plumbing"
-        };
+        var match = MatchEntity.Create(
+            Guid.NewGuid(), "+2203331234", "plumbing", 0, 0, _clock.GetUtcNow());
         _matches[match.Id] = match;
         _requests[match.RequestId] = ServiceRequestEntity.Create(
             "+2203339999", "plumbing",
             new Location(13.45, -16.6), "Banjul",
-            "req-test", 5.0, DateTimeOffset.UtcNow, false);
+            "req-test", 5.0, _clock.GetUtcNow(), false);
         return match;
+    }
+
+    private MatchFeedback CompletedJob(MatchEntity match, FeedbackAnswer answer)
+    {
+        var fb = MatchFeedback.CreatePending(
+            match.Id, match.RequestId, FeedbackStep.JobCompleted, _clock.GetUtcNow());
+        fb.Resolve(answer, _clock.GetUtcNow());
+        return fb;
     }
 
     [Fact]
@@ -133,13 +139,7 @@ public class Step2FeedbackHandlerTests
     public async Task Handle_AlreadyCompletedYes_DoesNotRePrompt()
     {
         var match = SeedMatch();
-        _latestJobCompleted = new MatchFeedback
-        {
-            MatchId = match.Id,
-            RequestId = match.RequestId,
-            Step = FeedbackStep.JobCompleted,
-            Answer = FeedbackAnswer.Yes
-        };
+        _latestJobCompleted = CompletedJob(match, FeedbackAnswer.Yes);
 
         await Build().Handle(new Step2FeedbackCheck(match.Id), _busMock.Object, CancellationToken.None);
 
@@ -151,13 +151,7 @@ public class Step2FeedbackHandlerTests
     public async Task Handle_AlreadyCompletedNo_DoesNotRePrompt()
     {
         var match = SeedMatch();
-        _latestJobCompleted = new MatchFeedback
-        {
-            MatchId = match.Id,
-            RequestId = match.RequestId,
-            Step = FeedbackStep.JobCompleted,
-            Answer = FeedbackAnswer.No
-        };
+        _latestJobCompleted = CompletedJob(match, FeedbackAnswer.No);
 
         await Build().Handle(new Step2FeedbackCheck(match.Id), _busMock.Object, CancellationToken.None);
 
@@ -169,13 +163,7 @@ public class Step2FeedbackHandlerTests
     public async Task Handle_PreviousJobCompletedInProgress_StillPublishes()
     {
         var match = SeedMatch();
-        _latestJobCompleted = new MatchFeedback
-        {
-            MatchId = match.Id,
-            RequestId = match.RequestId,
-            Step = FeedbackStep.JobCompleted,
-            Answer = FeedbackAnswer.InProgress
-        };
+        _latestJobCompleted = CompletedJob(match, FeedbackAnswer.InProgress);
 
         await Build().Handle(new Step2FeedbackCheck(match.Id), _busMock.Object, CancellationToken.None);
 

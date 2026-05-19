@@ -1,12 +1,15 @@
 using Hook.Features.ChatLifecycle;
+using Hook.Features.ChatLifecycle.EndChat;
 using Hook.Features.ChatSession.ParticipantAggregate;
 using Hook.Features.ChatSession.SessionAggregate;
 using Hook.Shared.Persistence.Data;
+using Hook.Shared.Pipeline.PostCommitSends;
 using Microsoft.AspNetCore.SignalR;
+using Wolverine;
 
 namespace Hook.Features.ChatSession;
 
-public sealed class ChatHub(IChatRepository chats, HookDbContext db, ChatScheduler scheduler, ILogger<ChatHub> logger, TimeProvider clock) : Hub
+public sealed class ChatHub(IChatRepository chats, HookDbContext db, ChatScheduler scheduler, IMessageBus bus, ILogger<ChatHub> logger, TimeProvider clock) : Hub
 {
     public override async Task OnConnectedAsync()
     {
@@ -120,15 +123,14 @@ public sealed class ChatHub(IChatRepository chats, HookDbContext db, ChatSchedul
             return;
         }
 
-        var msg = new ChatMessage
-        {
-            Id = dto.MessageId,
-            ChatId = chatId,
-            ParticipantId = participantId,
-            Sequence = dto.Sequence,
-            Ciphertext = ciphertext,
-            Nonce = nonce
-        };
+        var msg = ChatMessage.Create(
+            id: dto.MessageId,
+            chatId: chatId,
+            participantId: participantId,
+            sequence: dto.Sequence,
+            ciphertext: ciphertext,
+            nonce: nonce,
+            now: clock.GetUtcNow());
 
         var inserted = await chats.TryAddMessageAsync(msg);
         if (!inserted)
@@ -169,19 +171,11 @@ public sealed class ChatHub(IChatRepository chats, HookDbContext db, ChatSchedul
         if (participant is null) return;
         var role = (Context.Items[ChatHubConstants.Items.Role] as string) ?? participant.Role.ToString();
 
-        var session = await chats.GetSessionAsync(chatId);
-        if (session is null) return;
-        if (session.Status != ChatSessionStatus.Active)
-        {
-            await Clients.Caller.SendAsync(ChatHubConstants.Events.ChatEnded, new { reason = "already-ended", endedBy = (string?)null });
-            return;
-        }
-
-        session.End(clock.GetUtcNow());
-        await db.SaveChangesAsync();
-
-        await Clients.Group(ChatGroup(chatId)).SendAsync(ChatHubConstants.Events.ChatEnded, new { reason = "user", endedBy = role });
-        logger.LogInformation("Chat {ChatId} ended by {Role} ({ParticipantId})", chatId, role, participant.Id);
+        var outcome = await bus.InvokeAsync<EndChatOutcome>(new EndChatCommand(chatId, EndChatReason.User, role));
+        if (outcome.Result == EndChatResult.AlreadyEnded)
+            await Clients.Caller.SendAsync(ChatHubConstants.Events.ChatEnded, new ChatEndedPayload(EndChatReason.AlreadyEnded.ToWire()));
+        else if (outcome.Result == EndChatResult.Ended)
+            logger.LogInformation("Chat {ChatId} ended by {Role} ({ParticipantId})", chatId, role, participant.Id);
     }
 
     private async Task<ChatParticipant?> EnsureCurrentSessionAsync(Guid sessionId)

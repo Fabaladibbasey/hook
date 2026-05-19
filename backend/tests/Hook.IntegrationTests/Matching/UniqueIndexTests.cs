@@ -27,20 +27,10 @@ public sealed class UniqueIndexTests : PipelineTestBase
         await db.SaveChangesAsync();
 
         var providerPhone = $"+220{Guid.NewGuid().ToString("N")[..8]}";
-        db.Matches.Add(new Match
-        {
-            RequestId = request.Id,
-            ProviderPhone = providerPhone,
-            ServiceSlug = "plumbing"
-        });
+        db.Matches.Add(Match.Create(request.Id, providerPhone, "plumbing", 0, 0, DateTimeOffset.UtcNow));
         await db.SaveChangesAsync();
 
-        db.Matches.Add(new Match
-        {
-            RequestId = request.Id,
-            ProviderPhone = providerPhone,
-            ServiceSlug = "plumbing"
-        });
+        db.Matches.Add(Match.Create(request.Id, providerPhone, "plumbing", 0, 0, DateTimeOffset.UtcNow));
 
         var ex = await Should.ThrowAsync<DbUpdateException>(() => db.SaveChangesAsync());
         ex.InnerException.ShouldBeOfType<Npgsql.PostgresException>()

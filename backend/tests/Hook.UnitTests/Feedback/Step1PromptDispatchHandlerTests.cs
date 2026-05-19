@@ -21,7 +21,7 @@ public class Step1PromptDispatchHandlerTests
 
     private static PhoneNumber Phone() => PhoneNumber.Parse("+220300001");
 
-    private static Step1PromptDispatchRequested Req(string? picked = null) => new(
+    private static Step1PromptDispatchRequested Req(string picked = "") => new(
         FeedbackId: Guid.NewGuid(),
         MatchId: Guid.NewGuid(),
         RequestId: Guid.NewGuid(),

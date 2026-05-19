@@ -12,6 +12,7 @@ public static class OpenChatEndpoint
             IChatRepository chats,
             HookDbContext db,
             HttpRequest request,
+            TimeProvider clock,
             ILogger<OpenChatLog> logger,
             CancellationToken ct) =>
         {
@@ -25,13 +26,12 @@ public static class OpenChatEndpoint
             var ip = request.HttpContext.Connection.RemoteIpAddress?.ToString() ?? string.Empty;
             var ua = request.Headers.UserAgent.ToString();
 
-            await chats.AddAccessLogAsync(new ChatAccessLog
-            {
-                ChatId = participant.ChatId,
-                ParticipantId = participant.Id,
-                IpAddress = ip,
-                DeviceInfo = ua
-            }, ct);
+            await chats.AddAccessLogAsync(ChatAccessLog.Record(
+                chatId: participant.ChatId,
+                participantId: participant.Id,
+                ipAddress: ip,
+                deviceInfo: ua,
+                now: clock.GetUtcNow()), ct);
             await db.SaveChangesAsync(ct);
 
             logger.LogInformation("Chat link opened: chatId={ChatId} participantId={ParticipantId}",

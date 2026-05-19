@@ -53,16 +53,13 @@ public sealed class MatchingService(
         HookMetrics.MatchesTotal.Add(scored.Count,
             new KeyValuePair<string, object?>("service", request.ServiceSlug));
 
-        var newMatches = scored.Select(s => new MatchEntity
-        {
-            Id = Guid.NewGuid(),
-            RequestId = request.Id,
-            ProviderPhone = s.Candidate.Phone,
-            ServiceSlug = request.ServiceSlug,
-            DistanceKm = s.Candidate.DistanceKm,
-            Score = s.Score,
-            CreatedAt = now
-        }).ToList();
+        var newMatches = scored.Select(s => MatchEntity.Create(
+            requestId: request.Id,
+            providerPhone: s.Candidate.Phone,
+            serviceSlug: request.ServiceSlug,
+            distanceKm: s.Candidate.DistanceKm,
+            score: s.Score,
+            now: now)).ToList();
 
         await matches.AddRangeAsync(newMatches, ct);
 

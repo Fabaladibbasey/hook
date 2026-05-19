@@ -1,9 +1,10 @@
+using Hook.Shared.Domain;
 using NetTopologySuite.Geometries;
 using Location = Hook.Features.Geocoding.Models.Location;
 
 namespace Hook.Features.ProviderAvailability.AvailabilityAggregate;
 
-public class ProviderAvailability
+public class ProviderAvailability : IAggregateRoot
 {
     public required string Phone { get; init; }
     public List<string> Services { get; private set; } = [];

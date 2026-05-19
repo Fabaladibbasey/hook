@@ -76,8 +76,11 @@ namespace Hook.Shared.Persistence.Data.Migrations
                         .HasColumnType("bigint");
 
                     b.Property<string>("Phone")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
                         .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("");
 
                     b.Property<byte[]>("PublicKey")
                         .HasMaxLength(200)
@@ -120,9 +123,7 @@ namespace Hook.Shared.Persistence.Data.Migrations
                         .HasColumnType("bytea");
 
                     b.Property<DateTimeOffset>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasDefaultValueSql("now()");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<byte[]>("Nonce")
                         .IsRequired()

@@ -152,14 +152,8 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
 
         var (request, match) = await SeedMatchAsync(db, clientPhone);
-        var fb = new MatchFeedback
-        {
-            MatchId = match.Id,
-            RequestId = match.RequestId,
-            Step = FeedbackStep.DidYouFind,
-            Answer = FeedbackAnswer.Yes,
-            RepliedAt = DateTimeOffset.UtcNow
-        };
+        var fb = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
+        fb.Resolve(FeedbackAnswer.Yes, DateTimeOffset.UtcNow);
         db.MatchFeedback.Add(fb);
         await db.SaveChangesAsync();
 
@@ -176,13 +170,13 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         var (_, match) = await SeedMatchAsync(db, clientPhone);
 
         var first = await repo.TryAddPendingAsync(
-            new MatchFeedback { MatchId = match.Id, RequestId = match.RequestId, Step = FeedbackStep.DidYouFind });
+            MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow));
         Assert.True(first);
 
         await using var scope2 = _fx.Factory.Services.CreateAsyncScope();
         var repo2 = scope2.ServiceProvider.GetRequiredService<IFeedbackRepository>();
         var second = await repo2.TryAddPendingAsync(
-            new MatchFeedback { MatchId = match.Id, RequestId = match.RequestId, Step = FeedbackStep.DidYouFind });
+            MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow));
         Assert.False(second);
     }
 
@@ -199,14 +193,14 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
         var (_, match) = await SeedMatchAsync(db, clientPhone);
 
-        var entry = new MatchFeedback { MatchId = match.Id, RequestId = match.RequestId, Step = FeedbackStep.DidYouFind };
+        var entry = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
         Assert.True(await repo.TryAddPendingAsync(entry));
         Assert.True(await repo.TryClaimPendingAsync(entry.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow));
 
         await using var scope2 = _fx.Factory.Services.CreateAsyncScope();
         var repo2 = scope2.ServiceProvider.GetRequiredService<IFeedbackRepository>();
         var again = await repo2.TryAddPendingAsync(
-            new MatchFeedback { MatchId = match.Id, RequestId = match.RequestId, Step = FeedbackStep.DidYouFind });
+            MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow));
         Assert.False(again);
     }
 
@@ -219,7 +213,7 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
         var (_, match) = await SeedMatchAsync(db, clientPhone);
 
-        var entry = new MatchFeedback { MatchId = match.Id, RequestId = match.RequestId, Step = FeedbackStep.DidYouFind };
+        var entry = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
         await repo.TryAddPendingAsync(entry);
 
         Assert.True(await repo.TryClaimPendingAsync(entry.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow));
@@ -235,12 +229,12 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
         var (_, match) = await SeedMatchAsync(db, clientPhone);
 
-        var pending = new MatchFeedback { MatchId = match.Id, RequestId = match.RequestId, Step = FeedbackStep.DidYouFind };
+        var pending = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
         await repo.TryAddPendingAsync(pending);
         Assert.True(await repo.DeletePendingAsync(pending.Id));
 
         // Re-create + claim, then DeletePendingAsync should NOT remove the now-answered row.
-        var answered = new MatchFeedback { MatchId = match.Id, RequestId = match.RequestId, Step = FeedbackStep.DidYouFind };
+        var answered = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
         await repo.TryAddPendingAsync(answered);
         await repo.TryClaimPendingAsync(answered.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow);
         Assert.False(await repo.DeletePendingAsync(answered.Id));
@@ -260,20 +254,12 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
 
         var (_, olderMatch) = await SeedMatchAsync(db, clientPhone);
         var (_, newerMatch) = await SeedMatchAsync(db, clientPhone);
-        var older = new MatchFeedback
-        {
-            MatchId = olderMatch.Id,
-            RequestId = olderMatch.RequestId,
-            Step = FeedbackStep.DidYouFind,
-            PromptedAt = DateTimeOffset.UtcNow - TimeSpan.FromHours(2)
-        };
-        var newer = new MatchFeedback
-        {
-            MatchId = newerMatch.Id,
-            RequestId = newerMatch.RequestId,
-            Step = FeedbackStep.DidYouFind,
-            PromptedAt = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5)
-        };
+        var older = MatchFeedback.CreatePending(
+            olderMatch.Id, olderMatch.RequestId, FeedbackStep.DidYouFind,
+            DateTimeOffset.UtcNow - TimeSpan.FromHours(2));
+        var newer = MatchFeedback.CreatePending(
+            newerMatch.Id, newerMatch.RequestId, FeedbackStep.DidYouFind,
+            DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5));
         db.MatchFeedback.AddRange(older, newer);
         await db.SaveChangesAsync();
 
@@ -289,12 +275,8 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
             clientPhone, "plumbing",
             new Location(13.45, -16.6), "Banjul",
             $"req-{Guid.NewGuid()}", 5.0, DateTimeOffset.UtcNow, false);
-        var match = new Match
-        {
-            RequestId = request.Id,
-            ProviderPhone = $"+220{Guid.NewGuid().ToString("N")[..8]}",
-            ServiceSlug = "plumbing"
-        };
+        var match = Match.Create(
+            request.Id, $"+220{Guid.NewGuid().ToString("N")[..8]}", "plumbing", 0, 0, DateTimeOffset.UtcNow);
         db.ServiceRequests.Add(request);
         db.Matches.Add(match);
         await db.SaveChangesAsync();
@@ -304,12 +286,8 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
     private static async Task<Match> SeedExtraMatchForRequestAsync(
         HookDbContext db, Guid requestId)
     {
-        var match = new Match
-        {
-            RequestId = requestId,
-            ProviderPhone = $"+220{Guid.NewGuid().ToString("N")[..8]}",
-            ServiceSlug = "plumbing"
-        };
+        var match = Match.Create(
+            requestId, $"+220{Guid.NewGuid().ToString("N")[..8]}", "plumbing", 0, 0, DateTimeOffset.UtcNow);
         db.Matches.Add(match);
         await db.SaveChangesAsync();
         return match;
@@ -325,22 +303,14 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         var (request, firstMatch) = await SeedMatchAsync(db, clientPhone);
         var secondMatch = await SeedExtraMatchForRequestAsync(db, request.Id);
 
-        var firstEntry = new MatchFeedback
-        {
-            MatchId = firstMatch.Id,
-            RequestId = firstMatch.RequestId,
-            Step = FeedbackStep.DidYouFind
-        };
+        var firstEntry = MatchFeedback.CreatePending(
+            firstMatch.Id, firstMatch.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
         Assert.True(await repo.TryAddPendingAsync(firstEntry));
         Assert.True(await repo.TryClaimPendingAsync(firstEntry.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow));
 
         // Late sibling for the same request — broader partial unique includes answered rows.
-        var sibling = new MatchFeedback
-        {
-            MatchId = secondMatch.Id,
-            RequestId = secondMatch.RequestId,
-            Step = FeedbackStep.DidYouFind
-        };
+        var sibling = MatchFeedback.CreatePending(
+            secondMatch.Id, secondMatch.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
         Assert.False(await repo.TryAddPendingAsync(sibling));
     }
 
@@ -355,11 +325,11 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         await using var tx = await db.Database.BeginTransactionAsync();
 
         Assert.True(await db.TryInsertUniqueAsync(
-            new MatchFeedback { MatchId = match.Id, RequestId = match.RequestId, Step = FeedbackStep.DidYouFind },
+            MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow),
             new[] { FeedbackConstants.PendingUniqueIndexName, FeedbackConstants.RequestStep1UniqueIndexName }));
 
         Assert.False(await db.TryInsertUniqueAsync(
-            new MatchFeedback { MatchId = match.Id, RequestId = match.RequestId, Step = FeedbackStep.DidYouFind },
+            MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow),
             new[] { FeedbackConstants.PendingUniqueIndexName, FeedbackConstants.RequestStep1UniqueIndexName }));
 
         // Outer tx must still be usable — a poisoned tx would throw here.

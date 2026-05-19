@@ -31,8 +31,9 @@ public sealed class ClientRequestOrchestrator(
     {
         var phone = message.From;
         var now = clock.GetUtcNow();
-        var draft = await drafts.GetAsync(phone.Value, ct) ?? ClientRequestDraft.Start(phone.Value, now);
-        draft.UpdatedAt = now;
+        var existing = await drafts.GetAsync(phone.Value, ct);
+        var draft = existing ?? ClientRequestDraft.Start(phone.Value, now);
+        if (existing is not null) draft.Touch(now);
 
         // Slug switch mid-funnel: if the user is past the slug-confirm step and sends a
         // strong service-request hint with a different canonical slug, reset to
@@ -49,8 +50,8 @@ public sealed class ClientRequestOrchestrator(
                 var canonical = await slugResolver.ResolveAsync(extracted.Slugs[0], message.Text ?? string.Empty, ct);
                 if (!string.Equals(canonical.CanonicalSlug, draft.DraftServiceSlug, StringComparison.Ordinal))
                 {
-                    draft.DraftServiceSlug = canonical.CanonicalSlug;
-                    draft.Step = ClientRequestStep.ConfirmService;
+                    draft.SwitchSlug(canonical.CanonicalSlug, now);
+                    draft.StepTo(ClientRequestStep.ConfirmService, now);
                     // Location fields preserved on draft so YES skips straight to AwaitingDescription.
                     await drafts.UpsertAsync(draft, ct);
                     logger.LogDebug("Slug switch → {Slug} for {Phone}", canonical.CanonicalSlug, phone.Mask());
@@ -64,19 +65,19 @@ public sealed class ClientRequestOrchestrator(
         switch (draft.Step)
         {
             case ClientRequestStep.AwaitingService:
-                await StartAsync(draft, message, phone, ct);
+                await StartAsync(draft, message, phone, now, ct);
                 break;
             case ClientRequestStep.ConfirmService:
-                await ConfirmServiceAsync(draft, message, phone, ct);
+                await ConfirmServiceAsync(draft, message, phone, now, ct);
                 break;
             case ClientRequestStep.AwaitingLocation:
-                await CollectLocationAsync(draft, message, phone, ct);
+                await CollectLocationAsync(draft, message, phone, now, ct);
                 break;
             case ClientRequestStep.ConfirmLocation:
-                await ConfirmLocationAsync(draft, message, phone, ct);
+                await ConfirmLocationAsync(draft, message, phone, now, ct);
                 break;
             case ClientRequestStep.AwaitingDescription:
-                await CollectDescriptionAsync(draft, message, phone, ct);
+                await CollectDescriptionAsync(draft, message, phone, now, ct);
                 break;
             case ClientRequestStep.AwaitingPhoneShareConsent:
                 await CollectPhoneShareConsentAsync(draft, message, phone, now, ct);
@@ -87,7 +88,7 @@ public sealed class ClientRequestOrchestrator(
         }
     }
 
-    private async Task StartAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
+    private async Task StartAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
     {
         var text = message.Text ?? string.Empty;
         var extracted = await ai.ExtractServicesAsync(text, ct);
@@ -104,8 +105,8 @@ public sealed class ClientRequestOrchestrator(
         }
 
         var canonical = await slugResolver.ResolveAsync(extracted.Slugs[0], text, ct);
-        draft.DraftServiceSlug = canonical.CanonicalSlug;
-        draft.Step = ClientRequestStep.ConfirmService;
+        draft.SwitchSlug(canonical.CanonicalSlug, now);
+        draft.StepTo(ClientRequestStep.ConfirmService, now);
         await drafts.UpsertAsync(draft, ct);
         await bus.PublishAsync(new SendWhatsAppTextRequested(phone, $"Do you need {canonical.CanonicalSlug.Replace('-', ' ')}? Reply YES or NO — YES to confirm, NO to choose another service."));
     }
@@ -120,7 +121,7 @@ public sealed class ClientRequestOrchestrator(
         @"^\s*(no|nope|nah)\b[\s,.:;!?-]*(?<rest>.+)$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    private async Task ConfirmServiceAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
+    private async Task ConfirmServiceAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
     {
         var leadingNo = LeadingNoRx.Match(message.Text ?? string.Empty);
         if (leadingNo.Success)
@@ -128,10 +129,10 @@ public sealed class ClientRequestOrchestrator(
             var rest = leadingNo.Groups["rest"].Value.Trim();
             if (rest.Length > 0 && QuickIntent.Detect(rest) is null)
             {
-                draft.DraftServiceSlug = string.Empty;
-                draft.Step = ClientRequestStep.AwaitingService;
+                draft.SwitchSlug(string.Empty, now);
+                draft.StepTo(ClientRequestStep.AwaitingService, now);
                 var replay = message with { Text = rest };
-                await StartAsync(draft, replay, phone, ct);
+                await StartAsync(draft, replay, phone, now, ct);
                 return;
             }
         }
@@ -146,22 +147,22 @@ public sealed class ClientRequestOrchestrator(
             // location collection steps and jump straight to description.
             if (draft.DraftLatitude is not null && draft.DraftLongitude is not null)
             {
-                draft.Step = ClientRequestStep.AwaitingDescription;
+                draft.StepTo(ClientRequestStep.AwaitingDescription, now);
                 await drafts.UpsertAsync(draft, ct);
                 await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
                     $"Got it. Using your saved location: {draft.DraftFormattedAddress}. Want to add a description? Send it now or reply SKIP."));
                 return;
             }
 
-            draft.Step = ClientRequestStep.AwaitingLocation;
+            draft.StepTo(ClientRequestStep.AwaitingLocation, now);
             await drafts.UpsertAsync(draft, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Send your location pin (or type your address)."));
             return;
         }
         if (intent.Intent == IntentKind.Rejection)
         {
-            draft.DraftServiceSlug = string.Empty;
-            draft.Step = ClientRequestStep.AwaitingService;
+            draft.SwitchSlug(string.Empty, now);
+            draft.StepTo(ClientRequestStep.AwaitingService, now);
             await drafts.UpsertAsync(draft, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
                 "What service do you need? Or reply REGISTER if you're offering services instead."));
@@ -170,14 +171,12 @@ public sealed class ClientRequestOrchestrator(
         await bus.PublishAsync(new SendWhatsAppTextRequested(phone, $"Please reply YES or NO — YES to confirm {draft.DraftServiceSlug.Replace('-', ' ')}, NO to choose another service."));
     }
 
-    private async Task CollectLocationAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
+    private async Task CollectLocationAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
     {
         if (message.Kind == InboundMessageKind.Location && message.Location is { } loc)
         {
-            draft.DraftLatitude = loc.Latitude;
-            draft.DraftLongitude = loc.Longitude;
-            draft.DraftFormattedAddress = loc.Address ?? loc.Name ?? "(GPS pin)";
-            draft.Step = ClientRequestStep.AwaitingDescription;
+            draft.CaptureLocation(loc.Latitude, loc.Longitude, loc.Address ?? loc.Name ?? "(GPS pin)", now);
+            draft.StepTo(ClientRequestStep.AwaitingDescription, now);
             await drafts.UpsertAsync(draft, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Got your location. Want to add a short description? Send it now or reply SKIP."));
             return;
@@ -192,10 +191,8 @@ public sealed class ClientRequestOrchestrator(
                 await drafts.UpsertAsync(draft, ct);
                 return;
             }
-            draft.DraftLatitude = geocoded.Location.Latitude;
-            draft.DraftLongitude = geocoded.Location.Longitude;
-            draft.DraftFormattedAddress = geocoded.FormattedAddress;
-            draft.Step = ClientRequestStep.ConfirmLocation;
+            draft.CaptureLocation(geocoded.Location.Latitude, geocoded.Location.Longitude, geocoded.FormattedAddress, now);
+            draft.StepTo(ClientRequestStep.ConfirmLocation, now);
             await drafts.UpsertAsync(draft, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone, $"Found: '{geocoded.FormattedAddress}'. Reply YES to confirm or send your GPS pin."));
             return;
@@ -204,14 +201,12 @@ public sealed class ClientRequestOrchestrator(
         await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Send your location pin or type your address."));
     }
 
-    private async Task ConfirmLocationAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
+    private async Task ConfirmLocationAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
     {
         if (message.Kind == InboundMessageKind.Location && message.Location is { } loc)
         {
-            draft.DraftLatitude = loc.Latitude;
-            draft.DraftLongitude = loc.Longitude;
-            draft.DraftFormattedAddress = loc.Address ?? loc.Name ?? "(GPS pin)";
-            draft.Step = ClientRequestStep.AwaitingDescription;
+            draft.CaptureLocation(loc.Latitude, loc.Longitude, loc.Address ?? loc.Name ?? "(GPS pin)", now);
+            draft.StepTo(ClientRequestStep.AwaitingDescription, now);
             await drafts.UpsertAsync(draft, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Got your location. Want to add a description? Send it now or reply SKIP."));
             return;
@@ -222,7 +217,7 @@ public sealed class ClientRequestOrchestrator(
             : await ai.DetectIntentAsync(message.Text ?? string.Empty, ct);
         if (intent.Intent == IntentKind.Confirmation)
         {
-            draft.Step = ClientRequestStep.AwaitingDescription;
+            draft.StepTo(ClientRequestStep.AwaitingDescription, now);
             await drafts.UpsertAsync(draft, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Want to add a description? Send it now or reply SKIP."));
             return;
@@ -230,12 +225,12 @@ public sealed class ClientRequestOrchestrator(
         await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Reply YES to confirm or send your GPS pin."));
     }
 
-    private async Task CollectDescriptionAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
+    private async Task CollectDescriptionAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
     {
         var text = message.Text?.Trim();
         if (!IsSkipDescription(text))
         {
-            draft.DraftDescription = text;
+            draft.CaptureDescription(text, now);
         }
 
         if (string.IsNullOrEmpty(draft.DraftServiceSlug) || draft.DraftLatitude is null || draft.DraftLongitude is null)
@@ -266,7 +261,7 @@ public sealed class ClientRequestOrchestrator(
         // Description captured + guards passed. Park the draft awaiting the requester's
         // phone-share decision; the request itself is created in CollectPhoneShareConsentAsync
         // so SharePhoneNumber is set atomically with creation.
-        draft.Step = ClientRequestStep.AwaitingPhoneShareConsent;
+        draft.StepTo(ClientRequestStep.AwaitingPhoneShareConsent, now);
         await drafts.UpsertAsync(draft, ct);
         await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
             "One more thing — should we share your phone number with selected providers? Reply YES or NO."));
@@ -287,7 +282,7 @@ public sealed class ClientRequestOrchestrator(
         }
 
         var consent = intent.Intent == IntentKind.Confirmation;
-        draft.DraftSharePhoneConsent = consent;
+        draft.SetPhoneShareConsent(consent, now);
 
         if (string.IsNullOrEmpty(draft.DraftServiceSlug) || draft.DraftLatitude is null || draft.DraftLongitude is null)
         {
@@ -314,7 +309,6 @@ public sealed class ClientRequestOrchestrator(
             await drafts.DeleteAsync(phone.Value, ct);
 
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Looking for nearby providers…"));
-            await bus.PublishAsync(new ServiceRequestCreated(request.Id));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

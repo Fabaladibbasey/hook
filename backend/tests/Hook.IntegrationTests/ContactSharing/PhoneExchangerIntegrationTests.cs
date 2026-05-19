@@ -107,12 +107,7 @@ public sealed class PhoneExchangerIntegrationTests : PipelineTestBase
             providerConsent, TimeSpan.FromHours(ttlHours), now);
         db.ProviderAvailabilities.Add(provider);
 
-        var match = new Match
-        {
-            RequestId = request.Id,
-            ProviderPhone = providerPhone,
-            ServiceSlug = "plumbing"
-        };
+        var match = Match.Create(request.Id, providerPhone, "plumbing", 0, 0, now);
         db.Matches.Add(match);
 
         await db.SaveChangesAsync();

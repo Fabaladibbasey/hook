@@ -18,14 +18,14 @@ public class AiReadinessProbeTests
     {
         var aiMock = new Mock<IConversationAi>();
         aiMock.Setup(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new IntentDetectionResult(IntentKind.Unknown, 0.5, "en", null));
+            .ReturnsAsync(new IntentDetectionResult(IntentKind.Unknown, 0.5, "en", string.Empty));
         var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var probe = new AiReadinessProbe(aiMock.Object, clock, Opts(), NullLogger<AiReadinessProbe>.Instance);
 
         var result = await probe.ProbeAsync();
 
         result.Healthy.ShouldBeTrue();
-        result.Error.ShouldBeNull();
+        result.Error.ShouldBeEmpty();
     }
 
     [Fact]
@@ -49,7 +49,7 @@ public class AiReadinessProbeTests
     {
         var aiMock = new Mock<IConversationAi>();
         aiMock.Setup(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new IntentDetectionResult(IntentKind.Unknown, 0.5, "en", null));
+            .ReturnsAsync(new IntentDetectionResult(IntentKind.Unknown, 0.5, "en", string.Empty));
         var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var probe = new AiReadinessProbe(aiMock.Object, clock, Opts(), NullLogger<AiReadinessProbe>.Instance);
 
@@ -67,7 +67,7 @@ public class AiReadinessProbeTests
     {
         var aiMock = new Mock<IConversationAi>();
         aiMock.Setup(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new IntentDetectionResult(IntentKind.Unknown, 0.5, "en", null));
+            .ReturnsAsync(new IntentDetectionResult(IntentKind.Unknown, 0.5, "en", string.Empty));
         var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var probe = new AiReadinessProbe(aiMock.Object, clock, Opts(), NullLogger<AiReadinessProbe>.Instance);
 
@@ -86,7 +86,7 @@ public class AiReadinessProbeTests
             .Returns(async (string _, CancellationToken ct) =>
             {
                 await Task.Delay(TimeSpan.FromSeconds(5), ct);
-                return new IntentDetectionResult(IntentKind.Unknown, 0.5, "en", null);
+                return new IntentDetectionResult(IntentKind.Unknown, 0.5, "en", string.Empty);
             });
         var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
         var probe = new AiReadinessProbe(aiMock.Object, clock, Opts(probeTimeoutSeconds: 1), NullLogger<AiReadinessProbe>.Instance);

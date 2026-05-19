@@ -1,27 +1,29 @@
 using System.Security.Cryptography;
+using Hook.Shared.Domain;
 
 namespace Hook.Features.ChatSession.ParticipantAggregate;
 
-public class ChatParticipant
+public class ChatParticipant : IAggregateRoot
 {
-    public Guid Id { get; init; } = Guid.NewGuid();
+    public Guid Id { get; init; }
     public required Guid ChatId { get; init; }
     public required ChatParticipantRole Role { get; init; }
-    public string? Phone { get; init; }
+    public string Phone { get; init; } = string.Empty;
     public required string Token { get; init; }
-    public Guid CurrentSessionId { get; private set; } = Guid.NewGuid();
+    public Guid CurrentSessionId { get; private set; }
 
     public byte[]? PublicKey { get; private set; }
 
     public long LastInboundSequence { get; private set; }
 
-    public static ChatParticipant Create(Guid chatId, ChatParticipantRole role, string? phone) => new()
+    public static ChatParticipant Create(Guid chatId, ChatParticipantRole role, string phone) => new()
     {
-        Id = Guid.NewGuid(),
+        Id = Guid.CreateVersion7(),
         ChatId = chatId,
         Role = role,
         Phone = phone,
-        Token = GenerateToken()
+        Token = GenerateToken(),
+        CurrentSessionId = Guid.CreateVersion7()
     };
 
     /// <summary>
@@ -31,7 +33,7 @@ public class ChatParticipant
     /// </summary>
     public Guid RotateSession()
     {
-        CurrentSessionId = Guid.NewGuid();
+        CurrentSessionId = Guid.CreateVersion7();
         PublicKey = null;
         LastInboundSequence = 0;
         return CurrentSessionId;

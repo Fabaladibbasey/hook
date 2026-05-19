@@ -1,14 +1,12 @@
 using Hook.Features.ChatLifecycle.Events;
 using Hook.Features.ChatSession;
 using Hook.Features.ChatSession.SessionAggregate;
-using Hook.Shared.Pipeline.PostCommitSends;
 using Wolverine;
 
 namespace Hook.Features.ChatLifecycle.EndChat;
 
 public sealed class IdleEndHandler(
     IChatRepository chats,
-    TimeProvider clock,
     ILogger<IdleEndHandler> logger)
 {
     public async Task Handle(IdleEndCheck evt, IMessageBus bus, CancellationToken ct)
@@ -22,9 +20,6 @@ public sealed class IdleEndHandler(
             return;
         }
 
-        session.End(clock.GetUtcNow());
-
-        await bus.PublishAsync(new BroadcastChatEventRequested(
-            evt.ChatId, ChatHubEvents.ChatEnded, new ChatEndedPayload("idle")));
+        await bus.PublishAsync(new EndChatCommand(evt.ChatId, EndChatReason.Idle, string.Empty));
     }
 }

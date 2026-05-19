@@ -63,25 +63,22 @@ public class Step1FeedbackHandlerTests
             .Returns(ValueTask.CompletedTask);
     }
 
+    private readonly TimeProvider _clock = TimeProvider.System;
+
     private Step1FeedbackHandler Build() =>
-        new(_matchesMock.Object, _requestsMock.Object, _feedbackMock.Object);
+        new(_matchesMock.Object, _requestsMock.Object, _feedbackMock.Object, _clock);
 
     private MatchEntity SeedMatch()
     {
         var requestId = Guid.NewGuid();
-        var match = new MatchEntity
-        {
-            RequestId = requestId,
-            ProviderPhone = "+2203331234",
-            ServiceSlug = "plumbing"
-        };
+        var match = MatchEntity.Create(requestId, "+2203331234", "plumbing", 0, 0, _clock.GetUtcNow());
         _matches[match.Id] = match;
         _requestMatches[requestId] = new[] { match };
 
         _requests[requestId] = ServiceRequestEntity.Create(
             "+2203339999", "plumbing",
             new Location(13.45, -16.6), "Banjul",
-            "req-test", 5.0, DateTimeOffset.UtcNow, false);
+            "req-test", 5.0, _clock.GetUtcNow(), false);
         return match;
     }
 
@@ -96,7 +93,7 @@ public class Step1FeedbackHandlerTests
         Assert.Single(_published);
         Assert.Equal(match.Id, _published[0].MatchId);
         Assert.Equal(match.RequestId, _published[0].RequestId);
-        Assert.Null(_published[0].PickedFormatted);
+        Assert.Equal(string.Empty, _published[0].PickedFormatted);
     }
 
     [Fact]
@@ -130,12 +127,7 @@ public class Step1FeedbackHandlerTests
         // Pre-migration backfill leaves MatchFeedback rows with RequestId=Guid.Empty
         // and likewise some Match rows; entering reservation here would collide on
         // the request_step1 partial unique with a default-Guid insert.
-        var match = new MatchEntity
-        {
-            RequestId = Guid.Empty,
-            ProviderPhone = "+2203331234",
-            ServiceSlug = "plumbing"
-        };
+        var match = MatchEntity.Create(Guid.Empty, "+2203331234", "plumbing", 0, 0, _clock.GetUtcNow());
         _matches[match.Id] = match;
 
         await Build().Handle(new Step1FeedbackCheck(match.Id), _busMock.Object, CancellationToken.None);
@@ -172,7 +164,7 @@ public class Step1FeedbackHandlerTests
         _requests[match.RequestId] = ServiceRequestEntity.Create(
             "not-a-phone", "plumbing",
             new Location(13.45, -16.6), "Banjul",
-            "req-test", 5.0, DateTimeOffset.UtcNow, false);
+            "req-test", 5.0, _clock.GetUtcNow(), false);
 
         await Build().Handle(new Step1FeedbackCheck(match.Id), _busMock.Object, CancellationToken.None);
 
@@ -184,29 +176,18 @@ public class Step1FeedbackHandlerTests
     public async Task Handle_MultiPick_PickedFormattedHonorsRepositoryOrder()
     {
         var requestId = Guid.NewGuid();
-        var match = new MatchEntity
-        {
-            RequestId = requestId,
-            ProviderPhone = "+2203331234",
-            ServiceSlug = "plumbing",
-            Score = 0.5,
-            PickedAt = DateTimeOffset.UtcNow
-        };
+        var now = _clock.GetUtcNow();
+        var match = MatchEntity.Create(requestId, "+2203331234", "plumbing", 0, 0.5, now);
+        match.ClaimForPickup(false, now);
         _matches[match.Id] = match;
         _requests[requestId] = ServiceRequestEntity.Create(
             "+2203339999", "plumbing",
             new Location(13.45, -16.6), "Banjul",
-            "req-test", 5.0, DateTimeOffset.UtcNow, false);
+            "req-test", 5.0, now, false);
 
-        var sibling = new MatchEntity
-        {
-            RequestId = match.RequestId,
-            ProviderPhone = "+2204445678",
-            ServiceSlug = "plumbing",
-            CreatedAt = match.CreatedAt.AddSeconds(-1),
-            PickedAt = DateTimeOffset.UtcNow,
-            Score = 0.9
-        };
+        var sibling = MatchEntity.Create(
+            match.RequestId, "+2204445678", "plumbing", 0, 0.9, match.CreatedAt.AddSeconds(-1));
+        sibling.ClaimForPickup(false, now);
         _matches[sibling.Id] = sibling;
         _requestMatches[match.RequestId] = new[] { sibling, match };
 
@@ -214,8 +195,8 @@ public class Step1FeedbackHandlerTests
 
         Assert.Single(_published);
         var rendered = _published[0].PickedFormatted;
-        Assert.NotNull(rendered);
-        var firstSlot = rendered!.IndexOf("1)", StringComparison.Ordinal);
+        Assert.NotEqual(string.Empty, rendered);
+        var firstSlot = rendered.IndexOf("1)", StringComparison.Ordinal);
         var secondSlot = rendered.IndexOf("2)", StringComparison.Ordinal);
         Assert.True(firstSlot >= 0 && secondSlot > firstSlot);
         var slot1 = rendered.Substring(firstSlot, secondSlot - firstSlot);

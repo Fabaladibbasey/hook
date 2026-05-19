@@ -4,7 +4,7 @@ public sealed record IntentDetectionResult(
     IntentKind Intent,
     double Confidence,
     string LanguageCode,
-    string? Notes)
+    string Notes)
 {
     /// <summary>
     /// True only when the LLM both picked a known, non-Unknown intent AND reported

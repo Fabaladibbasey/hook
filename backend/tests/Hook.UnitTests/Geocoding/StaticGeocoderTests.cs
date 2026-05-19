@@ -26,7 +26,7 @@ public class StaticGeocoderTests
     }
 
     [Fact]
-    public async Task GeocodeAsync_ShouldFallBackToSfDefaults_WhenOptionsUnset()
+    public async Task GeocodeAsync_ShouldFallBackToBanjulDefaults_WhenOptionsUnset()
     {
         var opts = Options.Create(new DevGeocodingOptions());
         var geocoder = new StaticGeocoder(opts);
@@ -34,7 +34,7 @@ public class StaticGeocoderTests
         var result = await geocoder.GeocodeAsync("anywhere");
 
         result.ShouldNotBeNull();
-        result!.Location.Latitude.ShouldBe(37.7749);
-        result.Location.Longitude.ShouldBe(-122.4194);
+        result!.Location.Latitude.ShouldBe(13.4549);
+        result.Location.Longitude.ShouldBe(-16.5790);
     }
 }

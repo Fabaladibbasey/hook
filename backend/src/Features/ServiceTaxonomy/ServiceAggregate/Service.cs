@@ -1,6 +1,8 @@
+using Hook.Shared.Domain;
+
 namespace Hook.Features.ServiceTaxonomy.ServiceAggregate;
 
-public class Service
+public class Service : IAggregateRoot
 {
     public required string Slug { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
@@ -15,14 +17,14 @@ public class Service
         RawExamples.Add(trimmed);
     }
 
-    public static Service Create(string slug, string? rawExample = null)
+    public static Service Create(string slug, string rawExample = "")
     {
         var svc = new Service
         {
             Slug = slug,
             CreatedAt = DateTimeOffset.UtcNow
         };
-        if (rawExample is not null) svc.RememberRawExample(rawExample);
+        if (rawExample.Length > 0) svc.RememberRawExample(rawExample);
         return svc;
     }
 }

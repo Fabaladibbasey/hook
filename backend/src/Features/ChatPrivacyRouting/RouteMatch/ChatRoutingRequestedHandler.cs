@@ -30,7 +30,7 @@ public sealed class ChatRoutingRequestedHandler(
         // Reserve the claim with a pre-allocated ChatId before allocating the session
         // + 2 ChatParticipant rows. Race-loser exits with zero writes; the previous
         // order rolled back 4-5 inserts through the AutoApplyTransactions tx.
-        var chatId = Guid.NewGuid();
+        var chatId = Guid.CreateVersion7();
         if (!await matches.TryClaimChatRoutingAsync(match.Id, chatId, ct))
         {
             logger.LogDebug("ChatRouting: match {MatchId} lost the claim — peer already routed", evt.MatchId);
