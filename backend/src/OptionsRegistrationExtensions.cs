@@ -8,10 +8,10 @@ public static class OptionsRegistrationExtensions
     public static OptionsBuilder<TOptions> AddValidatedOptions<TOptions>(
         this IServiceCollection services,
         IConfiguration configuration,
-        string? sectionName = null)
+        string sectionName = "")
         where TOptions : class
     {
-        sectionName ??= ResolveSectionName<TOptions>();
+        if (string.IsNullOrWhiteSpace(sectionName)) sectionName = ResolveSectionName<TOptions>();
 
         return services
             .AddOptions<TOptions>()

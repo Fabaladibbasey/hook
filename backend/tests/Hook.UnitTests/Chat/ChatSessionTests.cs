@@ -24,7 +24,7 @@ public class ChatSessionTests
         evt.EventName.ShouldBe(ChatHubEvents.ChatEnded);
         var payload = evt.Payload.ShouldBeOfType<ChatEndedPayload>();
         payload.Reason.ShouldBe("idle");
-        payload.EndedBy.ShouldBeNull();
+        payload.EndedBy.ShouldBeEmpty();
     }
 
     [Fact]

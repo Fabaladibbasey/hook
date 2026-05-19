@@ -33,7 +33,7 @@ public class IdleEndHandlerTests
         await handler.Handle(new IdleEndCheck(session.Id, session.LastActivityAt), bus.Object, CancellationToken.None);
 
         bus.Verify(b => b.PublishAsync(
-            It.Is<EndChatCommand>(c => c.ChatId == session.Id && c.Reason == EndChatReason.Idle && c.EndedBy == null),
+            It.Is<EndChatCommand>(c => c.ChatId == session.Id && c.Reason == EndChatReason.Idle && c.EndedBy == ""),
             It.IsAny<DeliveryOptions>()), Times.Once);
         session.Status.ShouldBe(ChatSessionStatus.Active); // handler owns the mutation now
     }

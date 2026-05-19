@@ -20,7 +20,7 @@ public sealed class ChatHubEndChatBroadcastTests : PipelineTestBase
 
     private sealed record OpenResponse(Guid ChatId, Guid ParticipantId, string Role, Guid SessionId, string Status);
     private sealed record ChatHandle(Guid ChatId, OpenResponse Client, OpenResponse Provider, string ClientToken, string ProviderToken);
-    private sealed record ChatEndedDto(string Reason, string? EndedBy);
+    private sealed record ChatEndedDto(string Reason, string EndedBy);
 
     [Fact]
     public async Task ClientEndsChat_BroadcastsChatEnded_ToProvider_ViaEndChatCommandAndScraper()

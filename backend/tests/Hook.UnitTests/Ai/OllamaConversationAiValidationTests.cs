@@ -70,7 +70,7 @@ public class OllamaConversationAiValidationTests
         var ai = BuildAi(rawModelContent: """{"matchedSlug":"hax0r-slug","isNew":false}""");
         var result = await ai.JudgeServiceMatchAsync("plumbingg", new[] { "plumbing", "carpentry" });
         result.IsNew.ShouldBeTrue();
-        result.MatchedSlug.ShouldBeNull();
+        result.MatchedSlug.ShouldBeEmpty();
     }
 
     [Fact]
@@ -119,9 +119,9 @@ public class OllamaConversationAiValidationTests
     [Fact]
     public async Task IntentDetectionResult_IsActionable_requires_confidence_floor_and_known_intent()
     {
-        new IntentDetectionResult(IntentKind.ServiceRequest, 0.9, "en", null).IsActionable(0.6).ShouldBeTrue();
-        new IntentDetectionResult(IntentKind.ServiceRequest, 0.5, "en", null).IsActionable(0.6).ShouldBeFalse();
-        new IntentDetectionResult(IntentKind.Unknown, 0.99, "en", null).IsActionable(0.6).ShouldBeFalse();
+        new IntentDetectionResult(IntentKind.ServiceRequest, 0.9, "en", string.Empty).IsActionable(0.6).ShouldBeTrue();
+        new IntentDetectionResult(IntentKind.ServiceRequest, 0.5, "en", string.Empty).IsActionable(0.6).ShouldBeFalse();
+        new IntentDetectionResult(IntentKind.Unknown, 0.99, "en", string.Empty).IsActionable(0.6).ShouldBeFalse();
     }
 
     [Fact]

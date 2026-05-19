@@ -47,7 +47,7 @@ public sealed class OllamaConversationAi(
         var intentText = root.GetProperty("intent").GetString() ?? "";
         var confidence = root.TryGetProperty("confidence", out var c) ? Math.Clamp(c.GetDouble(), 0, 1) : 0;
         var language = root.TryGetProperty("language", out var l) ? l.GetString() ?? "en" : "en";
-        var notes = root.TryGetProperty("notes", out var n) ? n.GetString() : null;
+        var notes = root.TryGetProperty("notes", out var n) ? n.GetString() ?? string.Empty : string.Empty;
 
         // Strict ordinal match against the enum's named members. No ignoreCase fuzz, no
         // fallback for unknown labels — anything we don't recognise lands as Unknown,
@@ -117,16 +117,16 @@ public sealed class OllamaConversationAi(
         using var json = await CallJsonAsync(AiPrompts.ServiceJudgeSystem, prompt, schema, ct);
         var root = json.RootElement;
 
-        var matched = root.TryGetProperty("matchedSlug", out var m) ? m.GetString() : null;
+        var matched = root.TryGetProperty("matchedSlug", out var m) ? m.GetString() ?? string.Empty : string.Empty;
         var isNew = root.TryGetProperty("isNew", out var n) && n.GetBoolean();
 
         // The DB is the only ground truth for the slug taxonomy. If the LLM returns a slug
         // outside the candidate list we passed in, treat the proposal as new and let the
         // caller decide what to do with it (SlugResolver creates the canonical row from the
         // user's normalized slug, never from the LLM's string).
-        if (!string.IsNullOrEmpty(matched) && !candidateSlugs.Contains(matched, StringComparer.Ordinal))
+        if (matched.Length > 0 && !candidateSlugs.Contains(matched, StringComparer.Ordinal))
         {
-            matched = null;
+            matched = string.Empty;
             isNew = true;
         }
 

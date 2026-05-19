@@ -83,8 +83,8 @@ public sealed class FakeConversationAi : IConversationAi
             proposedSlug.Contains(c, StringComparison.OrdinalIgnoreCase));
 
         return Task.FromResult(match is not null
-            ? new ServiceJudgeResult(match, false, null)
-            : new ServiceJudgeResult(null, true, proposedSlug));
+            ? new ServiceJudgeResult(match, false, string.Empty)
+            : new ServiceJudgeResult(string.Empty, true, proposedSlug));
     }
 
     public Task<string> GenerateReplyAsync(ReplyContext context, CancellationToken ct = default)

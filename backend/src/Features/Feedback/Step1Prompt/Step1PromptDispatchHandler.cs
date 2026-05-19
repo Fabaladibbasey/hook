@@ -18,7 +18,7 @@ public sealed class Step1PromptDispatchHandler(
     public async Task Handle(Step1PromptDispatchRequested evt, CancellationToken ct)
     {
         var facts = new Dictionary<string, string> { ["service"] = evt.ServiceSlug };
-        if (evt.PickedFormatted is not null)
+        if (evt.PickedFormatted.Length > 0)
         {
             facts["pickedProviders"] = evt.PickedFormatted;
             facts["instruction"] =

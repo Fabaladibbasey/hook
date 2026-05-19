@@ -27,7 +27,7 @@ public class ChatParticipantConfiguration : IEntityTypeConfiguration<ChatPartici
         builder.HasKey(p => p.Id);
         builder.Property(p => p.Token).HasMaxLength(80).IsRequired();
         builder.PropertyAsStringEnum(p => p.Role, 16);
-        builder.Property(p => p.Phone).HasMaxLength(20);
+        builder.Property(p => p.Phone).HasMaxLength(20).IsRequired().HasDefaultValue("");
         builder.Property(p => p.PublicKey).HasMaxLength(200);
         builder.Property(p => p.LastInboundSequence).IsRequired();
         builder.HasIndex(p => p.Token).IsUnique().HasDatabaseName("ux_chat_participants_token");

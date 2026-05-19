@@ -109,7 +109,7 @@ public static class QuickIntent
         (EmergencyRx,               IntentKind.ServiceRequest),
     ];
 
-    private static readonly string?[] ConfirmTokens =
+    private static readonly string[] ConfirmTokens =
     [
         "y", "yes", "yeah", "yep", "yup", "ok", "okay", "sure", "confirm", "correct", "exactly",
         // Affirmatives the bot may advertise after presenting matches ("Reply 1 to
@@ -121,8 +121,8 @@ public static class QuickIntent
         // adjacent English words like "got" / "into" / "shore".
         "proceed", "continue", "details", "detail", "connect"
     ];
-    private static readonly string?[] RejectTokens = ["n", "no", "nope", "nah", "stop", "wrong", "incorrect"];
-    private static readonly string?[] CancelTokens = ["cancel", "end", "bye", "goodbye", "exit", "quit", "leave", "done"];
+    private static readonly string[] RejectTokens = ["n", "no", "nope", "nah", "stop", "wrong", "incorrect"];
+    private static readonly string[] CancelTokens = ["cancel", "end", "bye", "goodbye", "exit", "quit", "leave", "done"];
 
     private static readonly (string Phrase, IntentKind Intent)[] Phrases =
     [

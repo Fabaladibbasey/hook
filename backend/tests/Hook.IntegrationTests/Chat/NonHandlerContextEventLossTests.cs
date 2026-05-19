@@ -21,7 +21,7 @@ public sealed class NonHandlerContextEventLossTests : PipelineTestBase
     public NonHandlerContextEventLossTests(DevPipelineFixture fx) : base(fx) { }
 
     private sealed record OpenResponse(Guid ChatId, Guid ParticipantId, string Role, Guid SessionId, string Status);
-    private sealed record ChatEndedDto(string Reason, string? EndedBy);
+    private sealed record ChatEndedDto(string Reason, string EndedBy);
 
     [Fact]
     public async Task End_OutsideHandlerContext_DoesNotBroadcast_ToPeer()

@@ -93,7 +93,7 @@ public class Step1FeedbackHandlerTests
         Assert.Single(_published);
         Assert.Equal(match.Id, _published[0].MatchId);
         Assert.Equal(match.RequestId, _published[0].RequestId);
-        Assert.Null(_published[0].PickedFormatted);
+        Assert.Equal(string.Empty, _published[0].PickedFormatted);
     }
 
     [Fact]
@@ -195,8 +195,8 @@ public class Step1FeedbackHandlerTests
 
         Assert.Single(_published);
         var rendered = _published[0].PickedFormatted;
-        Assert.NotNull(rendered);
-        var firstSlot = rendered!.IndexOf("1)", StringComparison.Ordinal);
+        Assert.NotEqual(string.Empty, rendered);
+        var firstSlot = rendered.IndexOf("1)", StringComparison.Ordinal);
         var secondSlot = rendered.IndexOf("2)", StringComparison.Ordinal);
         Assert.True(firstSlot >= 0 && secondSlot > firstSlot);
         var slot1 = rendered.Substring(firstSlot, secondSlot - firstSlot);

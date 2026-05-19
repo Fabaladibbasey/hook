@@ -40,7 +40,7 @@ public class SlugResolverTests
         _aiMock.Setup(x => x.JudgeServiceMatchAsync(
                 It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string proposed, IReadOnlyList<string> _, CancellationToken __) =>
-                new ServiceJudgeResult(null, true, proposed));
+                new ServiceJudgeResult(string.Empty, true, proposed));
     }
 
     private SlugResolver Build(double autoMerge = 0.85, double aiJudge = 0.50)
@@ -85,7 +85,7 @@ public class SlugResolverTests
         _similarityRule = (existing, _) => existing == "plumbing" ? 0.92 : 0;
         var resolver = Build();
 
-        var result = await resolver.ResolveAsync("plumbings", null);
+        var result = await resolver.ResolveAsync("plumbings");
 
         result.CanonicalSlug.ShouldBe("plumbing");
         result.Resolution.ShouldBe(SlugResolution.AutoMerged);
@@ -99,7 +99,7 @@ public class SlugResolverTests
         _similarityRule = (existing, _) => existing == "plumbing" ? 0.65 : 0;
         _aiMock.Setup(x => x.JudgeServiceMatchAsync(
                 It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ServiceJudgeResult("plumbing", false, null));
+            .ReturnsAsync(new ServiceJudgeResult("plumbing", false, string.Empty));
         var resolver = Build();
 
         var result = await resolver.ResolveAsync("pipe-repair", "my sink leaks");
@@ -115,10 +115,10 @@ public class SlugResolverTests
         _similarityRule = (existing, _) => existing == "plumbing" ? 0.55 : 0;
         _aiMock.Setup(x => x.JudgeServiceMatchAsync(
                 It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ServiceJudgeResult(null, true, "astrology"));
+            .ReturnsAsync(new ServiceJudgeResult(string.Empty, true, "astrology"));
         var resolver = Build();
 
-        var result = await resolver.ResolveAsync("astrology", null);
+        var result = await resolver.ResolveAsync("astrology");
 
         result.CanonicalSlug.ShouldBe("astrology");
         result.Resolution.ShouldBe(SlugResolution.AiJudgedNew);
@@ -132,7 +132,7 @@ public class SlugResolverTests
         _similarityRule = (_, _) => 0.10;
         var resolver = Build();
 
-        var result = await resolver.ResolveAsync("astrology", null);
+        var result = await resolver.ResolveAsync("astrology");
 
         result.CanonicalSlug.ShouldBe("astrology");
         result.Resolution.ShouldBe(SlugResolution.Created);
@@ -148,7 +148,7 @@ public class SlugResolverTests
         _similarityRule = (existing, _) => existing == "plumbing" ? 0.65 : 0;
         _aiMock.Setup(x => x.JudgeServiceMatchAsync(
                 It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ServiceJudgeResult("evil-slug", false, null));
+            .ReturnsAsync(new ServiceJudgeResult("evil-slug", false, string.Empty));
         var resolver = Build();
 
         var result = await resolver.ResolveAsync("plumbingg", "I do plumbingg");
@@ -168,7 +168,7 @@ public class SlugResolverTests
         _similarityRule = (existing, _) => existing == "plumbing" ? 0.65 : 0;
         _aiMock.Setup(x => x.JudgeServiceMatchAsync(
                 It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ServiceJudgeResult("plumbing", false, null));
+            .ReturnsAsync(new ServiceJudgeResult("plumbing", false, string.Empty));
         var resolver = Build();
 
         var result = await resolver.ResolveAsync("pipe-fix", "leaky pipe");

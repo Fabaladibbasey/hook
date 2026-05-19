@@ -8,7 +8,7 @@ public class ChatParticipant : IAggregateRoot
     public Guid Id { get; init; }
     public required Guid ChatId { get; init; }
     public required ChatParticipantRole Role { get; init; }
-    public string? Phone { get; init; }
+    public string Phone { get; init; } = string.Empty;
     public required string Token { get; init; }
     public Guid CurrentSessionId { get; private set; }
 
@@ -16,7 +16,7 @@ public class ChatParticipant : IAggregateRoot
 
     public long LastInboundSequence { get; private set; }
 
-    public static ChatParticipant Create(Guid chatId, ChatParticipantRole role, string? phone) => new()
+    public static ChatParticipant Create(Guid chatId, ChatParticipantRole role, string phone) => new()
     {
         Id = Guid.CreateVersion7(),
         ChatId = chatId,

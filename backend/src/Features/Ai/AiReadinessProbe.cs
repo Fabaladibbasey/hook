@@ -2,7 +2,7 @@ using Microsoft.Extensions.Options;
 
 namespace Hook.Features.Ai;
 
-public sealed record ProbeResult(bool Healthy, DateTimeOffset CheckedAt, string? Error);
+public sealed record ProbeResult(bool Healthy, DateTimeOffset CheckedAt, string Error);
 
 public sealed class AiReadinessProbe(
     IConversationAi ai,
@@ -35,7 +35,7 @@ public sealed class AiReadinessProbe(
             try
             {
                 _ = await ai.DetectIntentAsync("ping", probeCts.Token);
-                _cached = new CachedResult(true, now, null);
+                _cached = new CachedResult(true, now, string.Empty);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -55,5 +55,5 @@ public sealed class AiReadinessProbe(
         }
     }
 
-    private sealed record CachedResult(bool Healthy, DateTimeOffset CheckedAt, string? Error);
+    private sealed record CachedResult(bool Healthy, DateTimeOffset CheckedAt, string Error);
 }

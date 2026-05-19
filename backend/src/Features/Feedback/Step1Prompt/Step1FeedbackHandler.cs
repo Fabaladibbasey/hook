@@ -36,7 +36,7 @@ public sealed class Step1FeedbackHandler(
         if (!await feedback.TryAddPendingAsync(entry, ct)) return;
 
         var picked = await matches.GetPickedForRequestAsync(match.RequestId, ct);
-        var pickedFormatted = picked.Count > 1 ? PickedMatchListFormatter.Format(picked) : null;
+        var pickedFormatted = picked.Count > 1 ? PickedMatchListFormatter.Format(picked) : string.Empty;
 
         await bus.PublishAsync(new Step1PromptDispatchRequested(
             FeedbackId: entry.Id,

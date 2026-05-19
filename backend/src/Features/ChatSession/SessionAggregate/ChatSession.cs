@@ -29,7 +29,7 @@ public class ChatSession : AggregateRoot
         LastActivityAt = now;
     }
 
-    public void End(DateTimeOffset now, EndChatReason reason, string? endedBy = null)
+    public void End(DateTimeOffset now, EndChatReason reason, string endedBy = "")
     {
         Status = ChatSessionStatus.Ended;
         ExpiresAt = now;

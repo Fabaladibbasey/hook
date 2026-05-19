@@ -45,7 +45,7 @@ public class EndChatCommandHandlerTests
         var handler = Build(null, out _);
 
         var outcome = await handler.Handle(
-            new EndChatCommand(Guid.NewGuid(), EndChatReason.User, null), CancellationToken.None);
+            new EndChatCommand(Guid.NewGuid(), EndChatReason.User, string.Empty), CancellationToken.None);
 
         outcome.Result.ShouldBe(EndChatResult.NotFound);
     }
@@ -59,7 +59,7 @@ public class EndChatCommandHandlerTests
         var handler = Build(session, out _);
 
         var outcome = await handler.Handle(
-            new EndChatCommand(session.Id, EndChatReason.Idle, null), CancellationToken.None);
+            new EndChatCommand(session.Id, EndChatReason.Idle, string.Empty), CancellationToken.None);
 
         outcome.Result.ShouldBe(EndChatResult.AlreadyEnded);
         session.DequeueEvents().ShouldBeEmpty();

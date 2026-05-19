@@ -50,7 +50,7 @@ public static class DbSetExtensions
         CancellationToken ct = default) where T : class
     {
         var outer = db.Database.CurrentTransaction;
-        string? savepoint = null;
+        var savepoint = string.Empty;
         if (outer is not null)
         {
             savepoint = $"sp{Interlocked.Increment(ref _savepointCounter)}";
@@ -61,7 +61,7 @@ public static class DbSetExtensions
         try
         {
             await db.SaveChangesAsync(ct);
-            if (savepoint is not null) await outer!.ReleaseSavepointAsync(savepoint, ct);
+            if (savepoint.Length > 0) await outer!.ReleaseSavepointAsync(savepoint, ct);
             return true;
         }
         catch (DbUpdateException ex) when (
@@ -69,7 +69,7 @@ public static class DbSetExtensions
             && constraintNames.Contains(pg.ConstraintName))
         {
             db.Entry(entity).State = EntityState.Detached;
-            if (savepoint is not null) await outer!.RollbackToSavepointAsync(savepoint, ct);
+            if (savepoint.Length > 0) await outer!.RollbackToSavepointAsync(savepoint, ct);
             return false;
         }
     }

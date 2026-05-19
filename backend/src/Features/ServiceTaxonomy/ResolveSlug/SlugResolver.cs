@@ -12,17 +12,18 @@ public sealed class SlugResolver(
 {
     public async Task<ResolveSlugResult> ResolveAsync(
         string proposedSlug,
-        string? rawExample,
+        string rawExample = "",
         CancellationToken ct = default)
     {
         var normalized = Normalize(proposedSlug);
         if (string.IsNullOrEmpty(normalized))
             throw new ArgumentException("Proposed slug is empty after normalization.", nameof(proposedSlug));
 
+        var memo = rawExample.Length > 0 ? rawExample : proposedSlug;
         var existing = await repository.GetBySlugAsync(normalized, ct);
         if (existing is not null)
         {
-            existing.RememberRawExample(rawExample ?? proposedSlug);
+            existing.RememberRawExample(memo);
             return new ResolveSlugResult(existing.Slug, SlugResolution.ReturnedExisting, 1.0);
         }
 
@@ -34,7 +35,7 @@ public sealed class SlugResolver(
 
         if (top is not null && topSim >= opts.AutoMergeThreshold)
         {
-            return await AcceptExistingAsync(top.Slug, rawExample ?? proposedSlug, SlugResolution.AutoMerged, topSim, ct);
+            return await AcceptExistingAsync(top.Slug, memo, SlugResolution.AutoMerged, topSim, ct);
         }
 
         if (top is not null && topSim >= opts.AiJudgeThreshold)
@@ -49,17 +50,17 @@ public sealed class SlugResolver(
             var matched = judged.MatchedSlug;
             var isExistingMatch =
                 !judged.IsNew
-                && !string.IsNullOrEmpty(matched)
+                && matched.Length > 0
                 && candidateList.Contains(matched, StringComparer.Ordinal);
 
             if (isExistingMatch)
             {
-                return await AcceptExistingAsync(matched!, rawExample ?? proposedSlug, SlugResolution.AiJudgedMerge, topSim, ct);
+                return await AcceptExistingAsync(matched, memo, SlugResolution.AiJudgedMerge, topSim, ct);
             }
             logger.LogDebug("AI judged proposal {Slug} as new (top similarity {Sim:F2})", normalized, topSim);
         }
 
-        var created = Service.Create(normalized, rawExample ?? proposedSlug);
+        var created = Service.Create(normalized, memo);
         await repository.AddAsync(created, ct);
 
         var resolution = top is not null && topSim >= opts.AiJudgeThreshold
