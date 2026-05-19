@@ -15,6 +15,7 @@ using Hook.Features.ProviderAvailability.Dev;
 using Hook.Features.RateLimiting;
 using Hook.Features.ServiceRequest;
 using Hook.Features.ServiceTaxonomy;
+using Hook.Features.ServiceTaxonomy.SeedRoots;
 using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Dev;
 using Hook.Features.Whatsapp.ReceiveWebhook;
@@ -163,6 +164,9 @@ try
         await using var scope = app.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
         await db.Database.MigrateAsync();
+
+        var rootSeeder = scope.ServiceProvider.GetRequiredService<RootSectorSeeder>();
+        await rootSeeder.EnsureRootSectorsAsync();
 
         if (app.Environment.IsDevelopment() || app.Environment.IsStaging())
         {

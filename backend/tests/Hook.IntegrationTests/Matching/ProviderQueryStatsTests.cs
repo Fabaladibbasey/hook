@@ -1,6 +1,7 @@
 using Hook.Features.Feedback.ProviderStatsAggregate;
 using Hook.Features.Matching.Match;
 using Hook.Features.ProviderAvailability.AvailabilityAggregate;
+using Hook.Features.ServiceTaxonomy.ServiceAggregate;
 using Hook.Shared.Persistence.Data;
 using Microsoft.Extensions.DependencyInjection;
 using Location = Hook.Features.Geocoding.Models.Location;
@@ -25,11 +26,11 @@ public sealed class ProviderQueryStatsTests : PipelineTestBase
 
         var withStats = ProviderAvailability.Register(
             $"+1415{Random.Shared.Next(1_000_000, 9_999_999)}",
-            new[] { slug }, location, "SF", shareContact: true,
+            [slug], location, "SF", shareContact: true,
             ttl: TimeSpan.FromHours(1), now);
         var coldStart = ProviderAvailability.Register(
             $"+1415{Random.Shared.Next(1_000_000, 9_999_999)}",
-            new[] { slug }, location, "SF", shareContact: true,
+            [slug], location, "SF", shareContact: true,
             ttl: TimeSpan.FromHours(1), now);
 
         var stats = ProviderStats.Initial(withStats.Phone, now);
@@ -42,7 +43,7 @@ public sealed class ProviderQueryStatsTests : PipelineTestBase
         // zero-default path (CompletedCount=0, SuccessRate=0) is preserved.
         var zeroStats = ProviderAvailability.Register(
             $"+1415{Random.Shared.Next(1_000_000, 9_999_999)}",
-            new[] { slug }, location, "SF", shareContact: true,
+            [slug], location, "SF", shareContact: true,
             ttl: TimeSpan.FromHours(1), now);
         var zero = ProviderStats.Initial(zeroStats.Phone, now);
 
@@ -51,12 +52,13 @@ public sealed class ProviderQueryStatsTests : PipelineTestBase
         await db.SaveChangesAsync();
 
         var requestPoint = location.ToPoint();
-        var candidates = await query.FindCandidatesAsync(
-            requestPoint, slug, radiusKm: 5, excludePhones: [], now);
+        var expanded = new ExpandedSlugs(slug, Parent: null, Children: Array.Empty<string>());
+        var scored = await query.FindCandidatesAsync(
+            requestPoint, expanded, radiusKm: 5, excludePhones: [], now);
 
-        var hot = Assert.Single(candidates, c => c.Phone == withStats.Phone);
-        var cold = Assert.Single(candidates, c => c.Phone == coldStart.Phone);
-        var zeroCandidate = Assert.Single(candidates, c => c.Phone == zeroStats.Phone);
+        var hot = Assert.Single(scored, c => c.Candidate.Phone == withStats.Phone).Candidate;
+        var cold = Assert.Single(scored, c => c.Candidate.Phone == coldStart.Phone).Candidate;
+        var zeroCandidate = Assert.Single(scored, c => c.Candidate.Phone == zeroStats.Phone).Candidate;
 
         Assert.Equal(5, hot.CompletedJobs);
         Assert.Equal(0.6, hot.SuccessRate, precision: 6);
@@ -84,11 +86,11 @@ public sealed class ProviderQueryStatsTests : PipelineTestBase
 
         var hot = ProviderAvailability.Register(
             $"+1415{Random.Shared.Next(1_000_000, 9_999_999)}",
-            new[] { slug }, location, "SF", shareContact: true,
+            [slug], location, "SF", shareContact: true,
             ttl: TimeSpan.FromHours(48), registeredAt);
         var cold = ProviderAvailability.Register(
             $"+1415{Random.Shared.Next(1_000_000, 9_999_999)}",
-            new[] { slug }, location, "SF", shareContact: true,
+            [slug], location, "SF", shareContact: true,
             ttl: TimeSpan.FromHours(48), registeredAt);
 
         var stats = ProviderStats.Initial(hot.Phone, now);
@@ -99,10 +101,11 @@ public sealed class ProviderQueryStatsTests : PipelineTestBase
         await db.SaveChangesAsync();
 
         var requestPoint = location.ToPoint();
-        var candidates = await query.FindCandidatesAsync(
-            requestPoint, slug, radiusKm: 5, excludePhones: [], now);
+        var expanded = new ExpandedSlugs(slug, Parent: null, Children: Array.Empty<string>());
+        var scored = await query.FindCandidatesAsync(
+            requestPoint, expanded, radiusKm: 5, excludePhones: [], now);
 
-        var ranked = scorer.ScoreAndRank(candidates, radiusKm: 5, now, take: 10);
+        var ranked = scorer.ScoreAndRank(scored, radiusKm: 5, now, take: 10);
 
         Assert.Equal(hot.Phone, ranked[0].Candidate.Phone);
         Assert.True(

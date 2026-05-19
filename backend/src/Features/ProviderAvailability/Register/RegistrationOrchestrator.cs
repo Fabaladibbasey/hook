@@ -45,6 +45,7 @@ public sealed class RegistrationOrchestrator(
             if (quick == IntentKind.Cancel)
             {
                 await availability.RemoveAsync(phone.Value, ct);
+                await drafts.DeleteAsync(phone.Value, ct);
                 await feedback.DeleteStatsAsync(phone.Value, ct);
                 logger.LogDebug("Unlisted provider {Phone}", phone.Mask());
                 await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
@@ -52,16 +53,30 @@ public sealed class RegistrationOrchestrator(
                 return;
             }
 
-            // Incremental add: a listed provider sending "I also offer X" appends new
-            // canonical slugs to their availability silently. Yes/no/edit short tokens
-            // produce no extraction so they fall through to the heartbeat reply.
-            if (await TryAddServicesAsync(existing, message.Text ?? string.Empty, ct) is { Count: > 0 } added)
+            // Pending add-service confirmation: a previous inbound proposed new
+            // slugs and asked YES/EDIT. Drive that flow before treating this
+            // inbound as a fresh proposal.
+            var pendingDraft = await drafts.GetAsync(phone.Value, ct);
+            if (pendingDraft is { Step: RegistrationStep.ConfirmAddServices })
             {
-                existing.Heartbeat(TimeSpan.FromHours(options.Value.ExpiryHours), now);
-                await refreshScheduler.ScheduleAsync(phone.Value, now, ct);
-                logger.LogDebug("Added {Count} services for provider {Phone}", added.Count, phone.Mask());
+                pendingDraft.Touch(now);
+                await ConfirmAddServicesAsync(existing, pendingDraft, message, phone, now, ct);
+                return;
+            }
+
+            // Incremental add: a listed provider sending "I offer X" must
+            // confirm before the listing mutates — symmetric to the new-
+            // registration YES/EDIT step. TTL extension is deferred until
+            // confirmation so a stale probe can't extend a listing.
+            var proposed = await ProposeAddServicesAsync(existing, message.Text ?? string.Empty, ct);
+            if (proposed.Count > 0)
+            {
+                var addDraft = RegistrationDraft.Start(phone.Value, now);
+                addDraft.SetServices(proposed, now);
+                addDraft.StepTo(RegistrationStep.ConfirmAddServices, now);
+                await drafts.UpsertAsync(addDraft, ct);
                 await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                    $"Added {string.Join(", ", added)}. You're now listed for {string.Join(", ", existing.Services)} (extended for {options.Value.ExpiryHours}h). Reply LEAVE to unlist."));
+                    $"I detected: {string.Join(", ", proposed)}. Reply YES to add to your listed services, or EDIT to change."));
                 return;
             }
 
@@ -75,6 +90,14 @@ public sealed class RegistrationOrchestrator(
         }
 
         var existingDraft = await drafts.GetAsync(phone.Value, ct);
+        // ConfirmAddServices is a listed-provider state. If it survived after
+        // the provider was unlisted (retention sweep, manual cleanup), treat
+        // as corrupt — drop it and restart the new-registration flow.
+        if (existingDraft is { Step: RegistrationStep.ConfirmAddServices })
+        {
+            await drafts.DeleteAsync(phone.Value, ct);
+            existingDraft = null;
+        }
         var draft = existingDraft ?? RegistrationDraft.Start(phone.Value, now);
         if (existingDraft is not null) draft.Touch(now);
 
@@ -210,7 +233,7 @@ public sealed class RegistrationOrchestrator(
         return canonical;
     }
 
-    private async Task<List<string>> TryAddServicesAsync(
+    private async Task<List<string>> ProposeAddServicesAsync(
         AvailabilityAggregate.ProviderAvailability existing, string text, CancellationToken ct)
     {
         var extracted = await ai.ExtractServicesAsync(text, ct);
@@ -220,9 +243,85 @@ public sealed class RegistrationOrchestrator(
         var newSlugs = canonical.Except(existing.Services).Distinct().ToList();
         if (newSlugs.Count == 0) return [];
 
-        existing.AddServices(newSlugs, options.Value.MaxServicesPerProvider);
-        // Recompute the actually-added subset after the cap (Services is now capped).
-        return [.. newSlugs.Where(s => existing.Services.Contains(s))];
+        var remainingCap = options.Value.MaxServicesPerProvider - existing.Services.Count;
+        if (remainingCap <= 0) return [];
+        return [.. newSlugs.Take(remainingCap)];
+    }
+
+    private async Task ConfirmAddServicesAsync(
+        AvailabilityAggregate.ProviderAvailability existing,
+        RegistrationDraft draft,
+        InboundMessage message,
+        PhoneNumber phone,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var quick = QuickIntent.Detect(message.Text);
+
+        // Mid-confirm append: not a yes/no/edit token, try to extract more
+        // services and merge into the proposal. Mirrors the bracket-style
+        // "and X" path in ConfirmServicesAsync for the new-registration flow.
+        if (quick is null or not (IntentKind.Confirmation or IntentKind.Rejection or IntentKind.Edit))
+        {
+            var extracted = await ai.ExtractServicesAsync(message.Text ?? string.Empty, ct);
+            if (extracted.Slugs.Count > 0)
+            {
+                var canonical = await ResolveAllAsync(extracted.Slugs, message.Text ?? string.Empty, ct);
+                var remainingCap = options.Value.MaxServicesPerProvider - existing.Services.Count;
+                var merged = draft.DraftServices
+                    .Concat(canonical.Where(s => !existing.Services.Contains(s)))
+                    .Distinct()
+                    .Take(remainingCap)
+                    .ToList();
+                if (merged.Count != draft.DraftServices.Count)
+                {
+                    draft.SetServices(merged, now);
+                    await drafts.UpsertAsync(draft, ct);
+                    await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+                        $"Updated: {string.Join(", ", merged)}. Reply YES to add, or EDIT to change."));
+                    return;
+                }
+            }
+        }
+
+        var intent = quick is { } q
+            ? new IntentDetectionResult(q, 1.0, "en", "quick")
+            : await ai.DetectIntentAsync(message.Text ?? string.Empty, ct);
+
+        if (intent.Intent == IntentKind.Confirmation)
+        {
+            existing.AddServices(draft.DraftServices, options.Value.MaxServicesPerProvider);
+            existing.Heartbeat(TimeSpan.FromHours(options.Value.ExpiryHours), now);
+            await refreshScheduler.ScheduleAsync(phone.Value, now, ct);
+            var added = draft.DraftServices.Where(existing.Services.Contains).ToList();
+            await drafts.DeleteAsync(phone.Value, ct);
+            logger.LogDebug("Added {Count} services for provider {Phone}", added.Count, phone.Mask());
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+                $"Added {string.Join(", ", added)}. You're now listed for {string.Join(", ", existing.Services)} (extended for {options.Value.ExpiryHours}h). Reply LEAVE to unlist."));
+            return;
+        }
+
+        if (intent.Intent == IntentKind.Edit)
+        {
+            await drafts.DeleteAsync(phone.Value, ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+                "Send the corrected list of services you want to add in one message."));
+            return;
+        }
+
+        if (intent.Intent == IntentKind.Rejection)
+        {
+            await drafts.DeleteAsync(phone.Value, ct);
+            existing.Heartbeat(TimeSpan.FromHours(options.Value.ExpiryHours), now);
+            await refreshScheduler.ScheduleAsync(phone.Value, now, ct);
+            var listed = string.Join(", ", existing.Services);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+                $"Keeping your listing as is for {listed} (extended for {options.Value.ExpiryHours}h). Reply LEAVE to unlist."));
+            return;
+        }
+
+        await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+            "Reply YES to add or EDIT to change."));
     }
 
     private async Task CollectLocationAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
@@ -241,7 +340,7 @@ public sealed class RegistrationOrchestrator(
             var geocoded = await geocoding.GeocodeAsync(message.Text!, ct);
             if (geocoded is null)
             {
-                await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Couldn't find that address. Please send your GPS pin (📎 → Location)."));
+                await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "I couldn't find that address. Try typing it differently, or send a GPS pin (📎 → Location)."));
                 await drafts.UpsertAsync(draft, ct);
                 return;
             }
@@ -309,7 +408,7 @@ public sealed class RegistrationOrchestrator(
             logger.LogWarning("Incomplete draft for {Phone} cannot finalize", phone.Mask());
             await drafts.DeleteAsync(phone.Value, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                "Couldn't list you — some details were missing. Reply 'I offer …' to start over."));
+                "Couldn't list you — I'm missing your service or location. Reply \"I offer …\" and send a location pin to try again."));
             return;
         }
 
@@ -330,7 +429,7 @@ public sealed class RegistrationOrchestrator(
                 phone.Mask(), openRequest.ServiceSlug);
             await drafts.DeleteAsync(phone.Value, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                $"You have an open request for {human}. Cancel it first (reply LEAVE) before listing yourself for {human}."));
+                $"You can't be both client and provider for the same service. You have an open request for {human} — reply CANCEL to close it, then register again."));
             return;
         }
 
@@ -361,7 +460,7 @@ public sealed class RegistrationOrchestrator(
             logger.LogError(ex, "Failed to finalize provider registration for {Phone}", phone.Mask());
             await drafts.DeleteAsync(phone.Value, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                "Couldn't list you right now. Reply 'I offer …' to try again."));
+                "Something went wrong listing you. Try again in a moment — reply \"I offer …\" to retry."));
         }
     }
 }

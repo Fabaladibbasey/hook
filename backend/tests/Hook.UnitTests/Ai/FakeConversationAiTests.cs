@@ -52,7 +52,7 @@ public class FakeConversationAiTests
     [Fact]
     public async Task JudgeServiceMatch_ShouldFindContainmentMatch()
     {
-        var result = await _ai.JudgeServiceMatchAsync("plumb", new[] { "plumbing", "carpentry" });
+        var result = await _ai.JudgeServiceMatchAsync("plumb", ["plumbing", "carpentry"]);
 
         result.MatchedSlug.ShouldBe("plumbing");
         result.IsNew.ShouldBeFalse();
@@ -61,7 +61,7 @@ public class FakeConversationAiTests
     [Fact]
     public async Task JudgeServiceMatch_ShouldReturnNewWhenNoCandidate()
     {
-        var result = await _ai.JudgeServiceMatchAsync("astrology", new[] { "plumbing", "carpentry" });
+        var result = await _ai.JudgeServiceMatchAsync("astrology", ["plumbing", "carpentry"]);
 
         result.IsNew.ShouldBeTrue();
         result.ProposedSlug.ShouldBe("astrology");
@@ -72,7 +72,7 @@ public class FakeConversationAiTests
     {
         var ctx = new ReplyContext(
             Purpose: "confirm-services",
-            RecentTurns: new[] { new ConversationTurn(TurnRole.User, "I do plumbing") });
+            RecentTurns: [new ConversationTurn(TurnRole.User, "I do plumbing")]);
 
         var reply = await _ai.GenerateReplyAsync(ctx);
 

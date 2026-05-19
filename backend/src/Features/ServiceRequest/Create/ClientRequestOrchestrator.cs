@@ -187,7 +187,7 @@ public sealed class ClientRequestOrchestrator(
             var geocoded = await geocoding.GeocodeAsync(message.Text!, ct);
             if (geocoded is null)
             {
-                await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Couldn't find that address. Please send your GPS pin (📎 → Location)."));
+                await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "I couldn't find that address. Try typing it differently, or send a GPS pin (📎 → Location)."));
                 await drafts.UpsertAsync(draft, ct);
                 return;
             }
@@ -238,7 +238,7 @@ public sealed class ClientRequestOrchestrator(
             logger.LogWarning("Incomplete client draft for {Phone}", phone.Mask());
             await drafts.DeleteAsync(phone.Value, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                "Couldn't save your request — some details were missing. Reply with what service you need to start over."));
+                "Couldn't save your request — I'm missing the service or your location. Reply with what you need (e.g. \"I need a plumber\") and send a location pin."));
             return;
         }
 
@@ -254,7 +254,7 @@ public sealed class ClientRequestOrchestrator(
                 phone.Mask(), draft.DraftServiceSlug);
             await drafts.DeleteAsync(phone.Value, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                $"You're listed as a {human} provider. To request {human} instead, reply LEAVE to unlist first, then send your request again."));
+                $"You can't request a service you're already listed to provide. To request {human}, first reply LEAVE to unlist from {human} (your other services stay active), then send your request again."));
             return;
         }
 
@@ -289,7 +289,7 @@ public sealed class ClientRequestOrchestrator(
             logger.LogWarning("Consent received with incomplete draft for {Phone}", phone.Mask());
             await drafts.DeleteAsync(phone.Value, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                "Couldn't save your request — some details were missing. Reply with what service you need to start over."));
+                "Couldn't save your request — I'm missing the service or your location. Reply with what you need (e.g. \"I need a plumber\") and send a location pin."));
             return;
         }
 
@@ -319,7 +319,7 @@ public sealed class ClientRequestOrchestrator(
             logger.LogError(ex, "Failed to finalize client request for {Phone}", phone.Mask());
             await drafts.DeleteAsync(phone.Value, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                "Couldn't save your request right now. Reply with what service you need (e.g. 'I need a plumber') to try again."));
+                "Something went wrong saving your request. Try again in a moment — reply with what you need (e.g. \"I need a plumber\")."));
         }
     }
 

@@ -81,7 +81,8 @@ public class DualRoleTests : PipelineTestBase
         // Expect the explicit reject message, NOT "Looking for nearby providers".
         var reject = await client.ExpectOutboundAsync(
             phone,
-            m => m.Body.Contains("listed as a plumbing provider", StringComparison.OrdinalIgnoreCase),
+            m => m.Body.Contains("already listed to provide", StringComparison.OrdinalIgnoreCase)
+                 && m.Body.Contains("plumbing", StringComparison.OrdinalIgnoreCase),
             since: afterReg);
         reject.Body.ShouldContain("LEAVE", Case.Insensitive);
 
@@ -111,7 +112,7 @@ public class DualRoleTests : PipelineTestBase
             phone,
             m => m.Body.Contains("open request for plumbing", StringComparison.OrdinalIgnoreCase),
             since: afterReq);
-        reject.Body.ShouldContain("LEAVE", Case.Insensitive);
+        reject.Body.ShouldContain("CANCEL", Case.Insensitive);
 
         using var scope = _fx.Factory.Services.CreateScope();
         var availability = scope.ServiceProvider.GetRequiredService<IProviderAvailabilityRepository>();

@@ -1,12 +1,14 @@
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
 using Hook.Features.ServiceTaxonomy;
+using Hook.Features.ServiceTaxonomy.JudgeParent;
 using Hook.Features.ServiceTaxonomy.ResolveSlug;
 using Hook.Features.ServiceTaxonomy.ServiceAggregate;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using Shouldly;
+using Wolverine;
 
 namespace Hook.UnitTests.ServiceTaxonomy;
 
@@ -15,6 +17,8 @@ public class SlugResolverTests
     private readonly Dictionary<string, Service> _store = new(StringComparer.OrdinalIgnoreCase);
     private readonly Mock<IServiceRepository> _repoMock = new();
     private readonly Mock<IConversationAi> _aiMock = new();
+    private readonly Mock<IMessageBus> _busMock = new();
+    private readonly List<object> _published = new();
     private Func<string, string, double> _similarityRule = (_, _) => 0;
 
     public SlugResolverTests()
@@ -41,6 +45,12 @@ public class SlugResolverTests
                 It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string proposed, IReadOnlyList<string> _, CancellationToken __) =>
                 new ServiceJudgeResult(string.Empty, true, proposed));
+
+        _busMock.Setup(x => x.PublishAsync(
+                It.IsAny<object>(),
+                It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions?>((msg, _) => _published.Add(msg))
+            .Returns(ValueTask.CompletedTask);
     }
 
     private SlugResolver Build(double autoMerge = 0.85, double aiJudge = 0.50)
@@ -50,7 +60,7 @@ public class SlugResolverTests
             AutoMergeThreshold = autoMerge,
             AiJudgeThreshold = aiJudge
         });
-        return new SlugResolver(_repoMock.Object, _aiMock.Object, options, NullLogger<SlugResolver>.Instance);
+        return new SlugResolver(_repoMock.Object, _aiMock.Object, _busMock.Object, options, NullLogger<SlugResolver>.Instance);
     }
 
     private void Seed(string slug) => _store[slug] = Service.Create(slug);
@@ -61,6 +71,16 @@ public class SlugResolverTests
     [InlineData("  Door / Wood Work  ", "door-wood-work")]
     [InlineData("dental--/--care", "dental-care")]
     public void Normalize_ShouldProduceKebabCaseSlug(string input, string expected)
+    {
+        SlugResolver.Normalize(input).ShouldBe(expected);
+    }
+
+    [Theory]
+    [InlineData("кардиолог", "")]                  // Cyrillic letters dropped
+    [InlineData("医生", "")]                         // CJK dropped
+    [InlineData("café-au-lait", "caf-au-lait")]    // é dropped, ASCII preserved
+    [InlineData("MIX-кир-ascii", "mix-ascii")]     // mid-Cyrillic stripped
+    public void Normalize_DropsNonAsciiHomoglyphs(string input, string expected)
     {
         SlugResolver.Normalize(input).ShouldBe(expected);
     }
@@ -175,5 +195,58 @@ public class SlugResolverTests
 
         result.CanonicalSlug.ShouldBe("plumbing");
         result.Resolution.ShouldBe(SlugResolution.AiJudgedMerge);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ShouldPublishJudgeParentRequest_OnCreate()
+    {
+        var resolver = Build();
+
+        await resolver.ResolveAsync("astrology", "horoscope");
+
+        _published.OfType<JudgeParentSlugRequested>()
+            .ShouldContain(r => r.Slug == "astrology");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ShouldNotPublishJudgeParentRequest_OnReturnedExisting()
+    {
+        Seed("plumbing");
+        var resolver = Build();
+
+        await resolver.ResolveAsync("plumbing", "I need a plumber");
+
+        _published.OfType<JudgeParentSlugRequested>().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ShouldNotPublishJudgeParentRequest_OnAutoMerged()
+    {
+        Seed("plumbing");
+        _similarityRule = (existing, _) => existing == "plumbing" ? 0.92 : 0;
+        var resolver = Build();
+
+        await resolver.ResolveAsync("plumbings");
+
+        _published.OfType<JudgeParentSlugRequested>().ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task AcceptExisting_PublishesJudgeParent_WhenSlugRowMissing()
+    {
+        // FindSimilar surfaces a slug at AutoMerge similarity, but GetBySlugAsync
+        // for that slug returns null (row was deleted between read and merge —
+        // possible in concurrent retention sweeps). AcceptExistingAsync re-creates
+        // the row and must publish parent-judgment for the new aggregate.
+        _similarityRule = (existing, _) => existing == "ghost" ? 0.92 : 0;
+        _store["ghost"] = Service.Create("ghost"); // FindSimilar will see it...
+        _repoMock.Setup(x => x.GetBySlugAsync("ghost", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Service?)null); // ...but GetBySlugAsync says it's gone
+
+        var resolver = Build();
+        await resolver.ResolveAsync("ghosts");
+
+        _published.OfType<JudgeParentSlugRequested>()
+            .ShouldContain(r => r.Slug == "ghost");
     }
 }

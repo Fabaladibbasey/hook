@@ -9,6 +9,7 @@ public enum RegistrationStep
     AwaitingLocation,
     ConfirmLocation,
     AwaitingConsent,
+    ConfirmAddServices,
     Done
 }
 

@@ -102,7 +102,7 @@ public sealed class PhoneExchangerIntegrationTests : PipelineTestBase
         db.ServiceRequests.Add(request);
 
         var provider = ProviderAvailability.Register(
-            providerPhone, new[] { "plumbing" },
+            providerPhone, ["plumbing"],
             new Location(13.45, -16.6), "Banjul",
             providerConsent, TimeSpan.FromHours(ttlHours), now);
         db.ProviderAvailabilities.Add(provider);

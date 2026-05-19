@@ -23,9 +23,8 @@ public sealed class ServiceRequestCreatedHandler(
         var request = await requests.GetAsync(evt.RequestId, ct);
         if (request is null) return;
 
-        if (PhoneNumber.TryParse(request.ClientPhone, out var clientPhone))
-        {
-            await presenter.PresentAsync(clientPhone, batch, request.ServiceSlug, ct);
-        }
+        if (!PhoneNumber.TryParse(request.ClientPhone, out var clientPhone)) return;
+
+        await presenter.PresentAsync(clientPhone, batch, request.ServiceSlug, ct);
     }
 }

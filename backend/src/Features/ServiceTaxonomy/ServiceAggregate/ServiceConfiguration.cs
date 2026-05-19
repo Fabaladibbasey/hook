@@ -12,10 +12,18 @@ public class ServiceConfiguration : IEntityTypeConfiguration<Service>
         builder.HasKey(s => s.Slug);
         builder.Property(s => s.Slug).HasMaxLength(80);
         builder.Property(s => s.CreatedAt).IsRequired();
-        builder.HasJsonbArray(s => s.RawExamples);
+        builder.Property(s => s.ParentSlug).HasMaxLength(80);
+        builder.HasJsonbArray(s => s.RawExamples)
+               .UsePropertyAccessMode(PropertyAccessMode.Field);
 
         builder.HasIndex(s => s.Slug).HasDatabaseName("ix_services_slug_trgm")
             .HasMethod("gin")
             .HasOperators("gin_trgm_ops");
+
+        builder.HasOne<Service>()
+               .WithMany()
+               .HasForeignKey(s => s.ParentSlug)
+               .OnDelete(DeleteBehavior.SetNull);
+        builder.HasIndex(s => s.ParentSlug).HasDatabaseName("ix_services_parent_slug");
     }
 }

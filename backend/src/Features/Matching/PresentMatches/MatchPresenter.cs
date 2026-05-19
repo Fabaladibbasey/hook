@@ -2,6 +2,7 @@ using System.Text.Json;
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
 using Hook.Features.Matching.Match;
+using Hook.Features.Matching.MatchAggregate;
 using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Phone;
 using Microsoft.Extensions.Options;
@@ -34,7 +35,8 @@ public sealed class MatchPresenter(
                 n = i + 1,
                 phone = Mask(s.Candidate.Phone),
                 distance = Math.Round(s.Candidate.DistanceKm, 1),
-                score = Math.Round(s.Score, 2)
+                score = Math.Round(s.Score, 2),
+                label = s.Kind == MatchKind.Exact ? "" : MatchLabels.Related
             })
             .ToArray();
 
@@ -52,7 +54,11 @@ public sealed class MatchPresenter(
             Facts: facts);
 
         var fallbackLines = capped
-            .Select((s, i) => $"{i + 1}. {Mask(s.Candidate.Phone)} — {s.Candidate.DistanceKm:F1}km away")
+            .Select((s, i) =>
+            {
+                var tag = s.Kind == MatchKind.Exact ? "" : $" ({MatchLabels.Related})";
+                return $"{i + 1}. {Mask(s.Candidate.Phone)} — {s.Candidate.DistanceKm:F1}km away{tag}";
+            })
             .ToList();
         // Bot owns the call-to-action verbatim — the AI presenter only writes the
         // body. Keeping the action line deterministic guarantees the vocabulary

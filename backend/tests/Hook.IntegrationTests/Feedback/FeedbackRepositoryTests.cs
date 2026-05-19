@@ -326,11 +326,11 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
 
         Assert.True(await db.TryInsertUniqueAsync(
             MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow),
-            new[] { FeedbackConstants.PendingUniqueIndexName, FeedbackConstants.RequestStep1UniqueIndexName }));
+            [FeedbackConstants.PendingUniqueIndexName, FeedbackConstants.RequestStep1UniqueIndexName]));
 
         Assert.False(await db.TryInsertUniqueAsync(
             MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow),
-            new[] { FeedbackConstants.PendingUniqueIndexName, FeedbackConstants.RequestStep1UniqueIndexName }));
+            [FeedbackConstants.PendingUniqueIndexName, FeedbackConstants.RequestStep1UniqueIndexName]));
 
         // Outer tx must still be usable — a poisoned tx would throw here.
         var count = await db.MatchFeedback.CountAsync();

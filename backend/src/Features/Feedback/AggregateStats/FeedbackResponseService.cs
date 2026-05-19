@@ -64,7 +64,13 @@ public sealed class FeedbackResponseService(
 
         // Bound the AI fallback by the retry window — hostile garbage on a stale Pending
         // shouldn't keep dragging Ollama into the loop.
-        if (parsed is null && now - pending.PromptedAt > opts.ParseRetryWindow) return;
+        if (parsed is null && now - pending.PromptedAt > opts.ParseRetryWindow)
+        {
+            if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct)) return;
+            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+                "Thanks — recorded that. No more questions on this one."));
+            return;
+        }
 
         var answer = parsed ?? await ResolveIntentYesNoAsync(intent, ct);
         if (answer is null)
@@ -76,7 +82,9 @@ public sealed class FeedbackResponseService(
 
         if (answer != FeedbackAnswer.Yes)
         {
-            await feedback.TryClaimPendingAsync(pending.Id, answer.Value, now, ct);
+            if (!await feedback.TryClaimPendingAsync(pending.Id, answer.Value, now, ct)) return;
+            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+                "Thanks for letting us know. We'll keep looking for someone better next time."));
             return;
         }
 
@@ -126,8 +134,10 @@ public sealed class FeedbackResponseService(
         {
             if (now - pending.PromptedAt > opts.ParseRetryWindow)
             {
-                await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct);
                 logger.LogWarning("IdentifyWinner parse window expired for match {MatchId}", pending.MatchId);
+                if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct)) return;
+                await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+                    "Thanks — recorded that. No more questions on this one."));
                 return;
             }
             await SendRetryHintIfFreshAsync(msg, pending, now, opts,
@@ -149,7 +159,13 @@ public sealed class FeedbackResponseService(
         var text = msg.Text ?? string.Empty;
 
         var parsed = ParseAnswer(text);
-        if (parsed is null && now - pending.PromptedAt > opts.ParseRetryWindow) return;
+        if (parsed is null && now - pending.PromptedAt > opts.ParseRetryWindow)
+        {
+            if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct)) return;
+            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+                "Thanks — recorded that. No more questions on this one."));
+            return;
+        }
 
         // AI intent fallback only resolves Confirmation/Rejection; InProgress comes
         // from ParseAnswer's regex.
@@ -177,6 +193,10 @@ public sealed class FeedbackResponseService(
             return;
         }
 
+        var step2Ack = answer == FeedbackAnswer.Yes
+            ? "Glad it worked out — thanks for the feedback!"
+            : "Thanks for letting us know. We'll factor that into future matches.";
+        await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From, step2Ack));
         await RecordOutcomeAsync(pending.MatchId, answer.Value, now, ct);
     }
 
@@ -201,7 +221,7 @@ public sealed class FeedbackResponseService(
                 logger.LogWarning(
                     "ETA {Eta} for match {MatchId} exceeds MaxEtaHorizon ({Horizon}); falling back",
                     etaValue, pending.MatchId, opts.MaxEtaHorizon);
-                await ClaimSkippedAndFallbackAsync(pending, opts, now, ct);
+                await ClaimSkippedAndFallbackAsync(pending, opts, now, msg.From, ct);
                 return;
             }
 
@@ -210,6 +230,8 @@ public sealed class FeedbackResponseService(
             var delay = etaValue - now + opts.EtaScheduleBuffer;
             if (delay < TimeSpan.Zero) delay = opts.EtaScheduleBuffer;
             await events.ScheduleAsync(new Step2FeedbackCheck(pending.MatchId), delay, ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+                "Got it — I'll check back with you after that. Good luck!"));
             logger.LogInformation(
                 "ETA captured for match {MatchId}, Step2 recheck scheduled at +{Delay}",
                 pending.MatchId, delay);
@@ -223,14 +245,16 @@ public sealed class FeedbackResponseService(
             return;
         }
 
-        await ClaimSkippedAndFallbackAsync(pending, opts, now, ct);
+        await ClaimSkippedAndFallbackAsync(pending, opts, now, msg.From, ct);
     }
 
     private async Task ClaimSkippedAndFallbackAsync(
-        MatchFeedback pending, FeedbackOptions opts, DateTimeOffset now, CancellationToken ct)
+        MatchFeedback pending, FeedbackOptions opts, DateTimeOffset now, PhoneNumber from, CancellationToken ct)
     {
         if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct)) return;
         await events.ScheduleAsync(new Step2FeedbackCheck(pending.MatchId), opts.Step2InProgressRecheckDelay, ct);
+        await bus.PublishAsync(new SendWhatsAppTextRequested(from,
+            "Thanks — recorded that. No more questions on this one."));
         logger.LogInformation(
             "ETA unusable for match {MatchId}; Step2 recheck scheduled at +{Delay}",
             pending.MatchId, opts.Step2InProgressRecheckDelay);

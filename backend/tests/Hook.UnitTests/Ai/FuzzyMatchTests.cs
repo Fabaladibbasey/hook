@@ -24,5 +24,5 @@ public class FuzzyMatchTests
 
     [Fact]
     public void MatchesAny_NullTokenInList_IsSkipped()
-        => Assert.True(FuzzyMatch.MatchesAny("yes", new string?[] { null, "yes" }, 1));
+        => Assert.True(FuzzyMatch.MatchesAny("yes", [null, "yes"], 1));
 }

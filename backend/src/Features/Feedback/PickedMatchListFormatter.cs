@@ -13,6 +13,7 @@ internal static class PickedMatchListFormatter
         string.Join(", ", picked.Select((m, i) =>
         {
             var masked = PhoneNumber.TryParse(m.ProviderPhone, out var p) ? p.Mask() : "***";
-            return $"{i + 1}) {masked}";
+            var tag = m.Kind == MatchKind.Exact ? "" : $" ({MatchLabels.Related})";
+            return $"{i + 1}) {masked}{tag}";
         }));
 }

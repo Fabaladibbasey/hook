@@ -302,6 +302,13 @@ namespace Hook.Shared.Persistence.Data.Migrations
                     b.Property<double>("DistanceKm")
                         .HasColumnType("double precision");
 
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)")
+                        .HasDefaultValueSql("'Exact'");
+
                     b.Property<DateTimeOffset?>("PickedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -399,6 +406,12 @@ namespace Hook.Shared.Persistence.Data.Migrations
                         .HasDatabaseName("ix_provider_availabilities_location");
 
                     NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Location"), "gist");
+
+                    b.HasIndex("Services")
+                        .HasDatabaseName("ix_provider_availabilities_services_gin");
+
+                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Services"), "gin");
+                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("Services"), new[] { "jsonb_path_ops" });
 
                     b.ToTable("provider_availabilities", (string)null);
                 });
@@ -580,6 +593,10 @@ namespace Hook.Shared.Persistence.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("ParentSlug")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
                     b.PrimitiveCollection<string>("RawExamples")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -587,6 +604,9 @@ namespace Hook.Shared.Persistence.Data.Migrations
                         .HasDefaultValueSql("'[]'::jsonb");
 
                     b.HasKey("Slug");
+
+                    b.HasIndex("ParentSlug")
+                        .HasDatabaseName("ix_services_parent_slug");
 
                     b.HasIndex("Slug")
                         .HasDatabaseName("ix_services_slug_trgm");
@@ -668,6 +688,14 @@ namespace Hook.Shared.Persistence.Data.Migrations
                         .HasForeignKey("RequestId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Hook.Features.ServiceTaxonomy.ServiceAggregate.Service", b =>
+                {
+                    b.HasOne("Hook.Features.ServiceTaxonomy.ServiceAggregate.Service", null)
+                        .WithMany()
+                        .HasForeignKey("ParentSlug")
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 #pragma warning restore 612, 618
         }
