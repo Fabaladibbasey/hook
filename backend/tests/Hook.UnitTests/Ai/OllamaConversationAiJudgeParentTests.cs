@@ -72,6 +72,27 @@ public class OllamaConversationAiJudgeParentTests
     }
 
     [Fact]
+    public async Task JudgeParentSlugAsync_CapsRawExamplesAtFive()
+    {
+        // Take(5) bounds the prompt size: each rawExample becomes one fenced
+        // <user_input> block. Six inputs → exactly five fences in the body.
+        var handler = new RecordingHandler(content: """{"parentSlug":"doctor"}""");
+        var ai = Build(handler);
+
+        await ai.JudgeParentSlugAsync(
+            "cardiology",
+            ["doctor"],
+            ["chest pain", "shortness of breath", "palpitations", "fainting", "leg swelling", "extra-overflow"]);
+
+        var body = handler.LastRequestBody.ShouldNotBeNull();
+        // PromptSafety.Fence emits `<user_input>\n…` per call — the system prompt
+        // also references the tag inline (without a following newline), so
+        // pattern-match the fence-opener form to count actual fences.
+        var fenceCount = System.Text.RegularExpressions.Regex.Matches(body, @"<user_input>\\n").Count;
+        fenceCount.ShouldBe(5);
+    }
+
+    [Fact]
     public async Task JudgeParentSlugAsync_FencesRawExamplesInRequest()
     {
         // The exact prompt body is internal; we observe the side-effect that

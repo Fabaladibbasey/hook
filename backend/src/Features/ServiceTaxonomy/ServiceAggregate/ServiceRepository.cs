@@ -10,7 +10,12 @@ public sealed class ServiceRepository(HookDbContext db) : IServiceRepository
 
     public async Task<IReadOnlyList<SlugSimilarity>> FindSimilarAsync(string slug, int take, CancellationToken ct = default)
     {
+        // `%` predicate engages ix_services_slug_trgm. Bounded by the
+        // session-level pg_trgm.similarity_threshold (default 0.3) — well below
+        // ServiceTaxonomyOptions.AiJudgeThreshold (0.5), so no resolver
+        // behaviour change.
         var rows = await db.Services
+            .Where(s => EF.Functions.TrigramsAreSimilar(s.Slug, slug))
             .Select(s => new { s.Slug, Similarity = EF.Functions.TrigramsSimilarity(s.Slug, slug) })
             .Where(x => x.Similarity > 0)
             .OrderByDescending(x => x.Similarity)

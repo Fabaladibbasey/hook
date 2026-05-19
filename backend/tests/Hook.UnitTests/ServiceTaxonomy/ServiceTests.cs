@@ -42,9 +42,11 @@ public class ServiceTests
     public void AssignParent_RejectsReParent_OnAlreadyParented()
     {
         var svc = Service.Create("cardiology");
-        svc.AssignParent("doctor");
+        var doctor = Service.Create("doctor");
+        var lawyer = Service.Create("lawyer");
+        svc.AssignParent(doctor);
 
-        Should.Throw<InvalidOperationException>(() => svc.AssignParent("lawyer"));
+        Should.Throw<InvalidOperationException>(() => svc.AssignParent(lawyer));
         svc.ParentSlug.ShouldBe("doctor");
     }
 
@@ -52,14 +54,26 @@ public class ServiceTests
     public void AssignParent_RejectsSelfParent()
     {
         var svc = Service.Create("doctor");
-        Should.Throw<InvalidOperationException>(() => svc.AssignParent("doctor"));
+        Should.Throw<InvalidOperationException>(() => svc.AssignParent(svc));
         svc.ParentSlug.ShouldBeNull();
     }
 
     [Fact]
-    public void AssignParent_RejectsEmptyParent()
+    public void AssignParent_RejectsNullParent()
     {
         var svc = Service.Create("doctor");
-        Should.Throw<ArgumentException>(() => svc.AssignParent(""));
+        Should.Throw<ArgumentNullException>(() => svc.AssignParent(null!));
+    }
+
+    [Fact]
+    public void AssignParent_NonRootParent_Throws()
+    {
+        var grandparent = Service.Create("doctor");
+        var mid = Service.Create("internal-medicine");
+        mid.AssignParent(grandparent);
+
+        var svc = Service.Create("cardiology");
+        Should.Throw<InvalidOperationException>(() => svc.AssignParent(mid));
+        svc.ParentSlug.ShouldBeNull();
     }
 }

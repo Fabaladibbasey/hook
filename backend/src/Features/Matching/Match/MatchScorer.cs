@@ -36,7 +36,7 @@ public sealed class MatchScorer(IOptions<MatchingOptions> options)
             MatchKind.Exact => 1.0,
             MatchKind.Broadened => opts.BroadenedMatchFactor,
             MatchKind.Narrowed => opts.NarrowedMatchFactor,
-            _ => 1.0,
+            _ => throw new ArgumentOutOfRangeException(nameof(input), input.Kind, null),
         };
         var score = baseScore * factor;
 

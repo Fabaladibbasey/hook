@@ -10,9 +10,7 @@ public sealed class RootSectorSeeder(
 {
     private const string ServicesPrimaryKey = "PK_services";
 
-    // Append-only. Never remove — removing a root after children exist would
-    // SET NULL them (graceful but semantically lossy). Order is irrelevant
-    // (membership lookup), so it's safe to reorder.
+    // Append-only — removing a root SET NULLs its children's ParentSlug.
     public static readonly IReadOnlyList<string> RootSlugs =
     [
         "doctor",
@@ -33,12 +31,12 @@ public sealed class RootSectorSeeder(
         "tutor",
     ];
 
+    public static readonly IReadOnlySet<string> RootSlugSet =
+        new HashSet<string>(RootSlugs, StringComparer.Ordinal);
+
     public async Task EnsureRootSectorsAsync(CancellationToken ct = default)
     {
-        // Per-row TryInsertUniqueAsync absorbs the concurrent-boot race (rolling
-        // deploy / scale-out) where two hosts race the same PK and one would
-        // otherwise crash on 23505. Constant cost vs the existing batched
-        // SaveChanges and idempotent on re-run.
+        // Per-row TryInsertUniqueAsync absorbs the concurrent-boot 23505 race.
         var added = 0;
         foreach (var slug in RootSlugs)
         {

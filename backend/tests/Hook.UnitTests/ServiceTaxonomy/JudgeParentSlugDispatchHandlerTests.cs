@@ -130,7 +130,7 @@ public class JudgeParentSlugDispatchHandlerTests
     public async Task Handle_NoOp_WhenSvcAlreadyHasParent()
     {
         var svc = Service.Create("cardiology");
-        svc.AssignParent("doctor");
+        svc.AssignParent(Service.Create("doctor"));
         SetupSlug(svc);
 
         await Build().Handle(new JudgeParentSlugRequested("cardiology"), CancellationToken.None);
@@ -149,6 +149,30 @@ public class JudgeParentSlugDispatchHandlerTests
         await Build().Handle(new JudgeParentSlugRequested("gone"), CancellationToken.None);
 
         _invoked.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Handle_NoOp_WhenSvcDeletedBetweenAiAndAssign()
+    {
+        // Race: dispatch handler reads svc (call #1), AI infers parent, then
+        // retention sweep / manual delete removes the row before the inner
+        // AssignServiceParentHandler re-reads it (call #2 returns null).
+        var first = Service.Create("cardiology");
+        var calls = 0;
+        _repo.Setup(r => r.GetBySlugAsync("cardiology", It.IsAny<CancellationToken>()))
+             .ReturnsAsync(() => Interlocked.Increment(ref calls) == 1 ? first : null);
+        _repo.Setup(r => r.GetBySlugAsync("doctor", It.IsAny<CancellationToken>()))
+             .ReturnsAsync(Service.Create("doctor"));
+        _ai.Setup(a => a.JudgeParentSlugAsync("cardiology", It.IsAny<IReadOnlyList<string>>(),
+                It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("doctor");
+        _bus.Setup(b => b.InvokeAsync(It.IsAny<AssignServiceParent>(), It.IsAny<CancellationToken>(), It.IsAny<TimeSpan?>()))
+            .Returns(async (object cmd, CancellationToken ct, TimeSpan? _) =>
+                await new AssignServiceParentHandler(_repo.Object).Handle((AssignServiceParent)cmd, ct));
+
+        await Build().Handle(new JudgeParentSlugRequested("cardiology"), CancellationToken.None);
+
+        first.ParentSlug.ShouldBeNull();
     }
 
     [Fact]

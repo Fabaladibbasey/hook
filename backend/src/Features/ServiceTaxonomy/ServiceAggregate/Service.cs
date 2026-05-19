@@ -12,7 +12,8 @@ public class Service : IAggregateRoot
     public required string Slug { get; init; }
     public string? ParentSlug { get; private set; }
     public DateTimeOffset CreatedAt { get; init; }
-    public List<string> RawExamples { get; private set; } = [];
+    private readonly List<string> _rawExamples = new();
+    public IReadOnlyList<string> RawExamples => _rawExamples;
 
     public bool IsRoot => ParentSlug is null;
 
@@ -21,21 +22,23 @@ public class Service : IAggregateRoot
         if (string.IsNullOrWhiteSpace(raw)) return;
         var trimmed = raw.Trim();
         if (trimmed.Length > MaxRawExampleLength) trimmed = trimmed[..MaxRawExampleLength];
-        if (RawExamples.Contains(trimmed, StringComparer.OrdinalIgnoreCase)) return;
-        if (RawExamples.Count >= 10) RawExamples.RemoveAt(0);
-        RawExamples.Add(trimmed);
+        if (_rawExamples.Contains(trimmed, StringComparer.OrdinalIgnoreCase)) return;
+        if (_rawExamples.Count >= 10) _rawExamples.RemoveAt(0);
+        _rawExamples.Add(trimmed);
     }
 
-    public void AssignParent(string parentSlug)
+    public void AssignParent(Service parent)
     {
-        if (string.IsNullOrWhiteSpace(parentSlug))
-            throw new ArgumentException("Parent slug required.", nameof(parentSlug));
-        if (string.Equals(parentSlug, Slug, StringComparison.Ordinal))
+        ArgumentNullException.ThrowIfNull(parent);
+        if (!parent.IsRoot)
+            throw new InvalidOperationException(
+                $"Parent {parent.Slug} is not a root sector; only one-level hierarchies allowed.");
+        if (string.Equals(parent.Slug, Slug, StringComparison.Ordinal))
             throw new InvalidOperationException($"Service {Slug} cannot be its own parent.");
         if (ParentSlug is not null)
             throw new InvalidOperationException(
                 $"Service {Slug} already has parent {ParentSlug}; re-parent rejected to prevent A→B→A cycles.");
-        ParentSlug = parentSlug;
+        ParentSlug = parent.Slug;
     }
 
     public static Service Create(string slug, string rawExample = "")

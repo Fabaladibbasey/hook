@@ -1,11 +1,15 @@
 using Hook.Features.ServiceTaxonomy.ServiceAggregate;
 using Hook.Shared.Persistence.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using NetTopologySuite.Geometries;
+using ProviderAvailabilityEntity = Hook.Features.ProviderAvailability.AvailabilityAggregate.ProviderAvailability;
 
 namespace Hook.Features.Matching.Match;
 
-public sealed class PostgresProviderQueryService(HookDbContext db) : IProviderQueryService
+public sealed class PostgresProviderQueryService(
+    HookDbContext db,
+    IOptions<MatchingOptions> options) : IProviderQueryService
 {
     public async Task<IReadOnlyList<ScoredProviderCandidate>> FindCandidatesAsync(
         Point requestLocation,
@@ -16,14 +20,30 @@ public sealed class PostgresProviderQueryService(HookDbContext db) : IProviderQu
         CancellationToken ct = default)
     {
         var radiusMeters = radiusKm * 1000.0;
-        var excludeSet = excludePhones.ToHashSet();
-        var allSlugs = slugs.All;
+        var excludeArray = excludePhones as string[] ?? excludePhones.ToArray();
+        var opts = options.Value;
 
-        var rows = await db.ProviderAvailabilities
-            .Where(p => p.ExpiresAt > now)
-            .Where(p => allSlugs.Any(slug => p.Services.Contains(slug)))
-            .Where(p => !excludeSet.Contains(p.Phone))
-            .Where(p => p.Location.IsWithinDistance(requestLocation, radiusMeters))
+        // Per-slug `@>` branches union into a bitmap-OR scan over
+        // ix_provider_availabilities_services_gin (jsonb_path_ops). A single
+        // `allSlugs.Any(...)` predicate flattens to `?|` / EXISTS-unnest which
+        // jsonb_path_ops does NOT support — Postgres falls back to seq scan.
+        IQueryable<ProviderAvailabilityEntity>? combined = null;
+        foreach (var slug in slugs.All)
+        {
+            var needle = $"[\"{slug}\"]";
+            var branch = db.ProviderAvailabilities
+                .Where(p => p.ExpiresAt > now)
+                .Where(p => EF.Functions.JsonContains(p.Services, needle))
+                .Where(p => !excludeArray.Contains(p.Phone))
+                .Where(p => p.Location.IsWithinDistance(requestLocation, radiusMeters));
+            combined = combined is null ? branch : combined.Union(branch);
+        }
+
+        if (combined is null) return [];
+
+        var rows = await combined
+            .OrderBy(p => p.Location.Distance(requestLocation))
+            .Take(opts.MaxCandidatePoolSize)
             .Select(p => new
             {
                 p.Phone,

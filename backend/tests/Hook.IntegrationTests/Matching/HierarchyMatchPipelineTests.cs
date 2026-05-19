@@ -14,6 +14,13 @@ public sealed class HierarchyMatchPipelineTests : PipelineTestBase
 {
     public HierarchyMatchPipelineTests(DevPipelineFixture fx) : base(fx) { }
 
+    // Stable per-call phone suffix — Random.Shared.Next is a shard-flake vector.
+    // Pipeline-4 serializes tests within the collection; a process-wide counter
+    // is sufficient since the DB is truncated between [Fact]s.
+    private static int _phoneCounter;
+    private static string NextPhone() =>
+        $"+22070000{Interlocked.Increment(ref _phoneCounter):D2}";
+
     [Fact]
     public async Task FindCandidates_NarrowedKind_WhenProviderHasChildSlug()
     {
@@ -27,13 +34,14 @@ public sealed class HierarchyMatchPipelineTests : PipelineTestBase
         var child = new Service { Slug = childSlug, CreatedAt = DateTimeOffset.UtcNow };
         db.Services.Add(child);
         await db.SaveChangesAsync();
-        child.AssignParent("software-engineering");
+        var parent = await db.Services.FindAsync("software-engineering");
+        child.AssignParent(parent!);
         await db.SaveChangesAsync();
 
         var now = DateTimeOffset.UtcNow;
         var location = new Location(DevPipelineFixture.SeedRefLat, DevPipelineFixture.SeedRefLng);
         var provider = ProviderAvailability.Register(
-            $"+220{Random.Shared.Next(1_000_000, 9_999_999)}",
+            NextPhone(),
             [childSlug], location, "Banjul", shareContact: true,
             ttl: TimeSpan.FromHours(1), now);
         db.ProviderAvailabilities.Add(provider);
@@ -61,13 +69,14 @@ public sealed class HierarchyMatchPipelineTests : PipelineTestBase
         db.Services.Add(new Service { Slug = childSlug, CreatedAt = DateTimeOffset.UtcNow });
         await db.SaveChangesAsync();
         var child = await db.Services.FindAsync(childSlug);
-        child!.AssignParent("doctor");
+        var parent = await db.Services.FindAsync("doctor");
+        child!.AssignParent(parent!);
         await db.SaveChangesAsync();
 
         var now = DateTimeOffset.UtcNow;
         var location = new Location(DevPipelineFixture.SeedRefLat, DevPipelineFixture.SeedRefLng);
         var generalist = ProviderAvailability.Register(
-            $"+220{Random.Shared.Next(1_000_000, 9_999_999)}",
+            NextPhone(),
             ["doctor"], location, "Banjul", shareContact: true,
             ttl: TimeSpan.FromHours(1), now);
         db.ProviderAvailabilities.Add(generalist);
@@ -93,7 +102,7 @@ public sealed class HierarchyMatchPipelineTests : PipelineTestBase
         var now = DateTimeOffset.UtcNow;
         var location = new Location(DevPipelineFixture.SeedRefLat, DevPipelineFixture.SeedRefLng);
         var exactProvider = ProviderAvailability.Register(
-            $"+220{Random.Shared.Next(1_000_000, 9_999_999)}",
+            NextPhone(),
             ["plumbing"], location, "Banjul", shareContact: true,
             ttl: TimeSpan.FromHours(1), now);
         db.ProviderAvailabilities.Add(exactProvider);

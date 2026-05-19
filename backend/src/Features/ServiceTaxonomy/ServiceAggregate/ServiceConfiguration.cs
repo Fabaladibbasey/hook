@@ -13,7 +13,8 @@ public class ServiceConfiguration : IEntityTypeConfiguration<Service>
         builder.Property(s => s.Slug).HasMaxLength(80);
         builder.Property(s => s.CreatedAt).IsRequired();
         builder.Property(s => s.ParentSlug).HasMaxLength(80);
-        builder.HasJsonbArray(s => s.RawExamples);
+        builder.HasJsonbArray(s => s.RawExamples)
+               .UsePropertyAccessMode(PropertyAccessMode.Field);
 
         builder.HasIndex(s => s.Slug).HasDatabaseName("ix_services_slug_trgm")
             .HasMethod("gin")

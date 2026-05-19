@@ -104,13 +104,19 @@ public sealed class SlugResolver(
     {
         if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
         var lower = raw.Trim().ToLowerInvariant();
-        var replaced = new System.Text.StringBuilder(lower.Length);
+        var sb = new System.Text.StringBuilder(lower.Length);
+        var lastWasDash = false;
         foreach (var c in lower)
         {
-            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) replaced.Append(c);
-            else if (c is ' ' or '-' or '_' or '/') replaced.Append('-');
+            char emit;
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) emit = c;
+            else if (c is ' ' or '-' or '_' or '/') emit = '-';
+            else continue;
+
+            if (emit == '-' && lastWasDash) continue;
+            sb.Append(emit);
+            lastWasDash = emit == '-';
         }
-        var collapsed = System.Text.RegularExpressions.Regex.Replace(replaced.ToString(), "-{2,}", "-");
-        return collapsed.Trim('-');
+        return sb.ToString().Trim('-');
     }
 }

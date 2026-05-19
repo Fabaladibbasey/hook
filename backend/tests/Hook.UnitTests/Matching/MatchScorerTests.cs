@@ -137,6 +137,32 @@ public class MatchScorerTests
     }
 
     [Fact]
+    public void ScoreAndRank_FactorFlipsOrder_WhenBroadenedHasHigherBase()
+    {
+        // Broadened candidate has a strictly stronger base (closer + more
+        // recent), but the 0.4 factor downgrades it below the Exact match.
+        // Guards against a regression where factor is multiplied AFTER the
+        // OrderBy pass.
+        var opts = new MatchingOptions { BroadenedMatchFactor = 0.4, NarrowedMatchFactor = 0.6, ColdStartMinJobs = 0 };
+        var scorer = Build(opts);
+        var now = DateTimeOffset.UtcNow;
+
+        var strongBroadened = new ProviderCandidate("+broad", true, now, DistanceKm: 0, CompletedJobs: 10, SuccessRate: 1);
+        var weakerExact = new ProviderCandidate("+exact", true, now.AddHours(-6), DistanceKm: 3, CompletedJobs: 5, SuccessRate: 0.5);
+
+        var ranked = scorer.ScoreAndRank(
+            [
+                new ScoredProviderCandidate(strongBroadened, MatchKind.Broadened),
+                new ScoredProviderCandidate(weakerExact, MatchKind.Exact),
+            ],
+            radiusKm: 5, now, take: 2);
+
+        ranked[0].Candidate.Phone.ShouldBe("+exact");
+        ranked[0].Kind.ShouldBe(MatchKind.Exact);
+        ranked[1].Kind.ShouldBe(MatchKind.Broadened);
+    }
+
+    [Fact]
     public void Score_ExactBeatsCrossLevel_WhenAllElseEqual()
     {
         var opts = new MatchingOptions { BroadenedMatchFactor = 0.5, NarrowedMatchFactor = 0.5, ColdStartMinJobs = 0 };

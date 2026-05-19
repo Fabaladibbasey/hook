@@ -12,38 +12,20 @@ public sealed class JudgeParentSlugDispatchHandler(
     IMessageBus bus,
     ILogger<JudgeParentSlugDispatchHandler> logger)
 {
-    /// <summary>
-    /// Bridges anonymous WhatsApp inbound -> Ollama parent inference -> durable
-    /// aggregate mutation.
-    /// </summary>
-    /// <remarks>
-    /// Outer is <see cref="NonTransactionalAttribute"/> so AutoApplyTransactions
-    /// does not pin an Npgsql connection across the 60-150s Ollama window. The
-    /// inner <c>AssignServiceParent</c> handler is default-transactional and
-    /// idempotent (no-ops on non-root), so re-firing this envelope after a
-    /// transient AI / network failure is safe. <c>bus.InvokeAsync</c> is load-
-    /// bearing -- switching to <c>PublishAsync</c> would break the exactly-once
-    /// guarantee since this outer handler is not enrolled in the durable outbox.
-    /// </remarks>
+    // [NonTransactional] avoids pinning an Npgsql connection across the 60-150s
+    // Ollama window. bus.InvokeAsync is load-bearing — PublishAsync would skip
+    // the durable outbox since this outer handler is unenrolled.
     [NonTransactional]
     public async Task Handle(JudgeParentSlugRequested evt, CancellationToken ct)
     {
         var svc = await repository.GetBySlugAsync(evt.Slug, ct);
         if (svc is null || !svc.IsRoot) return;
-
-        // RootSectorSeeder.RootSlugs is append-only per the seeder contract, so
-        // reading the static list avoids an extra DB roundtrip per inference.
-        var roots = RootSectorSeeder.RootSlugs;
-        // Defense-in-depth: SlugResolver normally won't republish for a seeded
-        // sector (it short-circuits on GetBySlugAsync hit), but if the row was
-        // deleted (retention sweep, manual cleanup) and re-resolved we'd
-        // otherwise ask AI to parent a sector that owns its own subtree.
-        if (roots.Contains(evt.Slug, StringComparer.Ordinal)) return;
+        if (RootSectorSeeder.RootSlugSet.Contains(evt.Slug)) return;
 
         string? parent;
         try
         {
-            parent = await ai.JudgeParentSlugAsync(evt.Slug, roots, svc.RawExamples, ct);
+            parent = await ai.JudgeParentSlugAsync(evt.Slug, RootSectorSeeder.RootSlugs, svc.RawExamples, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -52,7 +34,7 @@ public sealed class JudgeParentSlugDispatchHandler(
         }
 
         if (parent is null) return;
-        if (!roots.Contains(parent, StringComparer.Ordinal))
+        if (!RootSectorSeeder.RootSlugSet.Contains(parent))
         {
             logger.LogWarning("[Taxonomy] AI returned out-of-list parent {Parent} for {Slug}; dropping.", parent, evt.Slug);
             return;

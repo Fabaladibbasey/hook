@@ -33,6 +33,13 @@ public class MatchingOptions
     [Range(1, 10)]
     public int TopMatchesPerBatch { get; init; } = 3;
 
+    // Hard cap on the candidate pool returned by IProviderQueryService.
+    // Bounds the in-memory scorer cost when hierarchy expansion widens the
+    // service slug fanout; Postgres applies it as ORDER BY <-> + LIMIT so the
+    // GiST KNN index trims before transport.
+    [Range(1, 10000)]
+    public int MaxCandidatePoolSize { get; init; } = 200;
+
     // Broadened = provider matched a parent of the requested slug ("doctor" for
     // "cardiology"). More abuse-prone (a generalist could blanket every child
     // specialist's requests), so a harsher discount is applied.
