@@ -56,9 +56,22 @@ public sealed class FakeConversationAi : IConversationAi
         return Task.FromResult(new IntentDetectionResult(intent, 0.85, "en", "fake stub"));
     }
 
+    // Conservative typo map mirroring the spelling-normalization cue in the
+    // ServiceExtractionSystem prompt — keeps the FakeConversationAi shape
+    // close enough to the real extractor for integration tests to exercise
+    // the same open-domain path.
+    private static readonly Dictionary<string, string> SpellingFixes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["analysist"] = "analyst",
+        ["electritian"] = "electrician",
+        ["carpinter"] = "carpenter",
+        ["mecanic"] = "mechanic",
+        ["plummer"] = "plumber",
+    };
+
     public Task<ServiceExtractionResult> ExtractServicesAsync(string userMessage, CancellationToken ct = default)
     {
-        var lower = Normalize(userMessage);
+        var lower = NormalizeSpelling(Normalize(userMessage));
         var slugs = new List<string>();
         if (lower.Contains("plumb")) slugs.Add("plumbing");
         if (lower.Contains("carpent") || lower.Contains("door") || lower.Contains("wood")) slugs.Add("carpentry");
@@ -69,8 +82,31 @@ public sealed class FakeConversationAi : IConversationAi
         if (lower.Contains("electric")) slugs.Add("electrical");
         if (lower.Contains("mechanic") || lower.Contains("auto") || lower.Contains("car repair")) slugs.Add("auto-repair");
 
+        // Open-domain fallback: when canonical matchers produced nothing, look for a
+        // provider-framing prefix and emit a kebab-case slug from the trailing phrase.
+        // Mirrors the prompt's two-tier extraction so tests exercise the same path
+        // listed providers take when adding a non-canonical service.
+        if (slugs.Count == 0)
+        {
+            var m = Regex.Match(lower,
+                @"\b(?:i\s+do|i\s+am(?:\s+an?)?|i'?m(?:\s+an?)?|i\s+offer|i\s+provide)\s+(?<phrase>[a-z][a-z\s]{2,})");
+            if (m.Success)
+            {
+                var phrase = m.Groups["phrase"].Value.Trim();
+                var slug = Slugify(phrase);
+                if (slug.Length > 0) slugs.Add(slug);
+            }
+        }
+
         return Task.FromResult(new ServiceExtractionResult([.. slugs.Distinct()]));
     }
+
+    private static string NormalizeSpelling(string text) =>
+        Regex.Replace(text, @"\b[a-z]+\b", m =>
+            SpellingFixes.TryGetValue(m.Value, out var fix) ? fix : m.Value);
+
+    private static string Slugify(string phrase) =>
+        Regex.Replace(phrase.Trim(), @"\s+", "-");
 
     public Task<ServiceJudgeResult> JudgeServiceMatchAsync(
         string proposedSlug,
@@ -85,6 +121,29 @@ public sealed class FakeConversationAi : IConversationAi
         return Task.FromResult(match is not null
             ? new ServiceJudgeResult(match, false, string.Empty)
             : new ServiceJudgeResult(string.Empty, true, proposedSlug));
+    }
+
+    // Tests set entries here so the parent-inference handler reaches a deterministic
+    // verdict without hitting Ollama. Empty map → every slug stays a root.
+    public Dictionary<string, string> ParentMap { get; } = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["cardiology"] = "doctor",
+        [".net-developer"] = "software-engineering",
+        ["dotnet-developer"] = "software-engineering",
+        ["net-developer"] = "software-engineering",
+        ["family-law"] = "lawyer",
+        ["brake-repair"] = "mechanic",
+        ["wedding-photography"] = "photographer",
+    };
+
+    public Task<string?> JudgeParentSlugAsync(
+        string proposedSlug,
+        IReadOnlyList<string> rootCandidates,
+        IReadOnlyList<string> rawExamples,
+        CancellationToken ct = default)
+    {
+        if (!ParentMap.TryGetValue(proposedSlug, out var parent)) return Task.FromResult<string?>(null);
+        return Task.FromResult<string?>(rootCandidates.Contains(parent, StringComparer.Ordinal) ? parent : null);
     }
 
     public Task<string> GenerateReplyAsync(ReplyContext context, CancellationToken ct = default)

@@ -73,7 +73,7 @@ public class Step1FeedbackHandlerTests
         var requestId = Guid.NewGuid();
         var match = MatchEntity.Create(requestId, "+2203331234", "plumbing", 0, 0, _clock.GetUtcNow());
         _matches[match.Id] = match;
-        _requestMatches[requestId] = new[] { match };
+        _requestMatches[requestId] = [match];
 
         _requests[requestId] = ServiceRequestEntity.Create(
             "+2203339999", "plumbing",
@@ -189,7 +189,7 @@ public class Step1FeedbackHandlerTests
             match.RequestId, "+2204445678", "plumbing", 0, 0.9, match.CreatedAt.AddSeconds(-1));
         sibling.ClaimForPickup(false, now);
         _matches[sibling.Id] = sibling;
-        _requestMatches[match.RequestId] = new[] { sibling, match };
+        _requestMatches[match.RequestId] = [sibling, match];
 
         await Build().Handle(new Step1FeedbackCheck(match.Id), _busMock.Object, CancellationToken.None);
 

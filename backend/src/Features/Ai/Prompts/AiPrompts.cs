@@ -74,9 +74,23 @@ internal static class AiPrompts
     public const string ServiceExtractionSystem = SafetyPreamble +
         """
         You extract the kinds of services a service provider is offering or that a client needs,
-        from a single short message. Return canonical English slugs in lowercase kebab-case
+        from a single short message. Return slugs in lowercase kebab-case
         (e.g. plumbing, carpentry, computer-repair, auto-repair, electrical, painting,
-        delivery, cleaning, tutoring).
+        delivery, cleaning, tutoring, data-analyst, graphic-designer, accountant).
+
+        Two-tier extraction:
+          1) PREFER the canonical mapping below when applicable.
+          2) When the user names a profession or service noun phrase that is NOT in the
+             canonical mapping (e.g. "data analyst", "graphic designer", "accountant",
+             "copywriter", "physiotherapist"), emit it as a kebab-case slug derived
+             from the cleaned phrase. Open-domain extraction is REQUIRED — never drop
+             a valid profession just because it is missing from the canonical list.
+             Never substitute a related-but-different profession from the canonical
+             list when the user names an unfamiliar one — e.g. "Django developer"
+             is NOT "data-analyst" and NOT "software-engineer"; emit the literal
+             kebab-case of what they said: "django-developer". Different tech
+             roles (developer / engineer / analyst / designer / architect /
+             dev-ops) are DISTINCT services and must never be merged at extraction.
 
         - One slug per distinct service.
         - Strip generic suffixes ("services").
@@ -86,13 +100,17 @@ internal static class AiPrompts
           comes after the prefix.
         - Treat declarative messages as declarations even if they end with "?"
           (e.g. "I do car mechanic?" -> ["auto-repair"]).
-        - Output ONLY canonical service kinds. Never output adjectives, problem
-          descriptions, or symptoms. "broken", "leaking", "down", "dead", "stuck",
-          "jammed", "not working" are NEVER slugs.
+        - Spelling normalization: fix obvious phonetic typos BEFORE slugification.
+          Examples: "analysist" -> "analyst", "electritian" -> "electrician",
+          "carpinter" -> "carpenter", "mecanic" -> "mechanic", "plummer" -> "plumber".
+          Stay conservative — only fix clear phonetic misspellings of real
+          professions; never invent a profession that isn't in the message.
+        - Never output adjectives, problem descriptions, or symptoms. "broken",
+          "leaking", "down", "dead", "stuck", "jammed", "not working" are NEVER slugs.
             * "My door is broken"     -> ["carpentry"], NOT ["door","broken"].
             * "my pipes are leaking"  -> ["plumbing"], NOT ["pipes","leaking"].
             * "fridge stopped working" -> ["electrical"], NOT ["fridge","stopped"].
-        - Map profession nouns to the service they perform:
+        - Map profession nouns to the service they perform (canonical mapping):
             plumber                                                    -> "plumbing"
             carpenter                                                  -> "carpentry"
             electrician                                                -> "electrical"
@@ -153,7 +171,24 @@ internal static class AiPrompts
             "I do cab"                -> ["ride"]
             "I am a chef"             -> ["cooking"]
             "I'm a hairdresser"       -> ["hairdressing"]
-        - If no canonical service kind clearly fits, return [].
+        - Examples of open-domain extraction (NOT in canonical mapping):
+            "I do data analyst"       -> ["data-analyst"]
+            "I am a data analysist"   -> ["data-analyst"]   (typo normalized)
+            "I'm a graphic designer"  -> ["graphic-designer"]
+            "I'm an accountant"       -> ["accountant"]
+            "I do copywriting"        -> ["copywriter"]
+            "I am a physiotherapist"  -> ["physiotherapist"]
+            "I am Django developer"   -> ["django-developer"]
+            "I'm a React developer"   -> ["react-developer"]
+            "I do Python development" -> ["python-developer"]
+            "I am a backend dev"      -> ["backend-developer"]
+            "I'm a frontend engineer" -> ["frontend-engineer"]
+            "I am a UX designer"      -> ["ux-designer"]
+        - Return [] ONLY when the input has no profession or service signal at all
+          (greetings, vague chat, pure adjective/problem with no inferrable trade).
+          Examples that return []: "hi", "ok", "I'm tired today", "thanks", "lol".
+          Do NOT return [] just because the profession is unfamiliar — emit it as
+          a kebab-case slug.
         - Output strictly an array of strings, no commentary.
         """;
 
@@ -164,10 +199,42 @@ internal static class AiPrompts
 
         - If it matches one of the candidates, return that candidate as MatchedSlug.
         - If it is genuinely new, set IsNew = true and ProposedSlug = the proposal.
+        - Only return a candidate as MatchedSlug when the proposal is a synonym,
+          spelling variant, or trivial rephrasing of that candidate (e.g.
+          "auto-mechanic" vs "auto-repair", "house-cleaner" vs "cleaning",
+          "plumbings" vs "plumbing").
+        - Different professions within the same sector are DISTINCT services
+          even when their slugs share a sector token. These pairs MUST stay
+          distinct (IsNew = true):
+            * "django-developer" vs "data-analyst"
+            * "react-developer"  vs "graphic-designer"
+            * "backend-developer" vs "frontend-developer"
+            * "python-developer" vs "data-scientist"
+            * "cardiology" vs "dentistry"
+            * "family-law" vs "tax-law"
+            * "brake-repair" vs "engine-repair"
         - Treat "ride" (people transport — taxi, cab, okada, keke passenger)
           and "delivery" (object transport — parcel, package, food) as DISTINCT
           services. Never merge them, even if their names overlap or sound similar.
+        - If unsure, prefer IsNew = true. A false merge is worse than a new slug —
+          the parent-judgment step will place a genuinely-new slug under the right
+          sector anyway.
         - Return JSON only.
+        """;
+
+    public const string ParentSlugJudgeSystem = SafetyPreamble +
+        """
+        You assign a proposed service slug to its single best parent sector from a closed
+        list of candidate parent slugs, or return null when nothing fits.
+
+        - Pick a parent ONLY when the proposal is plausibly a specialization of it
+          (e.g. "cardiology" ⊂ "doctor", "react-developer" ⊂ "software-engineering",
+          "family-law" ⊂ "lawyer", "brake-repair" ⊂ "mechanic").
+        - Never invent a parent. The answer MUST be one of the candidate slugs, or null.
+        - If unsure, prefer null. A wrong parent is worse than no parent.
+        - Treat "ride" (people transport) and "delivery" (object transport) as DISTINCT;
+          a delivery specialization never gets "ride" as parent and vice versa.
+        - Output: {"parentSlug": "<one-of-candidates>" | null}. JSON only, no commentary.
         """;
 
     public const string ReplySystem = SafetyPreamble +
@@ -192,13 +259,15 @@ internal static class AiPrompts
         You write the WhatsApp reply that presents matched providers to a client.
         Reply in the user's language (BCP 47 / ISO 639-1 code provided in the prompt).
 
-        The "matches" fact is a JSON array. Each item has fields {n, phone, distance, score}.
+        The "matches" fact is a JSON array. Each item has fields {n, phone, distance, score, label}.
         The "count" fact is the total number of items (always equal to the array length, capped at 5).
 
         Required output shape (plain text only, no JSON, no markdown, no emojis unless the user used them):
         1. One short sentence acknowledging matches were found for the service.
         2. A numbered list — one line per item — using EXACTLY this format and nothing else:
                "{n}. {phone} — {distance}km away (score {score})"
+           When the item's `label` is non-empty, append a space and "({label})" to the end of that line
+           (e.g. "1. ...km away (score 0.72) (Related)"). When `label` is empty, omit it entirely.
            Render every item from the array, in order. Do not reorder, edit, unmask, or invent
            any value. Do not include the JSON itself.
 

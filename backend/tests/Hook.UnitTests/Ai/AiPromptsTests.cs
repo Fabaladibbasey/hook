@@ -93,4 +93,25 @@ public class AiPromptsTests
         prompt.ShouldContain("electrical", Case.Insensitive);
         prompt.ShouldContain("auto-repair", Case.Insensitive);
     }
+
+    [Fact]
+    public void ServiceExtraction_IsOpenDomain_WithSpellingNormalization()
+    {
+        var prompt = AiPrompts.ServiceExtractionSystem;
+
+        // Closed-list reject rule must be gone — only return [] for inputs with
+        // no profession/service signal at all, NOT just because the slug is
+        // missing from the canonical mapping.
+        prompt.ShouldNotContain("If no canonical service kind clearly fits, return [].");
+
+        // Open-domain contract: emit kebab-case slug for unfamiliar professions.
+        prompt.ShouldContain("data-analyst", Case.Insensitive);
+        prompt.ShouldContain("I do data analyst", Case.Insensitive);
+        prompt.ShouldContain("open-domain", Case.Insensitive);
+
+        // Spelling-normalization cue.
+        prompt.ShouldContain("Spelling normalization", Case.Insensitive);
+        prompt.ShouldContain("analysist", Case.Insensitive);
+        prompt.ShouldContain("analyst", Case.Insensitive);
+    }
 }

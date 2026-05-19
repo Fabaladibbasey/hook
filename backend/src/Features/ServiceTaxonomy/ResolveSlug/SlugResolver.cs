@@ -1,12 +1,15 @@
 using Hook.Features.Ai;
+using Hook.Features.ServiceTaxonomy.JudgeParent;
 using Hook.Features.ServiceTaxonomy.ServiceAggregate;
 using Microsoft.Extensions.Options;
+using Wolverine;
 
 namespace Hook.Features.ServiceTaxonomy.ResolveSlug;
 
 public sealed class SlugResolver(
     IServiceRepository repository,
     IConversationAi ai,
+    IMessageBus bus,
     IOptions<ServiceTaxonomyOptions> options,
     ILogger<SlugResolver> logger)
 {
@@ -62,6 +65,7 @@ public sealed class SlugResolver(
 
         var created = Service.Create(normalized, memo);
         await repository.AddAsync(created, ct);
+        await PublishParentJudgmentAsync(normalized);
 
         var resolution = top is not null && topSim >= opts.AiJudgeThreshold
             ? SlugResolution.AiJudgedNew
@@ -77,6 +81,7 @@ public sealed class SlugResolver(
         {
             existing = Service.Create(slug, rawExample);
             await repository.AddAsync(existing, ct);
+            await PublishParentJudgmentAsync(slug);
         }
         else
         {
@@ -85,6 +90,16 @@ public sealed class SlugResolver(
         return new ResolveSlugResult(slug, resolution, topSim);
     }
 
+    // Post-commit parent inference — handler reads RawExamples + runs AI without
+    // blocking the inbound funnel. Callers must invoke from inside a Wolverine
+    // handler context (AutoApplyTransactions + outbox) so the envelope is
+    // durable; see NonHandlerContextEventLossTests for the parallel guard pattern.
+    private ValueTask PublishParentJudgmentAsync(string slug) =>
+        bus.PublishAsync(new JudgeParentSlugRequested(slug));
+
+    // ASCII-only kebab-case: rejects Unicode / Cyrillic / CJK homoglyphs that
+    // could otherwise survive ToLowerInvariant + IsLetterOrDigit and poison
+    // downstream slug-keyed maps (LLM prompts, jsonb membership predicates).
     public static string Normalize(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
@@ -92,7 +107,7 @@ public sealed class SlugResolver(
         var replaced = new System.Text.StringBuilder(lower.Length);
         foreach (var c in lower)
         {
-            if (char.IsLetterOrDigit(c)) replaced.Append(c);
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) replaced.Append(c);
             else if (c is ' ' or '-' or '_' or '/') replaced.Append('-');
         }
         var collapsed = System.Text.RegularExpressions.Regex.Replace(replaced.ToString(), "-{2,}", "-");

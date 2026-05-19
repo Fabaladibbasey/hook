@@ -46,8 +46,8 @@ public class PickProviderResolverTests
     {
         var matches = Five();
         var picked = PickProviderResolver.Resolve("PICK 1,3,5", matches);
-        Assert.Equal(new[] { matches[0].Id, matches[2].Id, matches[4].Id }, picked.Select(p => p.Match.Id));
-        Assert.Equal(new[] { 1, 3, 5 }, picked.Select(p => p.Position));
+        Assert.Equal([matches[0].Id, matches[2].Id, matches[4].Id], picked.Select(p => p.Match.Id));
+        Assert.Equal([1, 3, 5], picked.Select(p => p.Position));
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public class PickProviderResolverTests
         var matches = Five();
         var picked = PickProviderResolver.Resolve("PICK ALL", matches);
         Assert.Equal(5, picked.Count);
-        Assert.Equal(new[] { 1, 2, 3, 4, 5 }, picked.Select(p => p.Position));
+        Assert.Equal([1, 2, 3, 4, 5], picked.Select(p => p.Position));
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public class PickProviderResolverTests
         var matches = Five();
         var picked = PickProviderResolver.Resolve("pick all", matches);
         Assert.Equal(5, picked.Count);
-        Assert.Equal(new[] { 1, 2, 3, 4, 5 }, picked.Select(p => p.Position));
+        Assert.Equal([1, 2, 3, 4, 5], picked.Select(p => p.Position));
     }
 
     [Fact]
@@ -83,8 +83,8 @@ public class PickProviderResolverTests
     {
         var matches = Five();
         var picked = PickProviderResolver.Resolve("PICK 2,2,3", matches);
-        Assert.Equal(new[] { matches[1].Id, matches[2].Id }, picked.Select(p => p.Match.Id));
-        Assert.Equal(new[] { 2, 3 }, picked.Select(p => p.Position));
+        Assert.Equal([matches[1].Id, matches[2].Id], picked.Select(p => p.Match.Id));
+        Assert.Equal([2, 3], picked.Select(p => p.Position));
     }
 
     [Fact]

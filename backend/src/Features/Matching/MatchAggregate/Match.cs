@@ -10,6 +10,7 @@ public class Match : IAggregateRoot
     public required string ServiceSlug { get; init; }
     public double DistanceKm { get; init; }
     public double Score { get; init; }
+    public MatchKind Kind { get; init; } = MatchKind.Exact;
     public bool ContactShared { get; private set; }
     public Guid? ChatId { get; private set; }
     public DateTimeOffset CreatedAt { get; init; }
@@ -21,7 +22,8 @@ public class Match : IAggregateRoot
         string serviceSlug,
         double distanceKm,
         double score,
-        DateTimeOffset now) => new()
+        DateTimeOffset now,
+        MatchKind kind = MatchKind.Exact) => new()
         {
             Id = Guid.CreateVersion7(),
             RequestId = requestId,
@@ -29,6 +31,7 @@ public class Match : IAggregateRoot
             ServiceSlug = serviceSlug,
             DistanceKm = distanceKm,
             Score = score,
+            Kind = kind,
             CreatedAt = now
         };
 

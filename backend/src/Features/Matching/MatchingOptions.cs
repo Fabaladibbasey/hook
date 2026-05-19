@@ -32,4 +32,15 @@ public class MatchingOptions
 
     [Range(1, 10)]
     public int TopMatchesPerBatch { get; init; } = 3;
+
+    // Broadened = provider matched a parent of the requested slug ("doctor" for
+    // "cardiology"). More abuse-prone (a generalist could blanket every child
+    // specialist's requests), so a harsher discount is applied.
+    [Range(0.1, 1.0)]
+    public double BroadenedMatchFactor { get; init; } = 0.4;
+
+    // Narrowed = provider matched a child of the requested slug ("cardiology"
+    // for "doctor"). Legitimate niche routing, so the discount is modest.
+    [Range(0.1, 1.0)]
+    public double NarrowedMatchFactor { get; init; } = 0.6;
 }

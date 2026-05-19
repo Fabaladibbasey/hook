@@ -61,8 +61,8 @@ public class ServiceRequestTests
             "+12025550123", "plumbing", new Location(0, 0), "x", string.Empty, 5, DateTimeOffset.UtcNow,
             sharePhoneNumber: false);
 
-        request.RecordShown(new[] { "+12025551111", "+12025552222" });
-        request.RecordShown(new[] { "+12025551111", "+12025553333" });
+        request.RecordShown(["+12025551111", "+12025552222"]);
+        request.RecordShown(["+12025551111", "+12025553333"]);
 
         request.ShownProviderPhones.Count.ShouldBe(3);
         request.ShownProviderPhones.ShouldContain("+12025553333");

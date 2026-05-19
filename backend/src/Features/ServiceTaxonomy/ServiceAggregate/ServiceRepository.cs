@@ -22,4 +22,36 @@ public sealed class ServiceRepository(HookDbContext db) : IServiceRepository
 
     public async Task AddAsync(Service service, CancellationToken ct = default) =>
         await db.Services.AddAsync(service, ct);
+
+    public async Task<ExpandedSlugs> ExpandAsync(string slug, CancellationToken ct = default)
+    {
+        // Single round-trip: rows are either the slug itself OR its direct children.
+        // Partition in-memory rather than issue self+children as separate queries.
+        var rows = await db.Services
+            .Where(s => s.Slug == slug || s.ParentSlug == slug)
+            .Select(s => new { s.Slug, s.ParentSlug })
+            .ToListAsync(ct);
+
+        string? parent = null;
+        var children = new List<string>();
+        var found = false;
+        foreach (var row in rows)
+        {
+            if (row.Slug == slug)
+            {
+                parent = row.ParentSlug;
+                found = true;
+            }
+            else
+            {
+                children.Add(row.Slug);
+            }
+        }
+
+        // Unknown slug: return Requested only — query will hit zero children and
+        // no parent. Matching just sees the literal slug; no broaden/narrow happens.
+        return found
+            ? new ExpandedSlugs(slug, parent, children)
+            : new ExpandedSlugs(slug, Parent: null, Children: Array.Empty<string>());
+    }
 }

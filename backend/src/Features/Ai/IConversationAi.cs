@@ -13,6 +13,16 @@ public interface IConversationAi
         IReadOnlyList<string> candidateSlugs,
         CancellationToken ct = default);
 
+    // Returns one of `rootCandidates` if the proposal is plausibly a specialization
+    // of it (e.g. cardiology ⊂ doctor). Returns null on no-fit, self-match, or
+    // out-of-candidate hallucination. Throws only on transport failure; the
+    // dispatcher (JudgeParentSlugDispatchHandler) catches and stays root.
+    Task<string?> JudgeParentSlugAsync(
+        string proposedSlug,
+        IReadOnlyList<string> rootCandidates,
+        IReadOnlyList<string> rawExamples,
+        CancellationToken ct = default);
+
     Task<string> GenerateReplyAsync(ReplyContext context, CancellationToken ct = default);
 
     Task<LanguageDetectionResult> DetectLanguageAsync(string userMessage, CancellationToken ct = default);

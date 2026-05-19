@@ -1,3 +1,4 @@
+using Hook.Shared.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using ServiceRequestEntity = Hook.Features.ServiceRequest.RequestAggregate.ServiceRequest;
@@ -13,6 +14,7 @@ public class MatchConfiguration : IEntityTypeConfiguration<Match>
         builder.Property(m => m.RequestId).IsRequired();
         builder.Property(m => m.ProviderPhone).HasMaxLength(20).IsRequired();
         builder.Property(m => m.ServiceSlug).HasMaxLength(80).IsRequired();
+        builder.PropertyAsStringEnum(m => m.Kind, 12).HasDefaultValueSql("'Exact'");
         builder.HasIndex(m => m.RequestId).HasDatabaseName("ix_matches_request_id");
         builder.HasIndex(m => m.ProviderPhone).HasDatabaseName("ix_matches_provider_phone");
         builder.HasIndex(m => new { m.RequestId, m.PickedAt }).HasDatabaseName("ix_matches_request_picked_at");
