@@ -27,7 +27,7 @@ public class EndChatCommandHandlerTests
         var handler = Build(session, out _);
 
         var outcome = await handler.Handle(
-            new EndChatCommand(session.Id, "user", "Client"), CancellationToken.None);
+            new EndChatCommand(session.Id, EndChatReason.User, "Client"), CancellationToken.None);
 
         outcome.Result.ShouldBe(EndChatResult.Ended);
         session.Status.ShouldBe(ChatSessionStatus.Ended);
@@ -45,7 +45,7 @@ public class EndChatCommandHandlerTests
         var handler = Build(null, out _);
 
         var outcome = await handler.Handle(
-            new EndChatCommand(Guid.NewGuid(), "user", null), CancellationToken.None);
+            new EndChatCommand(Guid.NewGuid(), EndChatReason.User, null), CancellationToken.None);
 
         outcome.Result.ShouldBe(EndChatResult.NotFound);
     }
@@ -54,12 +54,12 @@ public class EndChatCommandHandlerTests
     public async Task Handle_AlreadyEnded_ReturnsAlreadyEndedAndDoesNotRaise()
     {
         var session = ChatSession.Create(TimeSpan.FromMinutes(30), Now.AddMinutes(-10));
-        session.End(Now.AddMinutes(-1), "user", "Client");
+        session.End(Now.AddMinutes(-1), EndChatReason.User, "Client");
         session.DequeueEvents(); // drain prior event
         var handler = Build(session, out _);
 
         var outcome = await handler.Handle(
-            new EndChatCommand(session.Id, "idle", null), CancellationToken.None);
+            new EndChatCommand(session.Id, EndChatReason.Idle, null), CancellationToken.None);
 
         outcome.Result.ShouldBe(EndChatResult.AlreadyEnded);
         session.DequeueEvents().ShouldBeEmpty();

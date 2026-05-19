@@ -20,6 +20,6 @@ public sealed class IdleEndHandler(
             return;
         }
 
-        await bus.PublishAsync(new EndChatCommand(evt.ChatId, "idle", null));
+        await bus.PublishAsync(new EndChatCommand(evt.ChatId, EndChatReason.Idle, null));
     }
 }

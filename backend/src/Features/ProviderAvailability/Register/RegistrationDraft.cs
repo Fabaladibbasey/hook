@@ -12,7 +12,7 @@ public enum RegistrationStep
     Done
 }
 
-public class RegistrationDraft : AggregateRoot
+public class RegistrationDraft : IAggregateRoot
 {
     public required string Phone { get; init; }
     public RegistrationStep Step { get; private set; } = RegistrationStep.AwaitingServices;

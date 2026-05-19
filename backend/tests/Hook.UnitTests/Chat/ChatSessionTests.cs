@@ -1,3 +1,4 @@
+using Hook.Features.ChatLifecycle.EndChat;
 using Hook.Features.ChatSession;
 using Hook.Features.ChatSession.SessionAggregate;
 using Hook.Shared.Pipeline.PostCommitSends;
@@ -14,7 +15,7 @@ public class ChatSessionTests
     {
         var session = ChatSession.Create(TimeSpan.FromMinutes(30), Now);
 
-        session.End(Now, "idle");
+        session.End(Now, EndChatReason.Idle);
 
         var events = session.DequeueEvents();
         events.Count.ShouldBe(1);
@@ -31,7 +32,7 @@ public class ChatSessionTests
     {
         var session = ChatSession.Create(TimeSpan.FromMinutes(30), Now);
 
-        session.End(Now, "user", "Client");
+        session.End(Now, EndChatReason.User, "Client");
 
         var evt = session.DequeueEvents().Single().ShouldBeOfType<BroadcastChatEventRequested>();
         var payload = evt.Payload.ShouldBeOfType<ChatEndedPayload>();
@@ -43,7 +44,7 @@ public class ChatSessionTests
     public void DequeueEvents_IsIdempotent()
     {
         var session = ChatSession.Create(TimeSpan.FromMinutes(30), Now);
-        session.End(Now, "idle");
+        session.End(Now, EndChatReason.Idle);
 
         session.DequeueEvents().Count.ShouldBe(1);
         session.DequeueEvents().Count.ShouldBe(0);
@@ -54,7 +55,7 @@ public class ChatSessionTests
     {
         var session = ChatSession.Create(TimeSpan.FromMinutes(30), Now);
 
-        session.End(Now, "idle");
+        session.End(Now, EndChatReason.Idle);
 
         session.Status.ShouldBe(ChatSessionStatus.Ended);
         session.ExpiresAt.ShouldBe(Now);

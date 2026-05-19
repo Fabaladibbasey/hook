@@ -2,7 +2,7 @@ using Hook.Shared.Domain;
 
 namespace Hook.Features.ChatSession.AccessLog;
 
-public class ChatAccessLog : AggregateRoot
+public class ChatAccessLog : IAggregateRoot
 {
     public Guid Id { get; init; }
     public required Guid ChatId { get; init; }

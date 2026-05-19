@@ -3,7 +3,7 @@ using Hook.Shared.Domain;
 
 namespace Hook.Features.ChatSession.ParticipantAggregate;
 
-public class ChatParticipant : AggregateRoot
+public class ChatParticipant : IAggregateRoot
 {
     public Guid Id { get; init; }
     public required Guid ChatId { get; init; }

@@ -23,7 +23,7 @@ public sealed class ChatHubEndChatBroadcastTests : PipelineTestBase
     private sealed record ChatEndedDto(string Reason, string? EndedBy);
 
     [Fact]
-    public async Task EndChat_BroadcastsChatEnded_ToPeer_ViaDomainEventScraper()
+    public async Task ClientEndsChat_BroadcastsChatEnded_ToProvider_ViaEndChatCommandAndScraper()
     {
         var chat = await SeedChatAsync();
         await using var clientConn = BuildHub(chat.ClientToken, chat.Client.SessionId);
@@ -55,6 +55,63 @@ public sealed class ChatHubEndChatBroadcastTests : PipelineTestBase
         var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
         var session = await db.ChatSessions.AsNoTracking().FirstAsync(s => s.Id == chat.ChatId);
         session.Status.ShouldBe(ChatSessionStatus.Ended);
+    }
+
+    [Fact]
+    public async Task ProviderEndsChat_BroadcastsChatEnded_ToClient_WithEndedByProvider()
+    {
+        var chat = await SeedChatAsync();
+        await using var clientConn = BuildHub(chat.ClientToken, chat.Client.SessionId);
+        await using var providerConn = BuildHub(chat.ProviderToken, chat.Provider.SessionId);
+
+        var clientReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var clientEnded = new TaskCompletionSource<ChatEndedDto>(TaskCreationOptions.RunContinuationsAsynchronously);
+        clientConn.On<object>(ChatHubConstants.Events.HistoryLoaded, _ => clientReady.TrySetResult());
+        clientConn.On<ChatEndedDto>(ChatHubConstants.Events.ChatEnded, dto => clientEnded.TrySetResult(dto));
+
+        await clientConn.StartAsync();
+        await providerConn.StartAsync();
+        (await Task.WhenAny(clientReady.Task, Task.Delay(Timeout))).ShouldBe(clientReady.Task);
+
+        await providerConn.InvokeAsync("EndChat");
+
+        var winner = await Task.WhenAny(clientEnded.Task, Task.Delay(Timeout));
+        winner.ShouldBe(clientEnded.Task);
+        var dto = await clientEnded.Task;
+        dto.Reason.ShouldBe("user");
+        dto.EndedBy.ShouldBe(ChatParticipantRole.Provider.ToString());
+    }
+
+    [Fact]
+    public async Task EndChat_Twice_FromSameCaller_SecondCallEchoesAlreadyEnded_NoSecondPeerBroadcast()
+    {
+        var chat = await SeedChatAsync();
+        await using var clientConn = BuildHub(chat.ClientToken, chat.Client.SessionId);
+        await using var providerConn = BuildHub(chat.ProviderToken, chat.Provider.SessionId);
+
+        var providerReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var providerEnded = new TaskCompletionSource<ChatEndedDto>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var clientEchoes = new System.Collections.Concurrent.ConcurrentBag<ChatEndedDto>();
+        providerConn.On<object>(ChatHubConstants.Events.HistoryLoaded, _ => providerReady.TrySetResult());
+        providerConn.On<ChatEndedDto>(ChatHubConstants.Events.ChatEnded, dto => providerEnded.TrySetResult(dto));
+        clientConn.On<ChatEndedDto>(ChatHubConstants.Events.ChatEnded, dto => clientEchoes.Add(dto));
+
+        await clientConn.StartAsync();
+        await providerConn.StartAsync();
+        (await Task.WhenAny(providerReady.Task, Task.Delay(Timeout))).ShouldBe(providerReady.Task);
+
+        await clientConn.InvokeAsync("EndChat");
+        (await Task.WhenAny(providerEnded.Task, Task.Delay(Timeout))).ShouldBe(providerEnded.Task);
+
+        var providerBroadcastsBefore = providerEnded.Task.IsCompletedSuccessfully ? 1 : 0;
+        await clientConn.InvokeAsync("EndChat");
+
+        // Allow the already-ended echo to land.
+        await Task.Delay(TimeSpan.FromMilliseconds(500));
+
+        clientEchoes.ShouldContain(d => d.Reason == "already-ended");
+        // Provider must still have seen exactly one ChatEnded — second EndChat is caller-only.
+        providerBroadcastsBefore.ShouldBe(1);
     }
 
     private async Task<ChatHandle> SeedChatAsync()

@@ -2,7 +2,7 @@ using Hook.Shared.Domain;
 
 namespace Hook.Features.ServiceTaxonomy.ServiceAggregate;
 
-public class Service : AggregateRoot
+public class Service : IAggregateRoot
 {
     public required string Slug { get; init; }
     public DateTimeOffset CreatedAt { get; init; }

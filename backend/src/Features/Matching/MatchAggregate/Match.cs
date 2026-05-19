@@ -2,7 +2,7 @@ using Hook.Shared.Domain;
 
 namespace Hook.Features.Matching.MatchAggregate;
 
-public class Match : AggregateRoot
+public class Match : IAggregateRoot
 {
     public Guid Id { get; init; }
     public required Guid RequestId { get; init; }

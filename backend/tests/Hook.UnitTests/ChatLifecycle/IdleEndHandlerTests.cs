@@ -33,7 +33,7 @@ public class IdleEndHandlerTests
         await handler.Handle(new IdleEndCheck(session.Id, session.LastActivityAt), bus.Object, CancellationToken.None);
 
         bus.Verify(b => b.PublishAsync(
-            It.Is<EndChatCommand>(c => c.ChatId == session.Id && c.Reason == "idle" && c.EndedBy == null),
+            It.Is<EndChatCommand>(c => c.ChatId == session.Id && c.Reason == EndChatReason.Idle && c.EndedBy == null),
             It.IsAny<DeliveryOptions>()), Times.Once);
         session.Status.ShouldBe(ChatSessionStatus.Active); // handler owns the mutation now
     }
@@ -68,7 +68,7 @@ public class IdleEndHandlerTests
     public async Task Handle_AlreadyEndedSession_SkipsPublish()
     {
         var session = ChatSession.Create(TimeSpan.FromMinutes(30), Now.AddMinutes(-10));
-        session.End(Now.AddMinutes(-1), "user", "Client");
+        session.End(Now.AddMinutes(-1), EndChatReason.User, "Client");
         session.DequeueEvents();
         var (handler, bus, _) = Build(session);
 

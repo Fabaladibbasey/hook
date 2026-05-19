@@ -2,7 +2,7 @@ using Hook.Shared.Domain;
 
 namespace Hook.Features.Feedback.Models;
 
-public class MatchFeedback : AggregateRoot
+public class MatchFeedback : IAggregateRoot
 {
     public Guid Id { get; init; }
     public required Guid MatchId { get; init; }

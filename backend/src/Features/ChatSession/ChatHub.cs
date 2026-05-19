@@ -171,9 +171,9 @@ public sealed class ChatHub(IChatRepository chats, HookDbContext db, ChatSchedul
         if (participant is null) return;
         var role = (Context.Items[ChatHubConstants.Items.Role] as string) ?? participant.Role.ToString();
 
-        var outcome = await bus.InvokeAsync<EndChatOutcome>(new EndChatCommand(chatId, "user", role));
+        var outcome = await bus.InvokeAsync<EndChatOutcome>(new EndChatCommand(chatId, EndChatReason.User, role));
         if (outcome.Result == EndChatResult.AlreadyEnded)
-            await Clients.Caller.SendAsync(ChatHubConstants.Events.ChatEnded, new ChatEndedPayload("already-ended"));
+            await Clients.Caller.SendAsync(ChatHubConstants.Events.ChatEnded, new ChatEndedPayload(EndChatReason.AlreadyEnded.ToWire()));
         else if (outcome.Result == EndChatResult.Ended)
             logger.LogInformation("Chat {ChatId} ended by {Role} ({ParticipantId})", chatId, role, participant.Id);
     }

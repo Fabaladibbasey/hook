@@ -1,3 +1,4 @@
+using Hook.Features.ChatLifecycle.EndChat;
 using Hook.Shared.Domain;
 using Hook.Shared.Pipeline.PostCommitSends;
 
@@ -28,12 +29,12 @@ public class ChatSession : AggregateRoot
         LastActivityAt = now;
     }
 
-    public void End(DateTimeOffset now, string reason, string? endedBy = null)
+    public void End(DateTimeOffset now, EndChatReason reason, string? endedBy = null)
     {
         Status = ChatSessionStatus.Ended;
         ExpiresAt = now;
         RaiseDomainEvent(new BroadcastChatEventRequested(
-            Id, ChatHubEvents.ChatEnded, new ChatEndedPayload(reason, endedBy)));
+            Id, ChatHubEvents.ChatEnded, new ChatEndedPayload(reason.ToWire(), endedBy)));
     }
 
     public void Expire(DateTimeOffset now)

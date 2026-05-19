@@ -13,7 +13,7 @@ public enum ClientRequestStep
     Done
 }
 
-public class ClientRequestDraft : AggregateRoot
+public class ClientRequestDraft : IAggregateRoot
 {
     public required string Phone { get; init; }
     public ClientRequestStep Step { get; private set; } = ClientRequestStep.AwaitingService;
