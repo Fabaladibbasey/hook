@@ -2,20 +2,6 @@ import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
 import LegalFooter from "../components/LegalFooter";
 
-const env = (import.meta.env.VITE_SUPPORT_WHATSAPP as string | undefined)?.replace(/\D/g, "");
-export const SUPPORT_WHATSAPP = env && env.length > 0 ? env : "2206784709";
-
-export const supportWhatsappLink = `https://wa.me/${SUPPORT_WHATSAPP}`;
-
-export function formatSupportWhatsapp(digits: string = SUPPORT_WHATSAPP): string {
-  if (digits.startsWith("220") && digits.length === 10) {
-    return `+220 ${digits.slice(3, 6)} ${digits.slice(6)}`;
-  }
-  return `+${digits}`;
-}
-
-export const SUPPORT_WHATSAPP_DISPLAY = formatSupportWhatsapp();
-
 export default function LegalPage({
   title,
   effective,

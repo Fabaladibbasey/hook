@@ -3,13 +3,6 @@ using Microsoft.Extensions.Hosting;
 
 namespace Hook.Shared.Security;
 
-/// <summary>
-/// Writes a baseline set of response security headers on every response. Replaces the
-/// inline Referrer-Policy lambda — keeps the header surface in one auditable file.
-/// CSP <c>connect-src wss: https:</c> permits the SignalR hub at /hubs/chat;
-/// <c>style-src 'unsafe-inline'</c> accommodates Tailwind's inline style emission.
-/// HSTS only emitted outside Development since Kestrel dev is plain HTTP.
-/// </summary>
 internal static class SecurityHeadersMiddleware
 {
     internal const string ContentSecurityPolicy =
@@ -18,7 +11,7 @@ internal static class SecurityHeadersMiddleware
         "style-src 'self' 'unsafe-inline'; " +
         "img-src 'self' data:; " +
         "font-src 'self'; " +
-        "connect-src 'self' wss: https:; " +
+        "connect-src 'self'; " +
         "frame-ancestors 'none'; " +
         "base-uri 'self'; " +
         "form-action 'self'; " +
@@ -28,10 +21,17 @@ internal static class SecurityHeadersMiddleware
     public static IApplicationBuilder UseSecurityHeaders(this IApplicationBuilder app, IHostEnvironment environment)
     {
         var emitHsts = !environment.IsDevelopment();
-        return app.Use(async (ctx, next) =>
+        return app.Use((ctx, next) =>
         {
-            WriteHeaders(ctx.Response.Headers, emitHsts);
-            await next();
+            // OnStarting survives ExceptionHandlerMiddleware.Response.Clear() — eagerly written
+            // headers would be wiped on the exception re-run path.
+            ctx.Response.OnStarting(static state =>
+            {
+                var (response, hsts) = ((HttpResponse, bool))state;
+                WriteHeaders(response.Headers, hsts);
+                return Task.CompletedTask;
+            }, (ctx.Response, emitHsts));
+            return next(ctx);
         });
     }
 

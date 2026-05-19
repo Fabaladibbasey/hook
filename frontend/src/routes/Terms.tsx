@@ -1,9 +1,11 @@
-import LegalPage, { SUPPORT_WHATSAPP_DISPLAY, supportWhatsappLink } from "./LegalPage";
+import LegalPage from "./LegalPage";
+import { WhatsAppContact } from "../legal/SupportContact";
 import { RETENTION_DAYS_LABEL } from "../legal/RetentionDays";
+import { LEGAL_EFFECTIVE_DATE } from "../legal/EffectiveDate";
 
 export default function Terms() {
   return (
-    <LegalPage title="Terms of Service" effective="2026-05-06">
+    <LegalPage title="Terms of Service" effective={LEGAL_EFFECTIVE_DATE}>
       <p>
         These Terms govern your use of Hook (“Hook”, “we”, “us”), a WhatsApp-based platform that
         connects clients with nearby service providers. By using Hook you agree to these Terms. If
@@ -157,11 +159,7 @@ export default function Terms() {
 
       <h2 id="section-18">18. Contact</h2>
       <p>
-        Questions about these Terms — message us on WhatsApp:{" "}
-        <a href={supportWhatsappLink}>
-          <code>{SUPPORT_WHATSAPP_DISPLAY}</code>
-        </a>
-        .
+        Questions about these Terms — message us on WhatsApp: <WhatsAppContact />.
       </p>
     </LegalPage>
   );

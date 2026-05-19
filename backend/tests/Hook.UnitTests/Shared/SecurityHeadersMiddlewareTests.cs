@@ -7,13 +7,14 @@ namespace Hook.UnitTests.Shared;
 public class SecurityHeadersMiddlewareTests
 {
     [Fact]
-    public void WriteHeaders_Production_SetsAllSixBaselineHeadersAndHsts()
+    public void WriteHeaders_Production_SetsBaselineHeadersAndHsts()
     {
         var headers = new HeaderDictionary();
 
         SecurityHeadersMiddleware.WriteHeaders(headers, emitHsts: true);
 
-        headers["Content-Security-Policy"].ToString().ShouldContain("default-src 'self'");
+        headers["Content-Security-Policy"].ToString().ShouldBe(SecurityHeadersMiddleware.ContentSecurityPolicy);
+        headers["Content-Security-Policy"].ToString().ShouldContain("connect-src 'self'");
         headers["Content-Security-Policy"].ToString().ShouldContain("frame-ancestors 'none'");
         headers["X-Content-Type-Options"].ToString().ShouldBe("nosniff");
         headers["X-Frame-Options"].ToString().ShouldBe("DENY");
@@ -31,7 +32,7 @@ public class SecurityHeadersMiddlewareTests
         SecurityHeadersMiddleware.WriteHeaders(headers, emitHsts: false);
 
         headers.ContainsKey("Strict-Transport-Security").ShouldBeFalse();
-        headers["Content-Security-Policy"].ToString().ShouldNotBeNullOrEmpty();
+        headers["Content-Security-Policy"].ToString().ShouldBe(SecurityHeadersMiddleware.ContentSecurityPolicy);
         headers["X-Frame-Options"].ToString().ShouldBe("DENY");
     }
 }

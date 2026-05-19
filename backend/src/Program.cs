@@ -24,6 +24,7 @@ using Hook.Shared.Persistence;
 using Hook.Shared.Persistence.Data;
 using Hook.Shared.Retention;
 using Hook.Shared.Security;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Serilog;
@@ -89,14 +90,12 @@ try
     builder.Services.AddReverseProxy()
         .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
 
-    // Compress static-file responses (JS / CSS / HTML / SVG / JSON) so Kestrel matches Caddy in prod
-    // and Lighthouse "text compression" audit passes. Caddy re-honours Content-Encoding upstream
-    // rather than re-compressing, so this is safe behind the prod reverse proxy.
+    // Caddy re-honours Content-Encoding upstream rather than re-compressing.
     builder.Services.AddResponseCompression(opts =>
     {
         opts.EnableForHttps = true;
-        opts.Providers.Add<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProvider>();
-        opts.Providers.Add<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProvider>();
+        opts.Providers.Add<BrotliCompressionProvider>();
+        opts.Providers.Add<GzipCompressionProvider>();
         opts.MimeTypes =
         [
             "text/html",
@@ -104,7 +103,6 @@ try
             "text/plain",
             "text/xml",
             "application/javascript",
-            "application/json",
             "application/xml",
             "image/svg+xml",
         ];
@@ -115,15 +113,10 @@ try
     builder.Services.AddProblemDetails();
     builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
-    // Dev default so the Step1 feedback prompt surfaces in minutes instead of the
-    // 30-minute production cadence during local hacking. Step2 is now published
-    // immediately on Step1=Yes (Pillar A — no separate delay knob), so only Step1
-    // is overridden here. Devs can still override via env or appsettings.Development.json.
+    // Dev override so the Step1 feedback prompt surfaces in minutes instead of the
+    // 30-minute production cadence during local hacking.
     if (builder.Environment.IsDevelopment())
     {
-        // IsNullOrWhiteSpace catches the (admittedly unlikely) "   " case as well as
-        // truly-unset; keeping the dev override to a 2-min cadence so the prompt
-        // fires inside a single hacking session.
         if (string.IsNullOrWhiteSpace(builder.Configuration["Feedback:Step1InitialDelay"]))
             builder.Configuration["Feedback:Step1InitialDelay"] = "00:02:00";
     }
@@ -232,9 +225,7 @@ try
     app.MapChat();
     app.MapReverseProxy();
     app.UseDefaultFiles();
-    // Vite emits content-hashed filenames under /assets — those can be cached forever.
-    // index.html and the bare SVG/ico/robots/sitemap at the root must NOT be cached aggressively
-    // so a redeploy is visible immediately.
+    // Cache content-hashed /assets forever; force revalidation on everything at the root.
     app.UseStaticFiles(new StaticFileOptions
     {
         OnPrepareResponse = ctx =>
