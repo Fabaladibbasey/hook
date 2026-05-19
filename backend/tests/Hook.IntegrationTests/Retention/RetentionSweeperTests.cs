@@ -191,31 +191,14 @@ public sealed class RetentionSweeperTests : PipelineTestBase
         var (_, oldMatch2) = await SeedRequestAndMatchAsync(db, fresh);
         var (_, freshMatch) = await SeedRequestAndMatchAsync(db, fresh);
 
-        var oldAnswered = new MatchFeedback
-        {
-            MatchId = oldMatch.Id,
-            RequestId = oldMatch.RequestId,
-            Step = FeedbackStep.DidYouFind,
-            Answer = FeedbackAnswer.Yes,
-            PromptedAt = ancient,
-            RepliedAt = ancient + TimeSpan.FromHours(2)
-        };
-        var oldPending = new MatchFeedback
-        {
-            MatchId = oldMatch2.Id,
-            RequestId = oldMatch2.RequestId,
-            Step = FeedbackStep.DidYouFind,
-            PromptedAt = old
-        };
-        var recent = new MatchFeedback
-        {
-            MatchId = freshMatch.Id,
-            RequestId = freshMatch.RequestId,
-            Step = FeedbackStep.JobCompleted,
-            Answer = FeedbackAnswer.Yes,
-            PromptedAt = fresh,
-            RepliedAt = fresh
-        };
+        var oldAnswered = MatchFeedback.CreatePending(
+            oldMatch.Id, oldMatch.RequestId, FeedbackStep.DidYouFind, ancient);
+        oldAnswered.Resolve(FeedbackAnswer.Yes, ancient + TimeSpan.FromHours(2));
+        var oldPending = MatchFeedback.CreatePending(
+            oldMatch2.Id, oldMatch2.RequestId, FeedbackStep.DidYouFind, old);
+        var recent = MatchFeedback.CreatePending(
+            freshMatch.Id, freshMatch.RequestId, FeedbackStep.JobCompleted, fresh);
+        recent.Resolve(FeedbackAnswer.Yes, fresh);
         var phone = UniquePhone();
         var stats = ProviderStats.Initial(phone, ancient);
 
@@ -246,20 +229,9 @@ public sealed class RetentionSweeperTests : PipelineTestBase
             new Location(13.45, -16.6),
             "Banjul", "cascade-test", 5.0, old, false);
         oldRequest.Close();
-        var match = new Match
-        {
-            RequestId = oldRequest.Id,
-            ProviderPhone = UniquePhone(),
-            ServiceSlug = "plumbing"
-        };
-        var feedback = new MatchFeedback
-        {
-            MatchId = match.Id,
-            RequestId = match.RequestId,
-            Step = FeedbackStep.DidYouFind,
-            Answer = FeedbackAnswer.Yes,
-            PromptedAt = fresh
-        };
+        var match = Match.Create(oldRequest.Id, UniquePhone(), "plumbing", 0, 0, old);
+        var feedback = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, fresh);
+        feedback.Resolve(FeedbackAnswer.Yes, fresh);
         db.ServiceRequests.Add(oldRequest);
         db.Matches.Add(match);
         db.MatchFeedback.Add(feedback);
@@ -280,12 +252,7 @@ public sealed class RetentionSweeperTests : PipelineTestBase
             UniquePhone(), "plumbing",
             new Location(13.45, -16.6),
             "Banjul", $"req-{Guid.NewGuid()}", 5.0, createdAt, false);
-        var match = new Match
-        {
-            RequestId = request.Id,
-            ProviderPhone = UniquePhone(),
-            ServiceSlug = "plumbing"
-        };
+        var match = Match.Create(request.Id, UniquePhone(), "plumbing", 0, 0, createdAt);
         db.ServiceRequests.Add(request);
         db.Matches.Add(match);
         await db.SaveChangesAsync();
@@ -306,21 +273,10 @@ public sealed class RetentionSweeperTests : PipelineTestBase
         // Seed the post-multi-device columns so cascade has to clear them too.
         participant.SetPublicKey([0x01, 0x02]);
         participant.TryAdvanceSequence(5);
-        var message = new ChatMessage
-        {
-            ChatId = session.Id,
-            ParticipantId = participant.Id,
-            Sequence = 1,
-            Ciphertext = [9],
-            Nonce = new byte[12]
-        };
-        var accessLog = new ChatAccessLog
-        {
-            ChatId = session.Id,
-            ParticipantId = participant.Id,
-            IpAddress = "127.0.0.1",
-            DeviceInfo = "test"
-        };
+        var message = ChatMessage.Create(
+            Guid.CreateVersion7(), session.Id, participant.Id, 1, [9], new byte[12], DateTimeOffset.UtcNow);
+        var accessLog = ChatAccessLog.Record(
+            session.Id, participant.Id, "127.0.0.1", "test", DateTimeOffset.UtcNow);
 
         db.ChatSessions.Add(session);
         db.ChatParticipants.Add(participant);

@@ -45,8 +45,7 @@ public class PhoneExchangerTests
                 _lastClaim = claim;
                 if (_claimResult && _matches.TryGetValue(claim.MatchId, out var m))
                 {
-                    m.ContactShared = claim.RevealContact;
-                    m.PickedAt = claim.Now;
+                    m.ClaimForPickup(claim.RevealContact, claim.Now);
                 }
                 return _claimResult;
             });
@@ -80,12 +79,7 @@ public class PhoneExchangerTests
         string clientPhone = "+2203339999")
     {
         var providerPhone = "+2203331234";
-        var match = new MatchEntity
-        {
-            RequestId = Guid.NewGuid(),
-            ProviderPhone = providerPhone,
-            ServiceSlug = "plumbing"
-        };
+        var match = MatchEntity.Create(Guid.NewGuid(), providerPhone, "plumbing", 0, 0, _clock.GetUtcNow());
         _matches[match.Id] = match;
 
         var request = ServiceRequestEntity.Create(
@@ -148,8 +142,7 @@ public class PhoneExchangerTests
     public async Task TryExchange_AlreadySharedRePick_ResendsPhone_PrefixedByMatchPosition()
     {
         var match = SeedMatch();
-        match.ContactShared = true;
-        match.PickedAt = DateTimeOffset.UtcNow;
+        match.ClaimForPickup(true, DateTimeOffset.UtcNow);
 
         var outcome = await Build().TryExchangeAsync(match.Id, 7);
 
@@ -163,7 +156,7 @@ public class PhoneExchangerTests
     public async Task TryExchange_AlreadyRoutedRePick_SendsNotice_PrefixedByMatchPositionAndMaskedPhone()
     {
         var match = SeedMatch();
-        match.PickedAt = DateTimeOffset.UtcNow;
+        match.ClaimForPickup(false, DateTimeOffset.UtcNow);
 
         var outcome = await Build().TryExchangeAsync(match.Id, 3);
 

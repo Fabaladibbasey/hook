@@ -11,7 +11,7 @@ public sealed class ChatSessionFactory(
     public sealed record ChatLinks(Guid ChatId, string ClientUrl, string ProviderUrl);
 
     public Task<ChatLinks> CreateAsync(string clientPhone, string providerPhone, CancellationToken ct = default) =>
-        CreateAsync(Guid.NewGuid(), clientPhone, providerPhone, ct);
+        CreateAsync(Guid.CreateVersion7(), clientPhone, providerPhone, ct);
 
     public async Task<ChatLinks> CreateAsync(Guid chatId, string clientPhone, string providerPhone, CancellationToken ct = default)
     {

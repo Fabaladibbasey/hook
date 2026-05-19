@@ -70,12 +70,7 @@ public class ChatRoutingRequestedHandlerTests
 
     private MatchEntity SeedMatch()
     {
-        var match = new MatchEntity
-        {
-            RequestId = Guid.NewGuid(),
-            ProviderPhone = ProviderPhone,
-            ServiceSlug = Slug
-        };
+        var match = MatchEntity.Create(Guid.NewGuid(), ProviderPhone, Slug, 0, 0, _clock.GetUtcNow());
         _matches[match.Id] = match;
         return match;
     }
@@ -155,7 +150,7 @@ public class ChatRoutingRequestedHandlerTests
     public async Task Handle_MatchAlreadyHasChatId_DoesNotSendOrCreateLinks()
     {
         var match = SeedMatch();
-        match.ChatId = Guid.NewGuid();
+        match.ClaimForChat(Guid.NewGuid());
 
         await Build().Handle(MakeEvt(match.Id, clientConsented: false, providerConsented: false), _busMock.Object, CancellationToken.None);
 

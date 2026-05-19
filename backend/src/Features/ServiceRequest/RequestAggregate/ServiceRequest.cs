@@ -6,13 +6,13 @@ namespace Hook.Features.ServiceRequest.RequestAggregate;
 
 public class ServiceRequest : AggregateRoot
 {
-    public Guid Id { get; init; } = Guid.NewGuid();
+    public Guid Id { get; init; }
     public required string ClientPhone { get; init; }
     public required string ServiceSlug { get; init; }
     public required Point Location { get; init; }
     public string FormattedAddress { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;
-    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset CreatedAt { get; init; }
     public ServiceRequestStatus Status { get; private set; } = ServiceRequestStatus.Open;
 
     public List<string> ShownProviderPhones { get; private set; } = [];
@@ -32,7 +32,7 @@ public class ServiceRequest : AggregateRoot
     {
         var request = new ServiceRequest
         {
-            Id = Guid.NewGuid(),
+            Id = Guid.CreateVersion7(),
             ClientPhone = clientPhone,
             ServiceSlug = serviceSlug,
             Location = location.ToPoint(),

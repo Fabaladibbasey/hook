@@ -178,12 +178,7 @@ public class FeedbackResponseServiceTests
 
     private MatchEntity SeedAnchor(string providerPhone)
     {
-        var m = new MatchEntity
-        {
-            RequestId = Guid.NewGuid(),
-            ProviderPhone = providerPhone,
-            ServiceSlug = "plumbing"
-        };
+        var m = MatchEntity.Create(Guid.NewGuid(), providerPhone, "plumbing", 0, 0, _clock.GetUtcNow());
         _matches[m.Id] = m;
         _requestMatches[m.RequestId] = new List<MatchEntity> { m };
         return m;
@@ -192,17 +187,14 @@ public class FeedbackResponseServiceTests
     private MatchEntity SeedSibling(Guid anchorMatchId, string providerPhone)
     {
         var anchor = _matches[anchorMatchId];
-        var sibling = new MatchEntity
-        {
-            RequestId = anchor.RequestId,
-            ProviderPhone = providerPhone,
-            ServiceSlug = anchor.ServiceSlug,
-            CreatedAt = anchor.CreatedAt.AddSeconds(-1),
-            Score = anchor.Score + 0.1, // ranks higher → first in production order
-            PickedAt = DateTimeOffset.UtcNow
-        };
+        // ranks higher → first in production order (Score DESC)
+        var sibling = MatchEntity.Create(
+            anchor.RequestId, providerPhone, anchor.ServiceSlug,
+            distanceKm: 0,
+            score: anchor.Score + 0.1,
+            now: anchor.CreatedAt.AddSeconds(-1));
+        sibling.ClaimForPickup(true, _clock.GetUtcNow());
         _matches[sibling.Id] = sibling;
-        // Production order: Score DESC -> sibling first, anchor second.
         _requestMatches[anchor.RequestId] = new List<MatchEntity> { sibling, anchor };
         return sibling;
     }
@@ -210,13 +202,8 @@ public class FeedbackResponseServiceTests
     private MatchFeedback SeedPendingForStep(FeedbackStep step, DateTimeOffset? promptedAt = null)
     {
         var anchor = SeedAnchor("+2203331234");
-        return new MatchFeedback
-        {
-            MatchId = anchor.Id,
-            RequestId = anchor.RequestId,
-            Step = step,
-            PromptedAt = promptedAt ?? _clock.GetUtcNow()
-        };
+        return MatchFeedback.CreatePending(
+            anchor.Id, anchor.RequestId, step, promptedAt ?? _clock.GetUtcNow());
     }
 
     private static InboundMessage NewInbound(string text) =>
@@ -233,7 +220,7 @@ public class FeedbackResponseServiceTests
     [Fact]
     public async Task HandleAsync_UnknownStep_ThrowsInvalidOperation()
     {
-        var pending = new MatchFeedback { MatchId = Guid.NewGuid(), RequestId = Guid.NewGuid(), Step = (FeedbackStep)999 };
+        var pending = MatchFeedback.CreatePending(Guid.NewGuid(), Guid.NewGuid(), (FeedbackStep)999, _clock.GetUtcNow());
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             Build().HandleAsync(NewInbound("yes"), pending, Intent("yes"), CancellationToken.None));
@@ -257,7 +244,7 @@ public class FeedbackResponseServiceTests
     public async Task DidYouFind_YesSinglePick_PublishesStep2()
     {
         var pending = SeedPendingForStep(FeedbackStep.DidYouFind);
-        _matches[pending.MatchId].PickedAt = DateTimeOffset.UtcNow;
+        _matches[pending.MatchId].ClaimForPickup(false, DateTimeOffset.UtcNow);
 
         await Build().HandleAsync(NewInbound("yes"), pending, Intent("yes"), CancellationToken.None);
 
@@ -272,7 +259,7 @@ public class FeedbackResponseServiceTests
     public async Task DidYouFind_YesMultiPick_ReservesIdentifyWinnerAndSendsPrompt()
     {
         var pending = SeedPendingForStep(FeedbackStep.DidYouFind);
-        _matches[pending.MatchId].PickedAt = DateTimeOffset.UtcNow;
+        _matches[pending.MatchId].ClaimForPickup(false, DateTimeOffset.UtcNow);
         SeedSibling(pending.MatchId, "+2204445678");
 
         await Build().HandleAsync(NewInbound("yes"), pending, Intent("yes"), CancellationToken.None);
@@ -349,7 +336,7 @@ public class FeedbackResponseServiceTests
     public async Task DidYouFind_TryClaimRaceLost_NoPublish()
     {
         var pending = SeedPendingForStep(FeedbackStep.DidYouFind);
-        _matches[pending.MatchId].PickedAt = DateTimeOffset.UtcNow;
+        _matches[pending.MatchId].ClaimForPickup(false, DateTimeOffset.UtcNow);
         _tryClaimResult = false;
 
         await Build().HandleAsync(NewInbound("yes"), pending, Intent("yes"), CancellationToken.None);
@@ -376,7 +363,7 @@ public class FeedbackResponseServiceTests
     {
         var pending = SeedPendingForStep(FeedbackStep.IdentifyWinner);
         var anchor = _matches[pending.MatchId];
-        anchor.PickedAt = DateTimeOffset.UtcNow;
+        anchor.ClaimForPickup(false, DateTimeOffset.UtcNow);
         SeedSibling(pending.MatchId, "+2204445678");
         // Two picked siblings; reply "2" picks the second (anchor).
 
@@ -394,7 +381,7 @@ public class FeedbackResponseServiceTests
     public async Task IdentifyWinner_FirstSlotDigit_PublishesForHighestScoredSibling()
     {
         var pending = SeedPendingForStep(FeedbackStep.IdentifyWinner);
-        _matches[pending.MatchId].PickedAt = DateTimeOffset.UtcNow;
+        _matches[pending.MatchId].ClaimForPickup(false, DateTimeOffset.UtcNow);
         var sibling = SeedSibling(pending.MatchId, "+2204445678");
 
         await Build().HandleAsync(NewInbound("1"), pending, Intent("1"), CancellationToken.None);
@@ -410,7 +397,7 @@ public class FeedbackResponseServiceTests
     public async Task IdentifyWinner_OutOfRangeWithinRetryWindow_SendsHint()
     {
         var pending = SeedPendingForStep(FeedbackStep.IdentifyWinner, promptedAt: _clock.GetUtcNow());
-        _matches[pending.MatchId].PickedAt = DateTimeOffset.UtcNow;
+        _matches[pending.MatchId].ClaimForPickup(false, DateTimeOffset.UtcNow);
         SeedSibling(pending.MatchId, "+2204445678");
 
         await Build().HandleAsync(NewInbound("99"), pending, Intent("99"), CancellationToken.None);
@@ -426,7 +413,7 @@ public class FeedbackResponseServiceTests
         var pending = SeedPendingForStep(
             FeedbackStep.IdentifyWinner,
             promptedAt: _clock.GetUtcNow() - TimeSpan.FromHours(2));
-        _matches[pending.MatchId].PickedAt = DateTimeOffset.UtcNow;
+        _matches[pending.MatchId].ClaimForPickup(false, DateTimeOffset.UtcNow);
         SeedSibling(pending.MatchId, "+2204445678");
 
         await Build().HandleAsync(NewInbound("xyz"), pending, Intent("xyz"), CancellationToken.None);
@@ -441,7 +428,7 @@ public class FeedbackResponseServiceTests
     public async Task IdentifyWinner_TryClaimRaceLost_NoPublish()
     {
         var pending = SeedPendingForStep(FeedbackStep.IdentifyWinner);
-        _matches[pending.MatchId].PickedAt = DateTimeOffset.UtcNow;
+        _matches[pending.MatchId].ClaimForPickup(false, DateTimeOffset.UtcNow);
         SeedSibling(pending.MatchId, "+2204445678");
         _tryClaimResult = false;
 

@@ -74,22 +74,23 @@ public sealed class RegistrationOrchestrator(
             return;
         }
 
-        var draft = await drafts.GetAsync(phone.Value, ct) ?? RegistrationDraft.Start(phone.Value, now);
-        draft.UpdatedAt = now;
+        var existingDraft = await drafts.GetAsync(phone.Value, ct);
+        var draft = existingDraft ?? RegistrationDraft.Start(phone.Value, now);
+        if (existingDraft is not null) draft.Touch(now);
 
         switch (draft.Step)
         {
             case RegistrationStep.AwaitingServices:
-                await StartAsync(draft, message, phone, ct);
+                await StartAsync(draft, message, phone, now, ct);
                 break;
             case RegistrationStep.ConfirmServices:
-                await ConfirmServicesAsync(draft, message, phone, ct);
+                await ConfirmServicesAsync(draft, message, phone, now, ct);
                 break;
             case RegistrationStep.AwaitingLocation:
-                await CollectLocationAsync(draft, message, phone, ct);
+                await CollectLocationAsync(draft, message, phone, now, ct);
                 break;
             case RegistrationStep.ConfirmLocation:
-                await ConfirmLocationAsync(draft, message, phone, ct);
+                await ConfirmLocationAsync(draft, message, phone, now, ct);
                 break;
             case RegistrationStep.AwaitingConsent:
                 await CollectConsentAsync(draft, message, phone, now, ct);
@@ -114,7 +115,7 @@ public sealed class RegistrationOrchestrator(
         return existing;
     }
 
-    private async Task StartAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
+    private async Task StartAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
     {
         var text = message.Text ?? string.Empty;
         var extracted = await ai.ExtractServicesAsync(text, ct);
@@ -133,8 +134,8 @@ public sealed class RegistrationOrchestrator(
         // Draft persist + outbound prompt are part of the same Wolverine handler EF transaction;
         // commit lands at handler-end. A "fast yes" reply over WhatsApp can't race the commit in
         // practice (round-trip > commit latency).
-        draft.DraftServices = capped;
-        draft.Step = RegistrationStep.ConfirmServices;
+        draft.SetServices(capped, now);
+        draft.StepTo(RegistrationStep.ConfirmServices, now);
         await drafts.UpsertAsync(draft, ct);
 
         if (canonicalSlugs.Count > options.Value.MaxServicesPerProvider)
@@ -149,7 +150,7 @@ public sealed class RegistrationOrchestrator(
         }
     }
 
-    private async Task ConfirmServicesAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
+    private async Task ConfirmServicesAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
     {
         var quick = QuickIntent.Detect(message.Text);
 
@@ -167,7 +168,7 @@ public sealed class RegistrationOrchestrator(
                     .Take(options.Value.MaxServicesPerProvider).ToList();
                 if (merged.Count != draft.DraftServices.Count)
                 {
-                    draft.DraftServices = merged;
+                    draft.SetServices(merged, now);
                     await drafts.UpsertAsync(draft, ct);
                     await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
                         $"Updated: {string.Join(", ", merged)}. Reply YES to confirm or EDIT to change."));
@@ -181,7 +182,7 @@ public sealed class RegistrationOrchestrator(
             : await ai.DetectIntentAsync(message.Text ?? string.Empty, ct);
         if (intent.Intent == IntentKind.Confirmation)
         {
-            draft.Step = RegistrationStep.AwaitingLocation;
+            draft.StepTo(RegistrationStep.AwaitingLocation, now);
             await drafts.UpsertAsync(draft, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Send your location pin (or type your address)."));
             return;
@@ -189,7 +190,7 @@ public sealed class RegistrationOrchestrator(
 
         if (intent.Intent == IntentKind.Edit)
         {
-            draft.Step = RegistrationStep.AwaitingServices;
+            draft.StepTo(RegistrationStep.AwaitingServices, now);
             await drafts.UpsertAsync(draft, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Send the corrected list of services in one message."));
             return;
@@ -224,14 +225,12 @@ public sealed class RegistrationOrchestrator(
         return [.. newSlugs.Where(s => existing.Services.Contains(s))];
     }
 
-    private async Task CollectLocationAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
+    private async Task CollectLocationAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
     {
         if (message.Kind == InboundMessageKind.Location && message.Location is { } loc)
         {
-            draft.DraftLatitude = loc.Latitude;
-            draft.DraftLongitude = loc.Longitude;
-            draft.DraftFormattedAddress = loc.Address ?? loc.Name ?? "(GPS pin)";
-            draft.Step = RegistrationStep.AwaitingConsent;
+            draft.CaptureLocation(loc.Latitude, loc.Longitude, loc.Address ?? loc.Name ?? "(GPS pin)", now);
+            draft.StepTo(RegistrationStep.AwaitingConsent, now);
             await drafts.UpsertAsync(draft, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Got your location. Share your phone with clients on match? Reply YES to share, NO to keep it private."));
             return;
@@ -247,10 +246,8 @@ public sealed class RegistrationOrchestrator(
                 return;
             }
 
-            draft.DraftLatitude = geocoded.Location.Latitude;
-            draft.DraftLongitude = geocoded.Location.Longitude;
-            draft.DraftFormattedAddress = geocoded.FormattedAddress;
-            draft.Step = RegistrationStep.ConfirmLocation;
+            draft.CaptureLocation(geocoded.Location.Latitude, geocoded.Location.Longitude, geocoded.FormattedAddress, now);
+            draft.StepTo(RegistrationStep.ConfirmLocation, now);
             await drafts.UpsertAsync(draft, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
                 $"Found: '{geocoded.FormattedAddress}'. Reply YES to confirm or send your GPS pin instead."));
@@ -260,14 +257,12 @@ public sealed class RegistrationOrchestrator(
         await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Send your location pin or type your address."));
     }
 
-    private async Task ConfirmLocationAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, CancellationToken ct)
+    private async Task ConfirmLocationAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
     {
         if (message.Kind == InboundMessageKind.Location && message.Location is { } loc)
         {
-            draft.DraftLatitude = loc.Latitude;
-            draft.DraftLongitude = loc.Longitude;
-            draft.DraftFormattedAddress = loc.Address ?? loc.Name ?? "(GPS pin)";
-            draft.Step = RegistrationStep.AwaitingConsent;
+            draft.CaptureLocation(loc.Latitude, loc.Longitude, loc.Address ?? loc.Name ?? "(GPS pin)", now);
+            draft.StepTo(RegistrationStep.AwaitingConsent, now);
             await drafts.UpsertAsync(draft, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Got your location. Share your phone with clients on match? Reply YES to share, NO to keep it private."));
             return;
@@ -279,7 +274,7 @@ public sealed class RegistrationOrchestrator(
             : await ai.DetectIntentAsync(message.Text ?? string.Empty, ct);
         if (intent.Intent == IntentKind.Confirmation)
         {
-            draft.Step = RegistrationStep.AwaitingConsent;
+            draft.StepTo(RegistrationStep.AwaitingConsent, now);
             await drafts.UpsertAsync(draft, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Share your phone with clients on match? Reply YES to share, NO to keep it private."));
             return;
@@ -307,7 +302,7 @@ public sealed class RegistrationOrchestrator(
             return;
         }
 
-        draft.DraftShareContact = consent.Value;
+        draft.SetShareContact(consent.Value, now);
 
         if (draft.DraftLatitude is null || draft.DraftLongitude is null || draft.DraftServices.Count == 0)
         {

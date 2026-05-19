@@ -128,7 +128,7 @@ dotnet build -p:BaseOutputPath=bin/altbuild/bin/ -p:BaseIntermediateOutputPath=o
 - **Bot-owned action lines.** In matching flow the bot owns the match action line verbatim — `MatchPresenter` does not regenerate it.
 - **AI failure = drop.** `AiReplyHelper` drops the message on Ollama failure rather than falling back.
 - **Wolverine vs Ollama timeouts.** `Wolverine.DefaultExecutionTimeout` (default 60s) preempts long Ollama calls — keep them aligned in `Program.cs`.
-- **Geocoding fixtures.** Dev coordinates are Banjul; integration test fixtures are San Francisco.
+- **Geocoding fixtures.** All coordinates are Banjul / Gambia — dev and integration test fixtures share the same reference point.
 
 ## CI / Deploy
 

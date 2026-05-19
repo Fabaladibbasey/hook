@@ -21,8 +21,8 @@ namespace Hook.IntegrationTests;
 
 public sealed class DevPipelineFixture : IAsyncLifetime
 {
-    public const double SeedRefLat = 37.7749;
-    public const double SeedRefLng = -122.4194;
+    public const double SeedRefLat = 13.4549;
+    public const double SeedRefLng = -16.5790;
 
     // One Postgres container shared across every Pipeline-N shard. Each shard gets
     // its own database cloned from a pre-migrated template, which dodges 3x container

@@ -5,13 +5,11 @@ namespace Hook.UnitTests.ContactSharing;
 
 public class PickProviderResolverTests
 {
+    private static Match Stub(string providerPhone) =>
+        Match.Create(Guid.NewGuid(), providerPhone, "plumbing", 0, 0, DateTimeOffset.UtcNow);
+
     private static IReadOnlyList<Match> Five() => [.. Enumerable.Range(0, 5)
-        .Select(i => new Match
-        {
-            RequestId = Guid.NewGuid(),
-            ProviderPhone = $"+220300000{i}",
-            ServiceSlug = "plumbing"
-        })];
+        .Select(i => Stub($"+220300000{i}"))];
 
     [Fact]
     public void Resolve_SingleIndex_ReturnsOneMatchAtPosition1()
@@ -129,8 +127,8 @@ public class PickProviderResolverTests
     {
         var matches = new[]
         {
-            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2203331234", ServiceSlug = "plumbing" },
-            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2207771234", ServiceSlug = "plumbing" },
+            Stub("+2203331234"),
+            Stub("+2207771234"),
         };
         var picked = PickProviderResolver.Resolve("pick 1234", matches);
         Assert.Empty(picked);
@@ -141,9 +139,9 @@ public class PickProviderResolverTests
     {
         var matches = new[]
         {
-            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2203331234", ServiceSlug = "plumbing" },
-            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2207771234", ServiceSlug = "plumbing" },
-            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2204441234", ServiceSlug = "plumbing" },
+            Stub("+2203331234"),
+            Stub("+2207771234"),
+            Stub("+2204441234"),
         };
         var picked = PickProviderResolver.Resolve("pick 1234", matches);
         Assert.Empty(picked);
@@ -154,8 +152,8 @@ public class PickProviderResolverTests
     {
         var matches = new[]
         {
-            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2207775678", ServiceSlug = "plumbing" },
-            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2203331234", ServiceSlug = "plumbing" },
+            Stub("+2207775678"),
+            Stub("+2203331234"),
         };
         var picked = PickProviderResolver.Resolve("pick 1234", matches);
         var single = Assert.Single(picked);
@@ -171,8 +169,8 @@ public class PickProviderResolverTests
         // conversational digits.
         var matches = new[]
         {
-            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2203331234", ServiceSlug = "plumbing" },
-            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2207775678", ServiceSlug = "plumbing" },
+            Stub("+2203331234"),
+            Stub("+2207775678"),
         };
         var picked = PickProviderResolver.Resolve("1234 main st", matches);
         Assert.Empty(picked);
@@ -186,7 +184,7 @@ public class PickProviderResolverTests
         // edges to be non-digit (or string boundary).
         var matches = new[]
         {
-            new Match { RequestId = Guid.NewGuid(), ProviderPhone = "+2203331234", ServiceSlug = "plumbing" },
+            Stub("+2203331234"),
         };
         var picked = PickProviderResolver.Resolve("pick 12340", matches);
         Assert.Empty(picked);

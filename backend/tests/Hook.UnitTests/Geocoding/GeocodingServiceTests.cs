@@ -41,12 +41,12 @@ public class GeocodingServiceTests
             .Returns(Task.CompletedTask);
 
         var geocoderMock = new Mock<IGeocoder>();
-        var fetched = new GeocodeResult(new Location(40.7, -74), "New York, NY, USA", "google", FromCache: false);
+        var fetched = new GeocodeResult(new Location(13.4382, -16.6781), "Serrekunda, Kanifing, Gambia", "google", FromCache: false);
         geocoderMock.Setup(x => x.GeocodeAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(fetched);
         var service = new GeocodingService(geocoderMock.Object, cacheMock.Object, NullLogger<GeocodingService>.Instance);
 
-        var first = await service.GeocodeAsync("New York");
-        var second = await service.GeocodeAsync("new york");
+        var first = await service.GeocodeAsync("Serrekunda");
+        var second = await service.GeocodeAsync("serrekunda");
 
         first.ShouldNotBeNull();
         first!.FromCache.ShouldBeFalse();

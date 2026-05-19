@@ -7,7 +7,7 @@ public class DevGeocodingOptions
     public bool Enabled { get; init; }
 
     // Coordinates returned by the StaticGeocoder dev stub for any input address.
-    // Defaults preserve historical SF behaviour for backwards-compat with integration tests.
-    public double DefaultLat { get; init; } = 37.7749;
-    public double DefaultLng { get; init; } = -122.4194;
+    // Banjul, The Gambia — matches the deployment region.
+    public double DefaultLat { get; init; } = 13.4549;
+    public double DefaultLng { get; init; } = -16.5790;
 }

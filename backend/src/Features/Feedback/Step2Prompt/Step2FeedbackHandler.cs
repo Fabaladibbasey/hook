@@ -9,7 +9,8 @@ namespace Hook.Features.Feedback.Step2Prompt;
 public sealed class Step2FeedbackHandler(
     IFeedbackRepository feedback,
     IMatchRepository matches,
-    IServiceRequestRepository requests)
+    IServiceRequestRepository requests,
+    TimeProvider clock)
 {
     public async Task Handle(Step2FeedbackCheck evt, IMessageBus bus, CancellationToken ct)
     {
@@ -27,12 +28,8 @@ public sealed class Step2FeedbackHandler(
         if (request is null) return;
         if (!PhoneNumber.TryParse(request.ClientPhone, out var clientPhone)) return;
 
-        var entry = new MatchFeedback
-        {
-            MatchId = match.Id,
-            RequestId = match.RequestId,
-            Step = FeedbackStep.JobCompleted
-        };
+        var entry = MatchFeedback.CreatePending(
+            match.Id, match.RequestId, FeedbackStep.JobCompleted, clock.GetUtcNow());
         if (!await feedback.TryAddPendingAsync(entry, ct)) return;
 
         await bus.PublishAsync(new Step2PromptDispatchRequested(

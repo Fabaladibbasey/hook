@@ -24,24 +24,12 @@ public sealed class MatchRepositoryOrderingTests : PipelineTestBase
         var earlier = DateTimeOffset.UtcNow.AddMinutes(-5);
         var later = DateTimeOffset.UtcNow;
 
-        var laterMatch = new MatchEntity
-        {
-            RequestId = request.Id,
-            ProviderPhone = $"+220{Guid.NewGuid().ToString("N")[..8]}",
-            ServiceSlug = "plumbing",
-            DistanceKm = 1.0,
-            Score = 0.9,
-            CreatedAt = later
-        };
-        var earlierMatch = new MatchEntity
-        {
-            RequestId = request.Id,
-            ProviderPhone = $"+220{Guid.NewGuid().ToString("N")[..8]}",
-            ServiceSlug = "plumbing",
-            DistanceKm = 1.0,
-            Score = 0.9,
-            CreatedAt = earlier
-        };
+        var laterMatch = MatchEntity.Create(
+            request.Id, $"+220{Guid.NewGuid().ToString("N")[..8]}", "plumbing",
+            distanceKm: 1.0, score: 0.9, now: later);
+        var earlierMatch = MatchEntity.Create(
+            request.Id, $"+220{Guid.NewGuid().ToString("N")[..8]}", "plumbing",
+            distanceKm: 1.0, score: 0.9, now: earlier);
 
         // Insert later first so the natural insertion order is the OPPOSITE of the
         // expected sort — proves the tertiary sort is doing the work.

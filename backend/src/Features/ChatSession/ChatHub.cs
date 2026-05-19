@@ -122,15 +122,14 @@ public sealed class ChatHub(IChatRepository chats, HookDbContext db, ChatSchedul
             return;
         }
 
-        var msg = new ChatMessage
-        {
-            Id = dto.MessageId,
-            ChatId = chatId,
-            ParticipantId = participantId,
-            Sequence = dto.Sequence,
-            Ciphertext = ciphertext,
-            Nonce = nonce
-        };
+        var msg = ChatMessage.Create(
+            id: dto.MessageId,
+            chatId: chatId,
+            participantId: participantId,
+            sequence: dto.Sequence,
+            ciphertext: ciphertext,
+            nonce: nonce,
+            now: clock.GetUtcNow());
 
         var inserted = await chats.TryAddMessageAsync(msg);
         if (!inserted)

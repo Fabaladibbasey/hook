@@ -9,7 +9,8 @@ namespace Hook.Features.Feedback.Step1Prompt;
 public sealed class Step1FeedbackHandler(
     IMatchRepository matches,
     IServiceRequestRepository requests,
-    IFeedbackRepository feedback)
+    IFeedbackRepository feedback,
+    TimeProvider clock)
 {
     public async Task Handle(Step1FeedbackCheck evt, IMessageBus bus, CancellationToken ct)
     {
@@ -30,12 +31,8 @@ public sealed class Step1FeedbackHandler(
 
         // Reserve the pending row before any side-effects. Two partial unique
         // indexes back this insert; both losers exit silently.
-        var entry = new MatchFeedback
-        {
-            MatchId = match.Id,
-            RequestId = match.RequestId,
-            Step = FeedbackStep.DidYouFind
-        };
+        var entry = MatchFeedback.CreatePending(
+            match.Id, match.RequestId, FeedbackStep.DidYouFind, clock.GetUtcNow());
         if (!await feedback.TryAddPendingAsync(entry, ct)) return;
 
         var picked = await matches.GetPickedForRequestAsync(match.RequestId, ct);
