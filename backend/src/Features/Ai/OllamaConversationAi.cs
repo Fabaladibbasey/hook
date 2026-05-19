@@ -133,6 +133,60 @@ public sealed class OllamaConversationAi(
         return new ServiceJudgeResult(matched, isNew, ProposedSlug: proposedSlug);
     }
 
+    public async Task<string?> JudgeParentSlugAsync(
+        string proposedSlug,
+        IReadOnlyList<string> rootCandidates,
+        IReadOnlyList<string> rawExamples,
+        CancellationToken ct = default)
+    {
+        if (rootCandidates.Count == 0) return null;
+
+        var schema = new
+        {
+            type = "object",
+            properties = new
+            {
+                parentSlug = new { type = new[] { "string", "null" } }
+            },
+            required = new[] { "parentSlug" }
+        };
+
+        // Each raw example arrives from anonymous WhatsApp inbound (SlugResolver →
+        // RememberRawExample); fence individually so role tokens / chat-control
+        // bytes inside any single entry cannot escape into sibling fences or the
+        // surrounding system prompt.
+        var examples = rawExamples.Count == 0
+            ? "(none)"
+            : string.Join("\n", rawExamples.Take(5)
+                .Select(r => PromptSafety.Fence(r, options.Value.MaxUserInputChars)));
+        var prompt = $$"""
+            Proposed slug: {{proposedSlug}}
+            Candidate parent slugs: {{string.Join(", ", rootCandidates)}}
+            Recent raw examples:
+            {{examples}}
+            """;
+
+        using var json = await CallJsonAsync(AiPrompts.ParentSlugJudgeSystem, prompt, schema, ct);
+        var root = json.RootElement;
+        if (!root.TryGetProperty("parentSlug", out var p) || p.ValueKind == JsonValueKind.Null)
+            return null;
+
+        var picked = p.GetString();
+        if (string.IsNullOrWhiteSpace(picked)) return null;
+
+        // Same DB-is-ground-truth guard as JudgeServiceMatchAsync: ignore any
+        // slug not in the candidate list we passed in.
+        if (!rootCandidates.Contains(picked, StringComparer.Ordinal))
+        {
+            logger.LogWarning("Ollama returned out-of-candidate parent {Picked} for {Proposed}", picked, proposedSlug);
+            return null;
+        }
+        if (string.Equals(picked, proposedSlug, StringComparison.Ordinal))
+            return null;
+
+        return picked;
+    }
+
     public async Task<string> GenerateReplyAsync(ReplyContext context, CancellationToken ct = default)
     {
         var transcript = PromptSafety.EncodeTurns(context.RecentTurns);

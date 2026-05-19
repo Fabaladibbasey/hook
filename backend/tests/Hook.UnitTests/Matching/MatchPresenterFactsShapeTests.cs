@@ -128,6 +128,36 @@ public class MatchPresenterFactsShapeTests
     }
 
     [Fact]
+    public async Task Facts_label_is_Related_for_cross_level_matches()
+    {
+        var presenter = Build(cap: 100);
+
+        var batch = MakeBatchWith(scoredCount: 2, kind: Hook.Features.Matching.MatchAggregate.MatchKind.Broadened);
+        await presenter.PresentAsync(PhoneNumber.Parse("+15550000001"), batch, "plumbing");
+
+        using var doc = JsonDocument.Parse(_capturedFacts!["matches"]);
+        foreach (var item in doc.RootElement.EnumerateArray())
+        {
+            item.GetProperty("label").GetString().ShouldBe("Related");
+        }
+    }
+
+    [Fact]
+    public async Task Facts_label_is_empty_for_exact_matches()
+    {
+        var presenter = Build(cap: 100);
+
+        var batch = MakeBatchWith(scoredCount: 2, kind: Hook.Features.Matching.MatchAggregate.MatchKind.Exact);
+        await presenter.PresentAsync(PhoneNumber.Parse("+15550000001"), batch, "plumbing");
+
+        using var doc = JsonDocument.Parse(_capturedFacts!["matches"]);
+        foreach (var item in doc.RootElement.EnumerateArray())
+        {
+            item.GetProperty("label").GetString().ShouldBe("");
+        }
+    }
+
+    [Fact]
     public async Task PresentAsync_DoesNotNotifyAnyProvider_EvenWhenManyMatches()
     {
         var presenter = Build(cap: 100);
@@ -147,7 +177,7 @@ public class MatchPresenterFactsShapeTests
             options: Options.Create(new MatchingOptions { TopMatchesPerBatch = cap }),
             logger: NullLogger<MatchPresenter>.Instance);
 
-    private static MatchBatch MakeBatchWith(int scoredCount)
+    private static MatchBatch MakeBatchWith(int scoredCount, Hook.Features.Matching.MatchAggregate.MatchKind kind = Hook.Features.Matching.MatchAggregate.MatchKind.Exact)
     {
         var scored = Enumerable.Range(0, scoredCount)
             .Select(i => new ScoredCandidate(
@@ -158,7 +188,8 @@ public class MatchPresenterFactsShapeTests
                     DistanceKm: i + 1.234,
                     CompletedJobs: 5,
                     SuccessRate: 0.9 - (i * 0.01)),
-                Score: 1.0 - (i * 0.05)))
+                Score: 1.0 - (i * 0.05),
+                Kind: kind))
             .ToList();
         return new MatchBatch(Guid.NewGuid(), [], scored);
     }

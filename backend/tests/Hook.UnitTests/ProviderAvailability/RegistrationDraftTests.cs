@@ -12,7 +12,7 @@ public class RegistrationDraftTests
         // way the old code could leak mutation. Pin that invariant directly.
         var now = DateTimeOffset.Parse("2026-05-01T12:00:00Z");
         var source = RegistrationDraft.Start("+2203331234", now);
-        source.SetServices(new[] { "plumbing", "carpentry" }, now);
+        source.SetServices(["plumbing", "carpentry"], now);
 
         var target = RegistrationDraft.Start("+2203339999", now);
         target.ReplaceStateFrom(source);

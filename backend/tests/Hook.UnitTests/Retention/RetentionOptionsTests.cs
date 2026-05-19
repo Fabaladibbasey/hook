@@ -65,11 +65,10 @@ public class RetentionOptionsTests
     }
 
     public static IEnumerable<object[]> SweepIntervalEdges() =>
-        new[]
-        {
+        [
             new object[] { TimeSpan.FromMinutes(1) },
             [TimeSpan.FromDays(1)],
-        };
+        ];
 
     [Fact]
     public void StartupDelay_AboveCeiling_FailsValidation()

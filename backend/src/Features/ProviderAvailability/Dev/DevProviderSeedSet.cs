@@ -29,8 +29,8 @@ public static class DevProviderSeedSet
 
         var services = new[] { "plumbing", "plumber" };
 
-        return new DevProviderSpec[]
-        {
+        return
+        [
             new(
                 Phone: PhoneAt(0, "+2203000001"),
                 Services: services,
@@ -49,6 +49,6 @@ public static class DevProviderSeedSet
                 Location: Offset(northKm: -3.2, eastKm: -3.2),
                 FormattedAddress: "Bakau New Town, Gambia",
                 ShareContact: true)
-        };
+        ];
     }
 }

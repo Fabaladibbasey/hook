@@ -1,47 +1,56 @@
+using Hook.Features.Matching.MatchAggregate;
 using Microsoft.Extensions.Options;
 
 namespace Hook.Features.Matching.Match;
 
-public sealed record ScoredCandidate(ProviderCandidate Candidate, double Score);
+public sealed record ScoredCandidate(ProviderCandidate Candidate, double Score, MatchKind Kind);
 
 public sealed class MatchScorer(IOptions<MatchingOptions> options)
 {
-    public ScoredCandidate Score(ProviderCandidate candidate, double radiusKm, DateTimeOffset now)
+    public ScoredCandidate Score(ScoredProviderCandidate input, double radiusKm, DateTimeOffset now)
     {
         var opts = options.Value;
+        var c = input.Candidate;
 
-        var proximity = Math.Clamp(1.0 - (candidate.DistanceKm / radiusKm), 0.0, 1.0);
-
-        var hoursSinceActive = (now - candidate.LastActiveAt).TotalHours;
+        var proximity = Math.Clamp(1.0 - (c.DistanceKm / radiusKm), 0.0, 1.0);
+        var hoursSinceActive = (now - c.LastActiveAt).TotalHours;
         var recency = Math.Exp(-hoursSinceActive / opts.RecencyHalfLifeHours);
 
-        var useSuccess = candidate.CompletedJobs >= opts.ColdStartMinJobs;
-        double score;
-        if (useSuccess)
+        double baseScore;
+        if (c.CompletedJobs >= opts.ColdStartMinJobs)
         {
-            score = (opts.DistanceWeight * proximity) +
-                    (opts.RecencyWeight * recency) +
-                    (opts.SuccessWeight * candidate.SuccessRate);
+            baseScore = (opts.DistanceWeight * proximity)
+                      + (opts.RecencyWeight * recency)
+                      + (opts.SuccessWeight * c.SuccessRate);
         }
         else
         {
             var sum = opts.DistanceWeight + opts.RecencyWeight;
             var dw = opts.DistanceWeight / sum;
             var rw = opts.RecencyWeight / sum;
-            score = (dw * proximity) + (rw * recency);
+            baseScore = (dw * proximity) + (rw * recency);
         }
 
-        return new ScoredCandidate(candidate, score);
+        var factor = input.Kind switch
+        {
+            MatchKind.Exact => 1.0,
+            MatchKind.Broadened => opts.BroadenedMatchFactor,
+            MatchKind.Narrowed => opts.NarrowedMatchFactor,
+            _ => throw new ArgumentOutOfRangeException(nameof(input), input.Kind, null),
+        };
+        var score = baseScore * factor;
+
+        return new ScoredCandidate(c, score, input.Kind);
     }
 
     public IReadOnlyList<ScoredCandidate> ScoreAndRank(
-        IEnumerable<ProviderCandidate> candidates,
+        IEnumerable<ScoredProviderCandidate> inputs,
         double radiusKm,
         DateTimeOffset now,
         int take)
     {
-        return [.. candidates
-            .Select(c => Score(c, radiusKm, now))
+        return [.. inputs
+            .Select(i => Score(i, radiusKm, now))
             .OrderByDescending(s => s.Score)
             .Take(take)];
     }

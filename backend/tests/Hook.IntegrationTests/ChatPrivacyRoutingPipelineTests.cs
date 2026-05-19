@@ -111,7 +111,7 @@ public class ChatPrivacyRoutingPipelineTests : PipelineTestBase
         participants.Count.ShouldBe(2);
         participants.Select(p => p.Token).Distinct().Count().ShouldBe(2);
         participants.Select(p => p.Role).ShouldBe(
-            new[] { ChatParticipantRole.Client, ChatParticipantRole.Provider },
+            [ChatParticipantRole.Client, ChatParticipantRole.Provider],
             ignoreOrder: true);
         participants.Single(p => p.Role == ChatParticipantRole.Client).Phone.ShouldBe(phone);
         participants.Single(p => p.Role == ChatParticipantRole.Provider).Phone.ShouldBe(ShareDisabledProviderPhone);

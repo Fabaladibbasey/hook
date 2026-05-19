@@ -1,4 +1,5 @@
 using Hook.Features.ServiceTaxonomy.ResolveSlug;
+using Hook.Features.ServiceTaxonomy.SeedRoots;
 using Hook.Features.ServiceTaxonomy.ServiceAggregate;
 
 namespace Hook.Features.ServiceTaxonomy;
@@ -11,6 +12,7 @@ public static class ServiceTaxonomyServiceCollectionExtensions
 
         services.AddScoped<IServiceRepository, ServiceRepository>();
         services.AddScoped<SlugResolver>();
+        services.AddScoped<RootSectorSeeder>();
 
         return services;
     }

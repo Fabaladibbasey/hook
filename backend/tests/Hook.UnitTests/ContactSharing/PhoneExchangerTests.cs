@@ -91,7 +91,7 @@ public class PhoneExchangerTests
         var now = _clock.GetUtcNow();
         var expiresAt = providerExpiresAt ?? now.AddHours(24);
         _providers[providerPhone] = ProviderEntity.Register(
-            providerPhone, new[] { "plumbing" },
+            providerPhone, ["plumbing"],
             new Location(13.45, -16.6), "Banjul",
             providerConsent, expiresAt - now, now);
         return match;

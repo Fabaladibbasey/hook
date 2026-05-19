@@ -62,7 +62,7 @@ public sealed class RetentionSweeper(
             try
             {
                 await db.Database.ExecuteSqlRawAsync(
-                    "SELECT pg_advisory_lock({0});", new object[] { AdvisoryLockKey }, ct);
+                    "SELECT pg_advisory_lock({0});", [AdvisoryLockKey], ct);
                 lockAcquired = true;
             }
             catch (Exception ex)
@@ -95,7 +95,7 @@ public sealed class RetentionSweeper(
                 try
                 {
                     await db.Database.ExecuteSqlRawAsync(
-                        "SELECT pg_advisory_unlock({0});", new object[] { AdvisoryLockKey }, CancellationToken.None);
+                        "SELECT pg_advisory_unlock({0});", [AdvisoryLockKey], CancellationToken.None);
                 }
                 catch (Exception ex)
                 {

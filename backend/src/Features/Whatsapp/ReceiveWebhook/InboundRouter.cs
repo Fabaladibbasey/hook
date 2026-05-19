@@ -315,7 +315,7 @@ public sealed class InboundRouterHandler(
     {
         var ctx = new ReplyContext(
             Purpose: purpose,
-            RecentTurns: new[] { new ConversationTurn(TurnRole.User, text) },
+            RecentTurns: [new ConversationTurn(TurnRole.User, text)],
             LanguageHint: detected.LanguageCode,
             Facts: new Dictionary<string, string>
             {

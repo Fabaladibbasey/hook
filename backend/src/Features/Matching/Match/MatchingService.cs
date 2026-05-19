@@ -1,5 +1,6 @@
 using Hook.Features.Observability;
 using Hook.Features.ServiceRequest.RequestAggregate;
+using Hook.Features.ServiceTaxonomy.ServiceAggregate;
 using Microsoft.Extensions.Options;
 using IMatchRepository = Hook.Features.Matching.MatchAggregate.IMatchRepository;
 using MatchEntity = Hook.Features.Matching.MatchAggregate.Match;
@@ -15,6 +16,7 @@ public sealed class MatchingService(
     IServiceRequestRepository requests,
     IProviderQueryService query,
     IMatchRepository matches,
+    IServiceRepository services,
     MatchScorer scorer,
     IOptions<MatchingOptions> options,
     TimeProvider clock)
@@ -37,9 +39,11 @@ public sealed class MatchingService(
         // at the same coords would otherwise self-match.
         var excludePhones = request.ShownProviderPhones.Append(request.ClientPhone);
 
+        var expanded = await services.ExpandAsync(request.ServiceSlug, ct);
+
         var candidates = await query.FindCandidatesAsync(
             request.Location,
-            request.ServiceSlug,
+            expanded,
             radius,
             excludePhones,
             now,
@@ -59,7 +63,8 @@ public sealed class MatchingService(
             serviceSlug: request.ServiceSlug,
             distanceKm: s.Candidate.DistanceKm,
             score: s.Score,
-            now: now)).ToList();
+            now: now,
+            kind: s.Kind)).ToList();
 
         await matches.AddRangeAsync(newMatches, ct);
 
