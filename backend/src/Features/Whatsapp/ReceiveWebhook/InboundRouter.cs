@@ -395,11 +395,11 @@ public sealed class InboundRouterHandler(
         if (consideredTotal == failedTotal)
         {
             if (unavailable == failedTotal)
-                reply = "Those providers are no longer available. Reply NEXT for more.";
+                reply = "Those providers' listings expired. Reply NEXT for more matches, or INCREASE to search further.";
             else if (raceLost == failedTotal)
-                reply = "That match was just taken. Reply NEXT for more.";
+                reply = "Another client just picked that provider. Reply NEXT to see more matches.";
             else
-                reply = "Couldn't connect right now — please try again in a moment.";
+                reply = "Temporary hiccup connecting you. Try again in a moment, or reply NEXT for other providers.";
         }
         else
         {

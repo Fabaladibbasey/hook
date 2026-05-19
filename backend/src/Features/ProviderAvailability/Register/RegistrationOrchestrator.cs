@@ -241,7 +241,7 @@ public sealed class RegistrationOrchestrator(
             var geocoded = await geocoding.GeocodeAsync(message.Text!, ct);
             if (geocoded is null)
             {
-                await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Couldn't find that address. Please send your GPS pin (📎 → Location)."));
+                await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "I couldn't find that address. Try typing it differently, or send a GPS pin (📎 → Location)."));
                 await drafts.UpsertAsync(draft, ct);
                 return;
             }
@@ -309,7 +309,7 @@ public sealed class RegistrationOrchestrator(
             logger.LogWarning("Incomplete draft for {Phone} cannot finalize", phone.Mask());
             await drafts.DeleteAsync(phone.Value, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                "Couldn't list you — some details were missing. Reply 'I offer …' to start over."));
+                "Couldn't list you — I'm missing your service or location. Reply \"I offer …\" and send a location pin to try again."));
             return;
         }
 
@@ -330,7 +330,7 @@ public sealed class RegistrationOrchestrator(
                 phone.Mask(), openRequest.ServiceSlug);
             await drafts.DeleteAsync(phone.Value, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                $"You have an open request for {human}. Cancel it first (reply LEAVE) before listing yourself for {human}."));
+                $"You can't be both client and provider for the same service. You have an open request for {human} — reply CANCEL to close it, then register again."));
             return;
         }
 
@@ -361,7 +361,7 @@ public sealed class RegistrationOrchestrator(
             logger.LogError(ex, "Failed to finalize provider registration for {Phone}", phone.Mask());
             await drafts.DeleteAsync(phone.Value, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                "Couldn't list you right now. Reply 'I offer …' to try again."));
+                "Something went wrong listing you. Try again in a moment — reply \"I offer …\" to retry."));
         }
     }
 }

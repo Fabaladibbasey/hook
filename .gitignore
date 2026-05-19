@@ -10,6 +10,7 @@ bin-alt-tests/
 obj-alt/
 obj-test/
 obj-alt-tests/
+altobj/
 
 ## Build output
 publish/

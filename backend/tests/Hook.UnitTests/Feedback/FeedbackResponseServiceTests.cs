@@ -294,7 +294,7 @@ public class FeedbackResponseServiceTests
     }
 
     [Fact]
-    public async Task DidYouFind_NoReply_ClaimsNoNoPublish()
+    public async Task DidYouFind_NoReply_ClaimsNoAndAcks()
     {
         var pending = SeedPendingForStep(FeedbackStep.DidYouFind);
 
@@ -303,6 +303,19 @@ public class FeedbackResponseServiceTests
         Assert.Single(_claimed);
         Assert.Equal(FeedbackAnswer.No, _claimed[0].Answer);
         Assert.Empty(_published);
+        Assert.Single(_sent);
+        Assert.Contains("Thanks for letting us know", _sent[0].Body);
+    }
+
+    [Fact]
+    public async Task DidYouFind_NoReply_RaceLost_DoesNotAck()
+    {
+        var pending = SeedPendingForStep(FeedbackStep.DidYouFind);
+        _tryClaimResult = false;
+
+        await Build().HandleAsync(NewInbound("no"), pending, Intent("no"), CancellationToken.None);
+
+        Assert.Empty(_claimed);
         Assert.Empty(_sent);
     }
 
@@ -319,7 +332,7 @@ public class FeedbackResponseServiceTests
     }
 
     [Fact]
-    public async Task DidYouFind_GarbagePastRetryWindow_SilentNoAiCall()
+    public async Task DidYouFind_GarbagePastRetryWindow_ClaimsSkippedAndAcks()
     {
         var pending = SeedPendingForStep(
             FeedbackStep.DidYouFind,
@@ -327,8 +340,10 @@ public class FeedbackResponseServiceTests
 
         await Build().HandleAsync(NewInbound("xyz"), pending, Intent("xyz"), CancellationToken.None);
 
-        Assert.Empty(_claimed);
-        Assert.Empty(_sent);
+        Assert.Single(_claimed);
+        Assert.Equal(FeedbackAnswer.Skipped, _claimed[0].Answer);
+        Assert.Single(_sent);
+        Assert.Contains("No more questions", _sent[0].Body);
         // Bound the AI fallback by the retry window — no Ollama call for stale Pending.
         _aiMock.Verify(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -409,7 +424,7 @@ public class FeedbackResponseServiceTests
     }
 
     [Fact]
-    public async Task IdentifyWinner_PastRetryWindow_ClaimsSkippedAndLogs()
+    public async Task IdentifyWinner_PastRetryWindow_ClaimsSkippedAndAcks()
     {
         var pending = SeedPendingForStep(
             FeedbackStep.IdentifyWinner,
@@ -421,7 +436,8 @@ public class FeedbackResponseServiceTests
 
         Assert.Single(_claimed);
         Assert.Equal(FeedbackAnswer.Skipped, _claimed[0].Answer);
-        Assert.Empty(_sent);
+        Assert.Single(_sent);
+        Assert.Contains("No more questions", _sent[0].Body);
         Assert.Empty(_published);
     }
 
@@ -441,7 +457,7 @@ public class FeedbackResponseServiceTests
     // -- HandleJobCompletedAsync ----------------------------------------------
 
     [Fact]
-    public async Task JobCompleted_Yes_RecordsOutcomeSuccess()
+    public async Task JobCompleted_Yes_RecordsOutcomeSuccessAndAcks()
     {
         var pending = SeedPendingForStep(FeedbackStep.JobCompleted);
 
@@ -451,10 +467,12 @@ public class FeedbackResponseServiceTests
         Assert.Equal(FeedbackAnswer.Yes, _claimed[0].Answer);
         Assert.NotNull(_lastUpsertedStats);
         Assert.Equal(1, _lastUpsertedStats!.SuccessCount);
+        Assert.Single(_sent);
+        Assert.Contains("Glad it worked out", _sent[0].Body);
     }
 
     [Fact]
-    public async Task JobCompleted_No_RecordsOutcomeFailure()
+    public async Task JobCompleted_No_RecordsOutcomeFailureAndAcks()
     {
         var pending = SeedPendingForStep(FeedbackStep.JobCompleted);
 
@@ -465,6 +483,8 @@ public class FeedbackResponseServiceTests
         Assert.NotNull(_lastUpsertedStats);
         Assert.Equal(0, _lastUpsertedStats!.SuccessCount);
         Assert.Equal(1, _lastUpsertedStats!.CompletedCount);
+        Assert.Single(_sent);
+        Assert.Contains("factor that into future matches", _sent[0].Body);
     }
 
     [Fact]
@@ -483,7 +503,7 @@ public class FeedbackResponseServiceTests
     }
 
     [Fact]
-    public async Task JobCompleted_GarbagePastRetryWindow_SilentNoAiCall()
+    public async Task JobCompleted_GarbagePastRetryWindow_ClaimsSkippedAndAcks()
     {
         var pending = SeedPendingForStep(
             FeedbackStep.JobCompleted,
@@ -491,8 +511,10 @@ public class FeedbackResponseServiceTests
 
         await Build().HandleAsync(NewInbound("xyz"), pending, Intent("xyz"), CancellationToken.None);
 
-        Assert.Empty(_claimed);
-        Assert.Empty(_sent);
+        Assert.Single(_claimed);
+        Assert.Equal(FeedbackAnswer.Skipped, _claimed[0].Answer);
+        Assert.Single(_sent);
+        Assert.Contains("No more questions", _sent[0].Body);
         _aiMock.Verify(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -518,6 +540,8 @@ public class FeedbackResponseServiceTests
         var (schedMsg, schedDelay) = _scheduled[0];
         Assert.Equal(pending.MatchId, ((Step2FeedbackCheck)schedMsg).MatchId);
         Assert.True(schedDelay >= TimeSpan.FromHours(3));
+        Assert.Single(_sent);
+        Assert.Contains("I'll check back", _sent[0].Body);
     }
 
     [Fact]
@@ -550,6 +574,8 @@ public class FeedbackResponseServiceTests
         Assert.Single(_scheduled);
         var (_, delay) = _scheduled[0];
         Assert.Equal(_options.Step2InProgressRecheckDelay, delay);
+        Assert.Single(_sent);
+        Assert.Contains("No more questions", _sent[0].Body);
     }
 
     [Fact]
@@ -567,6 +593,8 @@ public class FeedbackResponseServiceTests
         Assert.Single(_scheduled);
         var (_, delay) = _scheduled[0];
         Assert.Equal(_options.Step2InProgressRecheckDelay, delay);
+        Assert.Single(_sent);
+        Assert.Contains("No more questions", _sent[0].Body);
     }
 
     [Fact]
