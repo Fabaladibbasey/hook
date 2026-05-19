@@ -135,9 +135,9 @@ try
         opts.PersistMessagesWithPostgresql(connectionString, schemaName: WolverineConfig.Schema);
         opts.UseEntityFrameworkCoreTransactions();
         // Drains AggregateRoot.DequeueEvents() from tracked entities during the
-        // AutoApplyTransactions middleware commit. Note: only fires inside a Wolverine
-        // handler — non-handler SaveChanges (e.g. ChatHub.EndChat) must drain manually
-        // via IMessageBus.PublishAsync after SaveChanges.
+        // AutoApplyTransactions middleware commit. Only fires inside a Wolverine
+        // handler context — hubs/endpoints MUST dispatch a command and let the
+        // handler own the aggregate mutation.
         opts.PublishDomainEventsFromEntityFrameworkCore();
         opts.Policies.AutoApplyTransactions();
     });

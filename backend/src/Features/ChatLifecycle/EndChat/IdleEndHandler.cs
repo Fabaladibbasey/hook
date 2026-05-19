@@ -1,15 +1,15 @@
 using Hook.Features.ChatLifecycle.Events;
 using Hook.Features.ChatSession;
 using Hook.Features.ChatSession.SessionAggregate;
+using Wolverine;
 
 namespace Hook.Features.ChatLifecycle.EndChat;
 
 public sealed class IdleEndHandler(
     IChatRepository chats,
-    TimeProvider clock,
     ILogger<IdleEndHandler> logger)
 {
-    public async Task Handle(IdleEndCheck evt, CancellationToken ct)
+    public async Task Handle(IdleEndCheck evt, IMessageBus bus, CancellationToken ct)
     {
         var session = await chats.GetSessionAsync(evt.ChatId, ct);
         if (session is null || session.Status != ChatSessionStatus.Active) return;
@@ -20,6 +20,6 @@ public sealed class IdleEndHandler(
             return;
         }
 
-        session.End(clock.GetUtcNow(), "idle");
+        await bus.PublishAsync(new EndChatCommand(evt.ChatId, "idle", null));
     }
 }

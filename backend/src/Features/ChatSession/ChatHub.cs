@@ -1,4 +1,5 @@
 using Hook.Features.ChatLifecycle;
+using Hook.Features.ChatLifecycle.EndChat;
 using Hook.Features.ChatSession.ParticipantAggregate;
 using Hook.Features.ChatSession.SessionAggregate;
 using Hook.Shared.Persistence.Data;
@@ -170,25 +171,11 @@ public sealed class ChatHub(IChatRepository chats, HookDbContext db, ChatSchedul
         if (participant is null) return;
         var role = (Context.Items[ChatHubConstants.Items.Role] as string) ?? participant.Role.ToString();
 
-        var session = await chats.GetSessionAsync(chatId);
-        if (session is null) return;
-        if (session.Status != ChatSessionStatus.Active)
-        {
+        var outcome = await bus.InvokeAsync<EndChatOutcome>(new EndChatCommand(chatId, "user", role));
+        if (outcome.Result == EndChatResult.AlreadyEnded)
             await Clients.Caller.SendAsync(ChatHubConstants.Events.ChatEnded, new ChatEndedPayload("already-ended"));
-            return;
-        }
-
-        session.End(clock.GetUtcNow(), "user", role);
-        await db.SaveChangesAsync();
-
-        // Wolverine's domain-event scraper only drains inside a handler's
-        // AutoApplyTransactions middleware. ChatHub is an ASP.NET hub, not a Wolverine
-        // handler, so we drain the staged events manually and enrol them in the durable
-        // outbox post-commit.
-        foreach (var evt in session.DequeueEvents())
-            await bus.PublishAsync(evt);
-
-        logger.LogInformation("Chat {ChatId} ended by {Role} ({ParticipantId})", chatId, role, participant.Id);
+        else if (outcome.Result == EndChatResult.Ended)
+            logger.LogInformation("Chat {ChatId} ended by {Role} ({ParticipantId})", chatId, role, participant.Id);
     }
 
     private async Task<ChatParticipant?> EnsureCurrentSessionAsync(Guid sessionId)
