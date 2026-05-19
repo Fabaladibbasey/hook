@@ -1,7 +1,5 @@
-import LegalPage, { SUPPORT_EMAIL } from "./LegalPage";
+import LegalPage, { SUPPORT_WHATSAPP_DISPLAY, supportWhatsappLink } from "./LegalPage";
 import { RETENTION_DAYS_LABEL } from "../legal/RetentionDays";
-
-const supportMailto = `mailto:${SUPPORT_EMAIL}`;
 
 export default function Terms() {
   return (
@@ -159,9 +157,9 @@ export default function Terms() {
 
       <h2 id="section-18">18. Contact</h2>
       <p>
-        Questions about these Terms:{" "}
-        <a href={supportMailto}>
-          <code>{SUPPORT_EMAIL}</code>
+        Questions about these Terms — message us on WhatsApp:{" "}
+        <a href={supportWhatsappLink}>
+          <code>{SUPPORT_WHATSAPP_DISPLAY}</code>
         </a>
         .
       </p>

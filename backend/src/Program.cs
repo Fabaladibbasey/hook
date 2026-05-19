@@ -23,6 +23,7 @@ using Hook.Shared.Domain;
 using Hook.Shared.Persistence;
 using Hook.Shared.Persistence.Data;
 using Hook.Shared.Retention;
+using Hook.Shared.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Serilog;
@@ -87,6 +88,27 @@ try
 
     builder.Services.AddReverseProxy()
         .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
+
+    // Compress static-file responses (JS / CSS / HTML / SVG / JSON) so Kestrel matches Caddy in prod
+    // and Lighthouse "text compression" audit passes. Caddy re-honours Content-Encoding upstream
+    // rather than re-compressing, so this is safe behind the prod reverse proxy.
+    builder.Services.AddResponseCompression(opts =>
+    {
+        opts.EnableForHttps = true;
+        opts.Providers.Add<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProvider>();
+        opts.Providers.Add<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProvider>();
+        opts.MimeTypes =
+        [
+            "text/html",
+            "text/css",
+            "text/plain",
+            "text/xml",
+            "application/javascript",
+            "application/json",
+            "application/xml",
+            "image/svg+xml",
+        ];
+    });
 
     builder.Services.AddGlobalRateLimiter(builder.Configuration);
 
@@ -167,12 +189,10 @@ try
         app.UseForwardedHeaders(ForwardedHeadersConfigurator.Build(builder.Configuration));
     }
 
-    // Token-in-URL pattern leaks via Referer; strip referrer on all responses.
-    app.Use(async (ctx, next) =>
-    {
-        ctx.Response.Headers["Referrer-Policy"] = "no-referrer";
-        await next();
-    });
+    // Full baseline of response security headers (CSP, HSTS in prod, frame/COOP/etc.)
+    // also covers the Referrer-Policy strip needed for the token-in-URL chat pattern.
+    app.UseSecurityHeaders(app.Environment);
+    app.UseResponseCompression();
     app.UseExceptionHandler();
     app.UseObservability();
     app.UseRateLimiter();
@@ -212,7 +232,24 @@ try
     app.MapChat();
     app.MapReverseProxy();
     app.UseDefaultFiles();
-    app.UseStaticFiles();
+    // Vite emits content-hashed filenames under /assets — those can be cached forever.
+    // index.html and the bare SVG/ico/robots/sitemap at the root must NOT be cached aggressively
+    // so a redeploy is visible immediately.
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        OnPrepareResponse = ctx =>
+        {
+            var path = ctx.Context.Request.Path.Value ?? string.Empty;
+            if (path.StartsWith("/assets/", StringComparison.OrdinalIgnoreCase))
+            {
+                ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=31536000, immutable";
+            }
+            else
+            {
+                ctx.Context.Response.Headers["Cache-Control"] = "no-cache";
+            }
+        }
+    });
     app.MapHub<ChatHub>(ChatHubConstants.HubPath);
     app.MapFallbackToFile("index.html");
 

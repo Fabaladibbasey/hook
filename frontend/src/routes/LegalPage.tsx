@@ -2,13 +2,19 @@ import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
 import LegalFooter from "../components/LegalFooter";
 
-const env = (import.meta.env.VITE_SUPPORT_EMAIL as string | undefined)?.trim();
-export const SUPPORT_EMAIL = env && env.length > 0 ? env : "support@example.invalid";
+const env = (import.meta.env.VITE_SUPPORT_WHATSAPP as string | undefined)?.replace(/\D/g, "");
+export const SUPPORT_WHATSAPP = env && env.length > 0 ? env : "2206784709";
 
-if (SUPPORT_EMAIL.endsWith(".invalid")) {
-  // eslint-disable-next-line no-console
-  console.warn("VITE_SUPPORT_EMAIL is unset; Privacy/Terms show a placeholder.");
+export const supportWhatsappLink = `https://wa.me/${SUPPORT_WHATSAPP}`;
+
+export function formatSupportWhatsapp(digits: string = SUPPORT_WHATSAPP): string {
+  if (digits.startsWith("220") && digits.length === 10) {
+    return `+220 ${digits.slice(3, 6)} ${digits.slice(6)}`;
+  }
+  return `+${digits}`;
 }
+
+export const SUPPORT_WHATSAPP_DISPLAY = formatSupportWhatsapp();
 
 export default function LegalPage({
   title,
@@ -24,7 +30,7 @@ export default function LegalPage({
       <header className="border-b border-slate-200 px-4 py-3">
         <div className="mx-auto flex max-w-3xl items-center gap-3">
           <Link to="/" className="flex items-center gap-2">
-            <img src="/hook-logo.png" alt="Hook" className="h-8 w-auto rounded" />
+            <img src="/hook-logo.svg" alt="Hook" width={32} height={32} className="rounded" />
             <span className="text-lg font-semibold">Hook</span>
           </Link>
           <span className="ml-auto text-sm text-slate-500">

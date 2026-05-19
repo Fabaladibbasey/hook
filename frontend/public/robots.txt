@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /c/
+Disallow: /dev
+
+Sitemap: https://hook.drop.africa/sitemap.xml
