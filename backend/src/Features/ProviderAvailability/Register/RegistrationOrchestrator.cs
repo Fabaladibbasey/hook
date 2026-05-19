@@ -214,11 +214,11 @@ public sealed class RegistrationOrchestrator(
         AvailabilityAggregate.ProviderAvailability existing, string text, CancellationToken ct)
     {
         var extracted = await ai.ExtractServicesAsync(text, ct);
-        if (extracted.Slugs.Count == 0) return new List<string>();
+        if (extracted.Slugs.Count == 0) return [];
 
         var canonical = await ResolveAllAsync(extracted.Slugs, text, ct);
         var newSlugs = canonical.Except(existing.Services).Distinct().ToList();
-        if (newSlugs.Count == 0) return new List<string>();
+        if (newSlugs.Count == 0) return [];
 
         existing.AddServices(newSlugs, options.Value.MaxServicesPerProvider);
         // Recompute the actually-added subset after the cap (Services is now capped).

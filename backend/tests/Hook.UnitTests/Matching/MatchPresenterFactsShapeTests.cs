@@ -18,7 +18,7 @@ public class MatchPresenterFactsShapeTests
 {
     private readonly Mock<IConversationAi> _aiMock = new();
     private readonly Mock<IWhatsappClient> _whatsappMock = new();
-    private readonly List<SentMessage> _sent = new();
+    private readonly List<SentMessage> _sent = [];
     private IReadOnlyDictionary<string, string>? _capturedFacts;
 
     public MatchPresenterFactsShapeTests()

@@ -18,11 +18,11 @@ namespace Hook.UnitTests.ContactSharing;
 
 public class PhoneExchangerTests
 {
-    private readonly Dictionary<Guid, MatchEntity> _matches = new();
-    private readonly Dictionary<Guid, ServiceRequestEntity> _requests = new();
-    private readonly Dictionary<string, ProviderEntity> _providers = new();
-    private readonly List<(PhoneNumber To, string Body)> _sent = new();
-    private readonly List<object> _published = new();
+    private readonly Dictionary<Guid, MatchEntity> _matches = [];
+    private readonly Dictionary<Guid, ServiceRequestEntity> _requests = [];
+    private readonly Dictionary<string, ProviderEntity> _providers = [];
+    private readonly List<(PhoneNumber To, string Body)> _sent = [];
+    private readonly List<object> _published = [];
 
     private readonly Mock<IMatchRepository> _matchesMock = new();
     private readonly Mock<IServiceRequestRepository> _requestsMock = new();

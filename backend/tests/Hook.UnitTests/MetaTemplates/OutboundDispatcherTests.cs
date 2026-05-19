@@ -118,7 +118,7 @@ public class OutboundDispatcherTests
 
     private sealed class CapturingHandler : HttpMessageHandler
     {
-        public List<(string Path, string Body)> Calls { get; } = new();
+        public List<(string Path, string Body)> Calls { get; } = [];
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(ct);

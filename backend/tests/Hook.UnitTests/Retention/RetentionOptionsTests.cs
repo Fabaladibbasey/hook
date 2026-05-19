@@ -7,7 +7,7 @@ public class RetentionOptionsTests
 {
     private static bool TryValidate(RetentionOptions opts, out List<ValidationResult> results)
     {
-        results = new List<ValidationResult>();
+        results = [];
         return Validator.TryValidateObject(
             opts, new ValidationContext(opts), results, validateAllProperties: true);
     }
