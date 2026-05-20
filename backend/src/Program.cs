@@ -1,5 +1,6 @@
 using Hook;
 using Hook.Features.Ai;
+using Hook.Features.Ai.Warmup;
 using Hook.Features.ChatLifecycle;
 using Hook.Features.ChatPrivacyRouting;
 using Hook.Features.ChatSession;
@@ -27,7 +28,6 @@ using Hook.Shared.Retention;
 using Hook.Shared.Security;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using Serilog;
 using Wolverine;
 using Wolverine.EntityFrameworkCore;
@@ -87,6 +87,12 @@ try
     builder.Services.AddRateLimiting(builder.Configuration);
     builder.Services.AddMetaTemplates();
     builder.Services.AddObservability();
+
+    builder.Services.AddHostedService<AiWarmupHostedService>();
+    if (builder.Environment.IsDevelopment() || builder.Environment.IsStaging())
+    {
+        builder.Services.AddHostedService<DevProviderSeederHostedService>();
+    }
 
     builder.Services.AddReverseProxy()
         .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
@@ -149,6 +155,10 @@ try
         // Durable outbox in every environment so scheduled messages survive
         // restarts and handler commits stay atomic with outgoing envelopes.
         opts.PersistMessagesWithPostgresql(connectionString, schemaName: WolverineConfig.Schema);
+        // Promote in-process local queues to durable so [NonTransactional] handlers
+        // (Ollama AI stages) survive a crash between bus.PublishAsync and the inner
+        // commit. Without this, locally-routed envelopes live only in memory.
+        opts.Policies.UseDurableLocalQueues();
         opts.UseEntityFrameworkCoreTransactions();
         // Drains AggregateRoot.DequeueEvents() from tracked entities during the
         // AutoApplyTransactions middleware commit. Only fires inside a Wolverine
@@ -161,23 +171,15 @@ try
     var app = builder.Build();
 
     {
+        // Migration + root taxonomy seed are data-integrity preconditions — keep
+        // these awaited. Dev provider seeding + AI warm-up moved to hosted services
+        // so they don't block Kestrel bind.
         await using var scope = app.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
         await db.Database.MigrateAsync();
 
         var rootSeeder = scope.ServiceProvider.GetRequiredService<RootSectorSeeder>();
         await rootSeeder.EnsureRootSectorsAsync();
-
-        if (app.Environment.IsDevelopment() || app.Environment.IsStaging())
-        {
-            var seedOpts = scope.ServiceProvider
-                .GetRequiredService<IOptions<DevProviderSeedOptions>>().Value;
-            if (seedOpts.Enabled && seedOpts.AutoSeed)
-            {
-                var seeder = scope.ServiceProvider.GetRequiredService<DevProviderSeeder>();
-                await seeder.SeedAsync();
-            }
-        }
     }
 
     // Dev runs Kestrel directly with no proxy; trust forwarded headers only outside Development.

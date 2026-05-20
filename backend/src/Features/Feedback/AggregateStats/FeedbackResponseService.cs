@@ -1,6 +1,5 @@
 using System.Text.RegularExpressions;
-using Hook.Features.Ai;
-using Hook.Features.Ai.Models;
+using Hook.Features.Feedback.Eta;
 using Hook.Features.Feedback.Models;
 using Hook.Features.Feedback.ProviderStatsAggregate;
 using Hook.Features.Matching.MatchAggregate;
@@ -16,7 +15,6 @@ namespace Hook.Features.Feedback.AggregateStats;
 public sealed class FeedbackResponseService(
     IFeedbackRepository feedback,
     IMatchRepository matches,
-    IConversationAi ai,
     IEventBus events,
     IMessageBus bus,
     IOptions<FeedbackOptions> options,
@@ -39,18 +37,17 @@ public sealed class FeedbackResponseService(
     public Task HandleAsync(
         InboundMessage msg,
         MatchFeedback pending,
-        LazyIntent intent,
         CancellationToken ct) => pending.Step switch
         {
-            FeedbackStep.DidYouFind => HandleDidYouFindAsync(msg, pending, intent, ct),
+            FeedbackStep.DidYouFind => HandleDidYouFindAsync(msg, pending, ct),
             FeedbackStep.IdentifyWinner => HandleIdentifyWinnerAsync(msg, pending, ct),
-            FeedbackStep.JobCompleted => HandleJobCompletedAsync(msg, pending, intent, ct),
+            FeedbackStep.JobCompleted => HandleJobCompletedAsync(msg, pending, ct),
             FeedbackStep.AwaitingEta => HandleAwaitingEtaAsync(msg, pending, ct),
             _ => throw new InvalidOperationException($"Unhandled FeedbackStep '{pending.Step}'")
         };
 
     private async Task HandleDidYouFindAsync(
-        InboundMessage msg, MatchFeedback pending, LazyIntent intent, CancellationToken ct)
+        InboundMessage msg, MatchFeedback pending, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
         var opts = options.Value;
@@ -72,17 +69,16 @@ public sealed class FeedbackResponseService(
             return;
         }
 
-        var answer = parsed ?? await ResolveIntentYesNoAsync(intent, ct);
-        if (answer is null)
+        if (parsed is null)
         {
             await SendRetryHintIfFreshAsync(msg, pending, now, opts,
                 "Reply YES if you found a provider, or NO if you didn't.", ct);
             return;
         }
 
-        if (answer != FeedbackAnswer.Yes)
+        if (parsed != FeedbackAnswer.Yes)
         {
-            if (!await feedback.TryClaimPendingAsync(pending.Id, answer.Value, now, ct)) return;
+            if (!await feedback.TryClaimPendingAsync(pending.Id, parsed.Value, now, ct)) return;
             await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
                 "Thanks for letting us know. We'll keep looking for someone better next time."));
             return;
@@ -152,7 +148,7 @@ public sealed class FeedbackResponseService(
     }
 
     private async Task HandleJobCompletedAsync(
-        InboundMessage msg, MatchFeedback pending, LazyIntent intent, CancellationToken ct)
+        InboundMessage msg, MatchFeedback pending, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
         var opts = options.Value;
@@ -167,19 +163,16 @@ public sealed class FeedbackResponseService(
             return;
         }
 
-        // AI intent fallback only resolves Confirmation/Rejection; InProgress comes
-        // from ParseAnswer's regex.
-        var answer = parsed ?? await ResolveIntentYesNoAsync(intent, ct);
-        if (answer is null)
+        if (parsed is null)
         {
             await SendRetryHintIfFreshAsync(msg, pending, now, opts,
                 "Reply YES if the job is done, NO if it didn't happen, or IN PROGRESS if you're still working on it.", ct);
             return;
         }
 
-        if (!await feedback.TryClaimPendingAsync(pending.Id, answer.Value, now, ct)) return;
+        if (!await feedback.TryClaimPendingAsync(pending.Id, parsed.Value, now, ct)) return;
 
-        if (answer == FeedbackAnswer.InProgress)
+        if (parsed == FeedbackAnswer.InProgress)
         {
             // Pillar B: reserve AwaitingEta and ask the client when they expect to
             // finish. The next inbound is routed through HandleAwaitingEtaAsync;
@@ -193,11 +186,11 @@ public sealed class FeedbackResponseService(
             return;
         }
 
-        var step2Ack = answer == FeedbackAnswer.Yes
+        var step2Ack = parsed == FeedbackAnswer.Yes
             ? "Glad it worked out — thanks for the feedback!"
             : "Thanks for letting us know. We'll factor that into future matches.";
         await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From, step2Ack));
-        await RecordOutcomeAsync(pending.MatchId, answer.Value, now, ct);
+        await RecordOutcomeAsync(pending.MatchId, parsed.Value, now, ct);
     }
 
     private async Task HandleAwaitingEtaAsync(InboundMessage msg, MatchFeedback pending, CancellationToken ct)
@@ -207,48 +200,27 @@ public sealed class FeedbackResponseService(
         var text = msg.Text ?? string.Empty;
 
         // Deterministic precheck: short replies with no digits and no ETA keyword
-        // can never carry a future-time signal — skip the round-trip to Ollama.
-        var eta = LooksLikeEtaCandidate(text)
-            ? await TryExtractEtaAsync(text, now, ct)
-            : null;
-
-        if (eta is { } etaValue)
+        // can never carry a future-time signal — handle inline without a round-trip
+        // to Ollama. Candidates defer to the outbox so the 60-150s Ollama window
+        // does not block the inbound funnel.
+        if (!LooksLikeEtaCandidate(text))
         {
-            // Cap absurd ETAs (parse hallucination, year 2099) so we don't sleep on a
-            // recheck for weeks. Treat as no-ETA and fall back.
-            if (etaValue - now > opts.MaxEtaHorizon)
+            if (now - pending.PromptedAt <= opts.ParseRetryWindow)
             {
-                logger.LogWarning(
-                    "ETA {Eta} for match {MatchId} exceeds MaxEtaHorizon ({Horizon}); falling back",
-                    etaValue, pending.MatchId, opts.MaxEtaHorizon);
-                await ClaimSkippedAndFallbackAsync(pending, opts, now, msg.From, ct);
+                await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+                    "Sorry, didn't catch that. When do you think the job will be done? e.g. 'in 3 hours' or 'tomorrow at 5pm'."));
                 return;
             }
-
-            if (!await feedback.TryClaimPendingWithEtaAsync(
-                    pending.Id, FeedbackAnswer.EtaCaptured, etaValue, now, ct)) return;
-            var delay = etaValue - now + opts.EtaScheduleBuffer;
-            if (delay < TimeSpan.Zero) delay = opts.EtaScheduleBuffer;
-            await events.ScheduleAsync(new Step2FeedbackCheck(pending.MatchId), delay, ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
-                "Got it — I'll check back with you after that. Good luck!"));
-            logger.LogInformation(
-                "ETA captured for match {MatchId}, Step2 recheck scheduled at +{Delay}",
-                pending.MatchId, delay);
+            await ClaimSkippedAndFallbackAsync(pending, opts, now, msg.From, ct);
             return;
         }
 
-        if (now - pending.PromptedAt <= opts.ParseRetryWindow)
-        {
-            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
-                "Sorry, didn't catch that. When do you think the job will be done? e.g. 'in 3 hours' or 'tomorrow at 5pm'."));
-            return;
-        }
-
-        await ClaimSkippedAndFallbackAsync(pending, opts, now, msg.From, ct);
+        await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+            "Got your ETA — one sec…"));
+        await bus.PublishAsync(new ExtractEtaRequested(pending.Id, pending.MatchId, msg.From, text));
     }
 
-    private async Task ClaimSkippedAndFallbackAsync(
+    internal async Task ClaimSkippedAndFallbackAsync(
         MatchFeedback pending, FeedbackOptions opts, DateTimeOffset now, PhoneNumber from, CancellationToken ct)
     {
         if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct)) return;
@@ -270,36 +242,11 @@ public sealed class FeedbackResponseService(
         return n >= 1 && n <= max ? n : null;
     }
 
-    private static async Task<FeedbackAnswer?> ResolveIntentYesNoAsync(LazyIntent intent, CancellationToken ct)
-    {
-        var detected = await intent.GetAsync(ct);
-        return detected.Intent switch
-        {
-            IntentKind.Confirmation => FeedbackAnswer.Yes,
-            IntentKind.Rejection => FeedbackAnswer.No,
-            _ => null
-        };
-    }
-
     private static bool LooksLikeEtaCandidate(string text)
     {
         if (string.IsNullOrWhiteSpace(text) || text.Length < 4) return false;
         if (text.Any(char.IsDigit)) return true;
         return EtaKeywordRegex.IsMatch(text);
-    }
-
-    private async Task<DateTimeOffset?> TryExtractEtaAsync(string text, DateTimeOffset now, CancellationToken ct)
-    {
-        try
-        {
-            return await ai.ExtractEtaAsync(text, now, ct);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "ETA extraction failed");
-            return null;
-        }
     }
 
     private async Task<IReadOnlyList<Hook.Features.Matching.MatchAggregate.Match>> GetPickedMatchesAsync(Guid anchorMatchId, CancellationToken ct)

@@ -1,17 +1,22 @@
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
 using Hook.Features.ProviderAvailability.AvailabilityAggregate;
-using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Phone;
+using Hook.Shared.Pipeline.PostCommitSends;
+using Wolverine;
+using Wolverine.Attributes;
 
 namespace Hook.Features.ProviderAvailability.Refresh;
 
 public sealed class ProviderRefreshCheckHandler(
     IProviderAvailabilityRepository availability,
     IConversationAi ai,
-    IWhatsappClient whatsapp,
+    IMessageBus bus,
     ILogger<ProviderRefreshCheckHandler> logger)
 {
+    // [NonTransactional]: AI inference takes 60-150s; opt out of AutoApplyTransactions
+    // so the handler doesn't pin an Npgsql connection across the Ollama window.
+    [NonTransactional]
     public async Task Handle(ProviderRefreshCheck evt, CancellationToken ct)
     {
         var provider = await availability.GetAsync(evt.Phone, ct);
@@ -19,7 +24,8 @@ public sealed class ProviderRefreshCheckHandler(
 
         if (provider.LastActiveAt > evt.LastActiveAt)
         {
-            logger.LogDebug("Skipping refresh prompt for {Phone}: fresher activity", PhoneNumber.TryParse(provider.Phone, out var ph) ? ph.Mask() : provider.Phone);
+            logger.LogDebug("Skipping refresh prompt for {Phone}: fresher activity",
+                PhoneNumber.TryParse(provider.Phone, out var ph) ? ph.Mask() : provider.Phone);
             return;
         }
 
@@ -40,7 +46,7 @@ public sealed class ProviderRefreshCheckHandler(
         var reply = await AiReplyHelper.TryGenerateAsync(ai, ctx, "provider_refresh", logger, ct);
         if (reply is null) return;
 
-        await whatsapp.SendTextAsync(phone, reply, ct);
+        await bus.PublishAsync(new SendWhatsAppTextRequested(phone, reply));
         logger.LogInformation("Sent 22h refresh prompt to {Phone}", phone.Mask());
     }
 }

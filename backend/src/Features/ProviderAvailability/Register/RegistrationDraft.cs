@@ -5,6 +5,10 @@ namespace Hook.Features.ProviderAvailability.Register;
 public enum RegistrationStep
 {
     AwaitingServices,
+    // Transient: parked while RegistrationExtractServicesHandler runs Ollama in the
+    // background. Any inbound during this step re-acks "still looking"; falls back to
+    // AwaitingServices if the resolve hangs past the orchestrator's TTL guard.
+    ResolvingServices,
     ConfirmServices,
     AwaitingLocation,
     ConfirmLocation,
@@ -24,6 +28,10 @@ public class RegistrationDraft : IAggregateRoot
     public bool? DraftShareContact { get; private set; }
     public DateTimeOffset StartedAt { get; init; }
     public DateTimeOffset UpdatedAt { get; private set; }
+    // Set when entering ResolvingServices, cleared on leaving. The TTL revert relies on
+    // this rather than UpdatedAt so a follow-up "Touch" while resolving cannot keep the
+    // draft trapped indefinitely.
+    public DateTimeOffset? ResolveStartedAt { get; private set; }
 
     public static RegistrationDraft Start(string phone, DateTimeOffset now) => new()
     {
@@ -36,6 +44,7 @@ public class RegistrationDraft : IAggregateRoot
     {
         Step = step;
         UpdatedAt = now;
+        ResolveStartedAt = step == RegistrationStep.ResolvingServices ? now : null;
     }
 
     public void SetServices(IEnumerable<string> services, DateTimeOffset now)
@@ -69,5 +78,6 @@ public class RegistrationDraft : IAggregateRoot
         DraftFormattedAddress = source.DraftFormattedAddress;
         DraftShareContact = source.DraftShareContact;
         UpdatedAt = source.UpdatedAt;
+        ResolveStartedAt = source.ResolveStartedAt;
     }
 }

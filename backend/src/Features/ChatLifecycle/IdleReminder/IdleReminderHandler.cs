@@ -1,16 +1,16 @@
 using Hook.Features.ChatLifecycle.Events;
 using Hook.Features.ChatSession;
 using Hook.Features.ChatSession.SessionAggregate;
-using Microsoft.AspNetCore.SignalR;
+using Hook.Shared.Pipeline.PostCommitSends;
+using Wolverine;
 
 namespace Hook.Features.ChatLifecycle.IdleReminder;
 
 public sealed class IdleReminderHandler(
     IChatRepository chats,
-    IHubContext<ChatHub> hub,
     ILogger<IdleReminderHandler> logger)
 {
-    public async Task Handle(IdleReminderCheck evt, CancellationToken ct)
+    public async Task Handle(IdleReminderCheck evt, IMessageBus bus, CancellationToken ct)
     {
         var session = await chats.GetSessionAsync(evt.ChatId, ct);
         if (session is null || session.Status != ChatSessionStatus.Active) return;
@@ -21,9 +21,8 @@ public sealed class IdleReminderHandler(
             return;
         }
 
-        await hub.Clients.Group(ChatHub.ChatGroup(evt.ChatId)).SendAsync(
-            "IdleReminder",
-            new { message = "Are you still available? Reply to continue." },
-            ct);
+        await bus.PublishAsync(new BroadcastChatEventRequested(
+            evt.ChatId, ChatHubEvents.IdleReminder,
+            new IdleReminderPayload("Are you still available? Reply to continue.")));
     }
 }

@@ -3,11 +3,12 @@ using Hook.Features.Ai.Models;
 using Hook.Features.Geocoding.Models;
 using Hook.Features.ProviderAvailability.AvailabilityAggregate;
 using Hook.Features.ProviderAvailability.Refresh;
-using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Phone;
+using Hook.Shared.Pipeline.PostCommitSends;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Shouldly;
+using Wolverine;
 using ProviderEntity = Hook.Features.ProviderAvailability.AvailabilityAggregate.ProviderAvailability;
 
 namespace Hook.UnitTests.ProviderAvailability;
@@ -16,18 +17,18 @@ public class ProviderRefreshCheckHandlerTests
 {
     private readonly Mock<IProviderAvailabilityRepository> _repo = new();
     private readonly Mock<IConversationAi> _ai = new();
-    private readonly Mock<IWhatsappClient> _whatsapp = new();
-    private readonly List<(PhoneNumber To, string Body)> _sent = [];
+    private readonly Mock<IMessageBus> _bus = new();
+    private readonly List<SendWhatsAppTextRequested> _sent = [];
 
     public ProviderRefreshCheckHandlerTests()
     {
-        _whatsapp.Setup(w => w.SendTextAsync(It.IsAny<PhoneNumber>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Callback<PhoneNumber, string, CancellationToken>((to, body, _) => _sent.Add((to, body)))
-            .ReturnsAsync("msg");
+        _bus.Setup(b => b.PublishAsync(It.IsAny<SendWhatsAppTextRequested>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions>((msg, _) => _sent.Add((SendWhatsAppTextRequested)msg))
+            .Returns(ValueTask.CompletedTask);
     }
 
     private ProviderRefreshCheckHandler Build() => new(
-        _repo.Object, _ai.Object, _whatsapp.Object,
+        _repo.Object, _ai.Object, _bus.Object,
         NullLogger<ProviderRefreshCheckHandler>.Instance);
 
     private static ProviderEntity SeedProvider() => ProviderEntity.Register(
@@ -50,7 +51,7 @@ public class ProviderRefreshCheckHandlerTests
     {
         var provider = SeedProvider();
         var cutoff = DateTimeOffset.UtcNow.AddMinutes(-30);
-        provider.Heartbeat(TimeSpan.FromHours(24), DateTimeOffset.UtcNow); // LastActiveAt > cutoff
+        provider.Heartbeat(TimeSpan.FromHours(24), DateTimeOffset.UtcNow);
         _repo.Setup(r => r.GetAsync(provider.Phone, It.IsAny<CancellationToken>())).ReturnsAsync(provider);
 
         await Build().Handle(new ProviderRefreshCheck(provider.Phone, cutoff), CancellationToken.None);
@@ -72,7 +73,7 @@ public class ProviderRefreshCheckHandlerTests
     }
 
     [Fact]
-    public async Task Handle_AiReturnsText_SendsToProviderPhone()
+    public async Task Handle_AiReturnsText_PublishesSendToProviderPhone()
     {
         var provider = SeedProvider();
         _repo.Setup(r => r.GetAsync(provider.Phone, It.IsAny<CancellationToken>())).ReturnsAsync(provider);
@@ -83,7 +84,7 @@ public class ProviderRefreshCheckHandlerTests
 
         _sent.ShouldHaveSingleItem();
         _sent[0].To.Value.ShouldBe(provider.Phone);
-        _sent[0].Body.ShouldBe("Are you still available?");
+        _sent[0].Text.ShouldBe("Are you still available?");
     }
 
     [Fact]

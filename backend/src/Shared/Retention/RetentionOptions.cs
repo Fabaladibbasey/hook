@@ -15,5 +15,11 @@ public sealed class RetentionOptions
     [Range(typeof(TimeSpan), "00:00:00", "00:30:00")]
     public TimeSpan StartupDelay { get; init; } = TimeSpan.FromMinutes(1);
 
+    // Wolverine's dead-letter queue holds JSON envelopes (which may include user text
+    // and unmasked phone for AI-stage messages) indefinitely after MaxAttempts failure.
+    // The sweep prunes rows older than this window so PII does not accumulate at rest.
+    [Range(1, 365)]
+    public int DeadLetterRetentionDays { get; init; } = 7;
+
     public bool Enabled { get; init; } = true;
 }

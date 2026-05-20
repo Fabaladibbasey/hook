@@ -305,6 +305,38 @@ public class ClientRequestPipelineTests : PipelineTestBase
         lookingFor.ShouldNotBeNull();
     }
 
+    // Regression: the description prompt is a contract — when we ask the user to
+    // describe their problem, the next inbound IS the description, even if it
+    // matches a service-request hint regex ("my X is broken", "X everywhere"...).
+    // It must not be hijacked into a slug-switch + "Looking up the service…" ack.
+    [Fact]
+    public async Task ServiceRequest_DescriptionStep_ProblemStatement_CapturedAsDescription_NotSlugSwitched()
+    {
+        using var client = _fx.Factory.CreateClient();
+        var phone = "+220700000095";
+
+        await _fx.InjectTextAndAwaitAsync(phone, "I need a plumber");
+        await _fx.InjectTextAndAwaitAsync(phone, "yes");
+        await _fx.InjectLocationAndAwaitAsync(phone, DevPipelineFixture.SeedRefLat, DevPipelineFixture.SeedRefLng);
+        var descPrompt = await client.ExpectOutboundAsync(
+            phone,
+            m => m.Body.Contains("description", StringComparison.OrdinalIgnoreCase));
+
+        // Trips both PossessiveProblemRx and DisasterRx in QuickIntent.
+        const string description = "my tap is leaking and water everywhere";
+        await _fx.InjectTextAndAwaitAsync(phone, description);
+
+        await client.ExpectOutboundAsync(phone,
+            m => m.Body.Contains("share your phone number", StringComparison.OrdinalIgnoreCase),
+            since: descPrompt.At);
+
+        using var scope = _fx.Factory.Services.CreateScope();
+        var drafts = scope.ServiceProvider.GetRequiredService<IClientRequestDraftRepository>();
+        var draft = await drafts.GetAsync(phone, default);
+        draft.ShouldNotBeNull();
+        draft.DraftDescription.ShouldBe(description);
+    }
+
     [Fact]
     public async Task ServiceRequest_YesAfterPresent_RepromptsWhenMultiple()
     {

@@ -3,13 +3,14 @@ using Hook.Features.ContactSharing.ExchangePhones;
 using Hook.Features.Geocoding.Models;
 using Hook.Features.Matching.MatchAggregate;
 using Hook.Features.ServiceRequest.RequestAggregate;
-using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Core;
+using Hook.Shared.Pipeline.PostCommitSends;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Shouldly;
+using Wolverine;
 using MatchEntity = Hook.Features.Matching.MatchAggregate.Match;
 using ProviderEntity = Hook.Features.ProviderAvailability.AvailabilityAggregate.ProviderAvailability;
 using ProviderRepoIface = Hook.Features.ProviderAvailability.AvailabilityAggregate.IProviderAvailabilityRepository;
@@ -28,7 +29,7 @@ public class PhoneExchangerTests
     private readonly Mock<IMatchRepository> _matchesMock = new();
     private readonly Mock<IServiceRequestRepository> _requestsMock = new();
     private readonly Mock<ProviderRepoIface> _providersMock = new();
-    private readonly Mock<IWhatsappClient> _whatsappMock = new();
+    private readonly Mock<IMessageBus> _busMock = new();
     private readonly Mock<IEventPublisher> _eventsMock = new();
     private readonly TimeProvider _clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-05-07T12:00:00Z"));
 
@@ -59,9 +60,13 @@ public class PhoneExchangerTests
             .ReturnsAsync((string phone, CancellationToken _) =>
                 _providers.TryGetValue(phone, out var p) ? p : null);
 
-        _whatsappMock.Setup(x => x.SendTextAsync(It.IsAny<PhoneNumber>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Callback<PhoneNumber, string, CancellationToken>((to, body, _) => _sent.Add((to, body)))
-            .ReturnsAsync("msg-1");
+        _busMock.Setup(x => x.PublishAsync(It.IsAny<SendWhatsAppTextRequested>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions>((msg, _) =>
+            {
+                var req = (SendWhatsAppTextRequested)msg;
+                _sent.Add((req.To, req.Text));
+            })
+            .Returns(ValueTask.CompletedTask);
 
         _eventsMock.Setup(x => x.PublishAsync(It.IsAny<It.IsAnyType>(), It.IsAny<CancellationToken>()))
             .Callback(new InvocationAction(inv => _published.Add(inv.Arguments[0])))
@@ -70,7 +75,7 @@ public class PhoneExchangerTests
 
     private PhoneExchanger Build() => new(
         _matchesMock.Object, _requestsMock.Object, _providersMock.Object,
-        _whatsappMock.Object, _eventsMock.Object, _clock,
+        _busMock.Object, _eventsMock.Object, _clock,
         NullLogger<PhoneExchanger>.Instance);
 
     private MatchEntity SeedMatch(

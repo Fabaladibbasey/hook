@@ -65,8 +65,16 @@ public sealed class RetentionSweeperTests : PipelineTestBase
 
         var result = await sweeper.RunOnceAsync(CancellationToken.None);
 
+        // Wolverine's dead-letter table lives in a separate schema and is not part of the
+        // EF model — it is swept via raw SQL. Exempt that one key from the EF-mapped check.
+        var rawSweeps = new HashSet<string>(StringComparer.Ordinal)
+        {
+            RetentionTableKeys.WolverineDeadLetterQueue,
+        };
+
         foreach (var key in result.DeletedByTable.Keys)
         {
+            if (rawSweeps.Contains(key)) continue;
             var found = db.Model.GetEntityTypes()
                 .Any(t => string.Equals(t.GetTableName(), key, StringComparison.Ordinal));
             Assert.True(found, $"Sweep key '{key}' has no matching EF entity table");

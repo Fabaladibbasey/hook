@@ -4,8 +4,8 @@ using Hook.Features.Ai.Models;
 using Hook.Features.Geocoding.Geocode;
 using Hook.Features.Matching;
 using Hook.Features.ProviderAvailability.AvailabilityAggregate;
+using Hook.Features.ServiceRequest.Create.ExtractServices;
 using Hook.Features.ServiceRequest.RequestAggregate;
-using Hook.Features.ServiceTaxonomy.ResolveSlug;
 using Hook.Features.Whatsapp.Models;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Pipeline.PostCommitSends;
@@ -19,8 +19,6 @@ public sealed class ClientRequestOrchestrator(
     IClientRequestDraftRepository drafts,
     IServiceRequestRepository requests,
     IProviderAvailabilityRepository availability,
-    IConversationAi ai,
-    SlugResolver slugResolver,
     GeocodingService geocoding,
     IMessageBus bus,
     IOptions<MatchingOptions> matchingOptions,
@@ -35,37 +33,30 @@ public sealed class ClientRequestOrchestrator(
         var draft = existing ?? ClientRequestDraft.Start(phone.Value, now);
         if (existing is not null) draft.Touch(now);
 
-        // Slug switch mid-funnel: if the user is past the slug-confirm step and sends a
-        // strong service-request hint with a different canonical slug, reset to
-        // ConfirmService for the new slug while preserving any captured location. The
-        // hint guard avoids running an LLM extract on every location/description reply.
+        // Slug switch mid-funnel: if the user is at a location step and sends a strong
+        // service-request hint, defer the extract + slug resolve to the outbox so the
+        // 60-150s Ollama window doesn't block the funnel. The hint guard keeps us off the
+        // LLM for every location reply. AwaitingDescription is intentionally excluded —
+        // we just asked the user to describe their problem, so a problem statement there
+        // IS the description, not a new service intent. AdvanceClientRequestDraftHandler
+        // race-guards against the user advancing the draft while the LLM runs.
         if (draft.Step is ClientRequestStep.AwaitingLocation
                        or ClientRequestStep.ConfirmLocation
-                       or ClientRequestStep.AwaitingDescription
             && QuickIntent.DetectIntentHint(message.Text) == IntentKind.ServiceRequest)
         {
-            var extracted = await ai.ExtractServicesAsync(message.Text ?? string.Empty, ct);
-            if (extracted.Slugs.Count > 0)
-            {
-                var canonical = await slugResolver.ResolveAsync(extracted.Slugs[0], message.Text ?? string.Empty, ct);
-                if (!string.Equals(canonical.CanonicalSlug, draft.DraftServiceSlug, StringComparison.Ordinal))
-                {
-                    draft.SwitchSlug(canonical.CanonicalSlug, now);
-                    draft.StepTo(ClientRequestStep.ConfirmService, now);
-                    // Location fields preserved on draft so YES skips straight to AwaitingDescription.
-                    await drafts.UpsertAsync(draft, ct);
-                    logger.LogDebug("Slug switch → {Slug} for {Phone}", canonical.CanonicalSlug, phone.Mask());
-                    await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                        $"Switching to {canonical.CanonicalSlug.Replace('-', ' ')}. Reply YES to confirm or NO to choose another."));
-                    return;
-                }
-            }
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+                "Looking up the service you mentioned…"));
+            await bus.PublishAsync(new ExtractServicesRequested(phone.Value, message.Text ?? string.Empty, IsSwitch: true));
+            return;
         }
 
         switch (draft.Step)
         {
             case ClientRequestStep.AwaitingService:
                 await StartAsync(draft, message, phone, now, ct);
+                break;
+            case ClientRequestStep.ResolvingService:
+                await HandleResolvingAsync(draft, message, phone, now, ct);
                 break;
             case ClientRequestStep.ConfirmService:
                 await ConfirmServiceAsync(draft, message, phone, now, ct);
@@ -91,24 +82,34 @@ public sealed class ClientRequestOrchestrator(
     private async Task StartAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
     {
         var text = message.Text ?? string.Empty;
-        var extracted = await ai.ExtractServicesAsync(text, ct);
-        if (extracted.Slugs.Count == 0)
+        // Park the draft in ResolvingService and defer ExtractServices to the outbox so
+        // the 60-150s Ollama window doesn't block the user. AdvanceClientRequestDraftHandler
+        // advances the draft to ConfirmService (or back to AwaitingService on no-slug).
+        draft.StepTo(ClientRequestStep.ResolvingService, now);
+        await drafts.UpsertAsync(draft, ct);
+        await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+            "Looking up the service you mentioned…"));
+        await bus.PublishAsync(new ExtractServicesRequested(phone.Value, text, IsSwitch: false));
+    }
+
+    private async Task HandleResolvingAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
+    {
+        // ResolveStartedAt anchors the TTL window: Touch() bumps UpdatedAt on every
+        // inbound during Resolving, so gating on UpdatedAt would never elapse.
+        var ttl = matchingOptions.Value.ResolveStuckTtl;
+        var resolveStart = draft.ResolveStartedAt ?? draft.UpdatedAt;
+        if (now - resolveStart > ttl)
         {
-            // Don't assume the user wants to REQUEST — they may have meant to REGISTER
-            // and only landed here because the LLM-classified intent edged over the
-            // confidence threshold. The REGISTER hint keeps the door open without
-            // restarting the conversation.
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                "What service do you need? (e.g. plumber, carpenter, computer repair) — or reply REGISTER if you're offering services instead."));
-            await drafts.UpsertAsync(draft, ct);
+            // The previous resolve dead-lettered or the host crashed before AdvanceClientRequestDraft
+            // ran. Force-revert to AwaitingService and treat the current message as a fresh start so
+            // the user is not trapped.
+            logger.LogWarning("Resolve stuck > {Ttl}s for {Phone}; reverting to AwaitingService", ttl.TotalSeconds, phone.Mask());
+            draft.StepTo(ClientRequestStep.AwaitingService, now);
+            await StartAsync(draft, message, phone, now, ct);
             return;
         }
-
-        var canonical = await slugResolver.ResolveAsync(extracted.Slugs[0], text, ct);
-        draft.SwitchSlug(canonical.CanonicalSlug, now);
-        draft.StepTo(ClientRequestStep.ConfirmService, now);
-        await drafts.UpsertAsync(draft, ct);
-        await bus.PublishAsync(new SendWhatsAppTextRequested(phone, $"Do you need {canonical.CanonicalSlug.Replace('-', ' ')}? Reply YES or NO — YES to confirm, NO to choose another service."));
+        await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+            "Still looking up your earlier message — one moment."));
     }
 
     // "no I want carpentry", "no actually plumbing" — the leading "no" rejects
@@ -137,11 +138,10 @@ public sealed class ClientRequestOrchestrator(
             }
         }
 
-        var quick = QuickIntent.Detect(message.Text);
-        var intent = quick is { } q
-            ? new IntentDetectionResult(q, 1.0, "en", "quick")
-            : await ai.DetectIntentAsync(message.Text ?? string.Empty, ct);
-        if (intent.Intent == IntentKind.Confirmation)
+        // QuickIntent's regex covers YES/NO/OK/etc. at confirm steps; the LLM fallback
+        // here was a 60-150s tax for negligible UX gain, so we re-prompt instead.
+        var intentKind = QuickIntent.Detect(message.Text);
+        if (intentKind == IntentKind.Confirmation)
         {
             // If we already have a captured location (slug-switch path), skip the
             // location collection steps and jump straight to description.
@@ -159,7 +159,7 @@ public sealed class ClientRequestOrchestrator(
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Send your location pin (or type your address)."));
             return;
         }
-        if (intent.Intent == IntentKind.Rejection)
+        if (intentKind == IntentKind.Rejection)
         {
             draft.SwitchSlug(string.Empty, now);
             draft.StepTo(ClientRequestStep.AwaitingService, now);
@@ -211,11 +211,7 @@ public sealed class ClientRequestOrchestrator(
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Got your location. Want to add a description? Send it now or reply SKIP."));
             return;
         }
-        var quick = QuickIntent.Detect(message.Text);
-        var intent = quick is { } q
-            ? new IntentDetectionResult(q, 1.0, "en", "quick")
-            : await ai.DetectIntentAsync(message.Text ?? string.Empty, ct);
-        if (intent.Intent == IntentKind.Confirmation)
+        if (QuickIntent.Detect(message.Text) == IntentKind.Confirmation)
         {
             draft.StepTo(ClientRequestStep.AwaitingDescription, now);
             await drafts.UpsertAsync(draft, ct);
@@ -270,18 +266,14 @@ public sealed class ClientRequestOrchestrator(
     private async Task CollectPhoneShareConsentAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
     {
         var quick = QuickIntent.Detect(message.Text);
-        var intent = quick is { } q
-            ? new IntentDetectionResult(q, 1.0, "en", "quick")
-            : await ai.DetectIntentAsync(message.Text ?? string.Empty, ct);
-
-        if (intent.Intent != IntentKind.Confirmation && intent.Intent != IntentKind.Rejection)
+        if (quick != IntentKind.Confirmation && quick != IntentKind.Rejection)
         {
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
                 "Should we share your phone number with selected providers? Reply YES or NO."));
             return;
         }
 
-        var consent = intent.Intent == IntentKind.Confirmation;
+        var consent = quick == IntentKind.Confirmation;
         draft.SetPhoneShareConsent(consent, now);
 
         if (string.IsNullOrEmpty(draft.DraftServiceSlug) || draft.DraftLatitude is null || draft.DraftLongitude is null)

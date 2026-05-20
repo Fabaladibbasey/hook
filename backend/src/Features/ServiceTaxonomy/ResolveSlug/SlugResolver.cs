@@ -6,14 +6,14 @@ using Wolverine;
 
 namespace Hook.Features.ServiceTaxonomy.ResolveSlug;
 
-public sealed class SlugResolver(
+public class SlugResolver(
     IServiceRepository repository,
     IConversationAi ai,
     IMessageBus bus,
     IOptions<ServiceTaxonomyOptions> options,
     ILogger<SlugResolver> logger)
 {
-    public async Task<ResolveSlugResult> ResolveAsync(
+    public virtual async Task<ResolveSlugResult> ResolveAsync(
         string proposedSlug,
         string rawExample = "",
         CancellationToken ct = default)

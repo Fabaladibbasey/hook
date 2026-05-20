@@ -838,7 +838,7 @@ Both finalize the request and publish `ServiceRequestCreated`.
 ### FB-006 — Step1 unrelated reply within retry window  [P2] [both]
 
 **Preconditions:** Step1 pending.
-**Expected:** unrecognised text first hits `ParseAnswer`; on miss, the handler short-circuits if `now - PromptedAt > ParseRetryWindow` (default 1h) — no AI call, no claim, silent. Within window: `LazyIntent.GetAsync` runs; `Confirmation`/`Rejection` map to YES/NO; otherwise the bot sends a single `"Sorry, didn't catch that. Reply YES if you found a provider, or NO if you didn't."` retry hint and waits.
+**Expected:** unrecognised text first hits `ParseAnswer`; on miss, the handler short-circuits if `now - PromptedAt > ParseRetryWindow` (default 1h) — claim Skipped + ack `"Thanks — recorded that. No more questions on this one."` Within window: handler short-circuits to a retry hint (`"Sorry, didn't catch that. Reply YES if you found a provider, or NO if you didn't."`) — Step1 only takes Yes / No, no AI fallback. The previous AI-fallback path (`LazyIntent.GetAsync`) was removed; `ParseAnswer` is the single source of truth.
 **Note:** `"in progress"` at Step1 specifically resolves to `null` (not `InProgress`) — Step1 only takes Yes/No, the user is hinted instead of silently claimed.
 
 ### FB-007 — Step2 IN_PROGRESS → ETA prompt → ETA-driven recheck  [P1] [both]

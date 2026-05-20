@@ -5,8 +5,8 @@ using Hook.Features.Geocoding.Geocode;
 using Hook.Features.Geocoding.Models;
 using Hook.Features.ProviderAvailability.AvailabilityAggregate;
 using Hook.Features.ProviderAvailability.Refresh;
+using Hook.Features.ProviderAvailability.Register.ExtractServices;
 using Hook.Features.ServiceRequest.RequestAggregate;
-using Hook.Features.ServiceTaxonomy.ResolveSlug;
 using Hook.Features.Whatsapp.Models;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Pipeline.PostCommitSends;
@@ -20,8 +20,6 @@ public sealed class RegistrationOrchestrator(
     IProviderAvailabilityRepository availability,
     IServiceRequestRepository requests,
     IFeedbackRepository feedback,
-    IConversationAi ai,
-    SlugResolver slugResolver,
     GeocodingService geocoding,
     IMessageBus bus,
     ProviderRefreshScheduler refreshScheduler,
@@ -64,20 +62,15 @@ public sealed class RegistrationOrchestrator(
                 return;
             }
 
-            // Incremental add: a listed provider sending "I offer X" must
-            // confirm before the listing mutates — symmetric to the new-
-            // registration YES/EDIT step. TTL extension is deferred until
-            // confirmation so a stale probe can't extend a listing.
-            var proposed = await ProposeAddServicesAsync(existing, message.Text ?? string.Empty, ct);
-            if (proposed.Count > 0)
+            // Incremental add: a listed provider sending "I offer X" must confirm before
+            // the listing mutates. Defer the LLM extract to the outbox so the funnel does
+            // not block on Ollama; AdvanceRegistrationDraftHandler promotes the inbound
+            // to ConfirmAddServices if extraction yields new slugs. The heartbeat ack
+            // below still fires inline so the user always sees a visible reply.
+            if (QuickIntent.DetectIntentHint(message.Text) == IntentKind.ProviderRegistration)
             {
-                var addDraft = RegistrationDraft.Start(phone.Value, now);
-                addDraft.SetServices(proposed, now);
-                addDraft.StepTo(RegistrationStep.ConfirmAddServices, now);
-                await drafts.UpsertAsync(addDraft, ct);
-                await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                    $"I detected: {string.Join(", ", proposed)}. Reply YES to add to your listed services, or EDIT to change."));
-                return;
+                await bus.PublishAsync(new RegistrationExtractServicesRequested(
+                    phone.Value, message.Text ?? string.Empty, RegistrationExtractMode.AddToExisting));
             }
 
             existing.Heartbeat(TimeSpan.FromHours(options.Value.ExpiryHours), now);
@@ -105,6 +98,9 @@ public sealed class RegistrationOrchestrator(
         {
             case RegistrationStep.AwaitingServices:
                 await StartAsync(draft, message, phone, now, ct);
+                break;
+            case RegistrationStep.ResolvingServices:
+                await HandleResolvingAsync(draft, message, phone, now, ct);
                 break;
             case RegistrationStep.ConfirmServices:
                 await ConfirmServicesAsync(draft, message, phone, now, ct);
@@ -141,36 +137,33 @@ public sealed class RegistrationOrchestrator(
     private async Task StartAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
     {
         var text = message.Text ?? string.Empty;
-        var extracted = await ai.ExtractServicesAsync(text, ct);
-        if (extracted.Slugs.Count == 0)
+        // Park the draft in ResolvingServices and defer ExtractServices to the outbox so
+        // the 60-150s Ollama window doesn't block the user. AdvanceRegistrationDraftHandler
+        // advances the draft to ConfirmServices (or back to AwaitingServices on no-slug).
+        draft.StepTo(RegistrationStep.ResolvingServices, now);
+        await drafts.UpsertAsync(draft, ct);
+        await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+            "Looking up the service you mentioned…"));
+        await bus.PublishAsync(new RegistrationExtractServicesRequested(
+            phone.Value, text, RegistrationExtractMode.NewRegistration));
+    }
+
+    private async Task HandleResolvingAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
+    {
+        // ResolveStartedAt anchors the TTL window: Touch() bumps UpdatedAt on every
+        // inbound during Resolving, so gating on UpdatedAt would never elapse.
+        var ttl = options.Value.ResolveStuckTtl;
+        var resolveStart = draft.ResolveStartedAt ?? draft.UpdatedAt;
+        if (now - resolveStart > ttl)
         {
-            // Symmetric to ClientRequestOrchestrator: keep the REQUEST exit open in
-            // case the user landed in registration on a borderline classification.
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                "Tell me what services you offer (e.g. plumbing, carpentry, computer repair) — or reply REQUEST if you need a service instead."));
-            await drafts.UpsertAsync(draft, ct);
+            logger.LogWarning("Resolve stuck > {Ttl}s for {Phone}; reverting to AwaitingServices",
+                ttl.TotalSeconds, phone.Mask());
+            draft.StepTo(RegistrationStep.AwaitingServices, now);
+            await StartAsync(draft, message, phone, now, ct);
             return;
         }
-
-        var canonicalSlugs = await ResolveAllAsync(extracted.Slugs, text, ct);
-        var capped = canonicalSlugs.Distinct().Take(options.Value.MaxServicesPerProvider).ToList();
-        // Draft persist + outbound prompt are part of the same Wolverine handler EF transaction;
-        // commit lands at handler-end. A "fast yes" reply over WhatsApp can't race the commit in
-        // practice (round-trip > commit latency).
-        draft.SetServices(capped, now);
-        draft.StepTo(RegistrationStep.ConfirmServices, now);
-        await drafts.UpsertAsync(draft, ct);
-
-        if (canonicalSlugs.Count > options.Value.MaxServicesPerProvider)
-        {
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                $"Max {options.Value.MaxServicesPerProvider} services per provider. Keeping: {string.Join(", ", capped)}. Reply YES or EDIT."));
-        }
-        else
-        {
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                $"I detected: {string.Join(", ", capped)}. Reply YES to confirm or EDIT to change."));
-        }
+        await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+            "Still looking up your earlier message — one moment."));
     }
 
     private async Task ConfirmServicesAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
@@ -178,32 +171,19 @@ public sealed class RegistrationOrchestrator(
         var quick = QuickIntent.Detect(message.Text);
 
         // Bracket-style "and X": if the reply is not a confirm/reject/edit/cancel token,
-        // try to extract another service and append before falling through to the
-        // standard yes/edit handling. Lets a provider register multiple services across
-        // separate messages instead of cramming them into a single offer.
+        // defer extract to the outbox so the 60-150s Ollama window doesn't block.
+        // AdvanceRegistrationDraftHandler (AppendToDraft mode) merges the canonical
+        // slugs into the existing draft and re-prompts.
         if (quick is null or not (IntentKind.Confirmation or IntentKind.Rejection or IntentKind.Edit or IntentKind.Cancel))
         {
-            var extracted = await ai.ExtractServicesAsync(message.Text ?? string.Empty, ct);
-            if (extracted.Slugs.Count > 0)
-            {
-                var canonical = await ResolveAllAsync(extracted.Slugs, message.Text ?? string.Empty, ct);
-                var merged = draft.DraftServices.Concat(canonical).Distinct()
-                    .Take(options.Value.MaxServicesPerProvider).ToList();
-                if (merged.Count != draft.DraftServices.Count)
-                {
-                    draft.SetServices(merged, now);
-                    await drafts.UpsertAsync(draft, ct);
-                    await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                        $"Updated: {string.Join(", ", merged)}. Reply YES to confirm or EDIT to change."));
-                    return;
-                }
-            }
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+                "Looking up the service you mentioned…"));
+            await bus.PublishAsync(new RegistrationExtractServicesRequested(
+                phone.Value, message.Text ?? string.Empty, RegistrationExtractMode.AppendToDraft));
+            return;
         }
 
-        var intent = quick is { } q
-            ? new IntentDetectionResult(q, 1.0, "en", "quick")
-            : await ai.DetectIntentAsync(message.Text ?? string.Empty, ct);
-        if (intent.Intent == IntentKind.Confirmation)
+        if (quick == IntentKind.Confirmation)
         {
             draft.StepTo(RegistrationStep.AwaitingLocation, now);
             await drafts.UpsertAsync(draft, ct);
@@ -211,7 +191,7 @@ public sealed class RegistrationOrchestrator(
             return;
         }
 
-        if (intent.Intent == IntentKind.Edit)
+        if (quick == IntentKind.Edit)
         {
             draft.StepTo(RegistrationStep.AwaitingServices, now);
             await drafts.UpsertAsync(draft, ct);
@@ -220,32 +200,6 @@ public sealed class RegistrationOrchestrator(
         }
 
         await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Reply YES to confirm or EDIT to change."));
-    }
-
-    private async Task<List<string>> ResolveAllAsync(IEnumerable<string> slugs, string originalText, CancellationToken ct)
-    {
-        var canonical = new List<string>();
-        foreach (var slug in slugs)
-        {
-            var resolved = await slugResolver.ResolveAsync(slug, originalText, ct);
-            canonical.Add(resolved.CanonicalSlug);
-        }
-        return canonical;
-    }
-
-    private async Task<List<string>> ProposeAddServicesAsync(
-        AvailabilityAggregate.ProviderAvailability existing, string text, CancellationToken ct)
-    {
-        var extracted = await ai.ExtractServicesAsync(text, ct);
-        if (extracted.Slugs.Count == 0) return [];
-
-        var canonical = await ResolveAllAsync(extracted.Slugs, text, ct);
-        var newSlugs = canonical.Except(existing.Services).Distinct().ToList();
-        if (newSlugs.Count == 0) return [];
-
-        var remainingCap = options.Value.MaxServicesPerProvider - existing.Services.Count;
-        if (remainingCap <= 0) return [];
-        return [.. newSlugs.Take(remainingCap)];
     }
 
     private async Task ConfirmAddServicesAsync(
@@ -258,37 +212,19 @@ public sealed class RegistrationOrchestrator(
     {
         var quick = QuickIntent.Detect(message.Text);
 
-        // Mid-confirm append: not a yes/no/edit token, try to extract more
-        // services and merge into the proposal. Mirrors the bracket-style
-        // "and X" path in ConfirmServicesAsync for the new-registration flow.
+        // Mid-confirm append: defer extract to the outbox (mirrors the bracket-style
+        // "and X" path in ConfirmServicesAsync). AdvanceRegistrationDraftHandler
+        // (AppendToAddDraft mode) merges into the proposal, capped by remaining slots.
         if (quick is null or not (IntentKind.Confirmation or IntentKind.Rejection or IntentKind.Edit))
         {
-            var extracted = await ai.ExtractServicesAsync(message.Text ?? string.Empty, ct);
-            if (extracted.Slugs.Count > 0)
-            {
-                var canonical = await ResolveAllAsync(extracted.Slugs, message.Text ?? string.Empty, ct);
-                var remainingCap = options.Value.MaxServicesPerProvider - existing.Services.Count;
-                var merged = draft.DraftServices
-                    .Concat(canonical.Where(s => !existing.Services.Contains(s)))
-                    .Distinct()
-                    .Take(remainingCap)
-                    .ToList();
-                if (merged.Count != draft.DraftServices.Count)
-                {
-                    draft.SetServices(merged, now);
-                    await drafts.UpsertAsync(draft, ct);
-                    await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                        $"Updated: {string.Join(", ", merged)}. Reply YES to add, or EDIT to change."));
-                    return;
-                }
-            }
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+                "Looking up the service you mentioned…"));
+            await bus.PublishAsync(new RegistrationExtractServicesRequested(
+                phone.Value, message.Text ?? string.Empty, RegistrationExtractMode.AppendToAddDraft));
+            return;
         }
 
-        var intent = quick is { } q
-            ? new IntentDetectionResult(q, 1.0, "en", "quick")
-            : await ai.DetectIntentAsync(message.Text ?? string.Empty, ct);
-
-        if (intent.Intent == IntentKind.Confirmation)
+        if (quick == IntentKind.Confirmation)
         {
             existing.AddServices(draft.DraftServices, options.Value.MaxServicesPerProvider);
             existing.Heartbeat(TimeSpan.FromHours(options.Value.ExpiryHours), now);
@@ -301,7 +237,7 @@ public sealed class RegistrationOrchestrator(
             return;
         }
 
-        if (intent.Intent == IntentKind.Edit)
+        if (quick == IntentKind.Edit)
         {
             await drafts.DeleteAsync(phone.Value, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
@@ -309,7 +245,7 @@ public sealed class RegistrationOrchestrator(
             return;
         }
 
-        if (intent.Intent == IntentKind.Rejection)
+        if (quick == IntentKind.Rejection)
         {
             await drafts.DeleteAsync(phone.Value, ct);
             existing.Heartbeat(TimeSpan.FromHours(options.Value.ExpiryHours), now);
@@ -367,11 +303,7 @@ public sealed class RegistrationOrchestrator(
             return;
         }
 
-        var quick = QuickIntent.Detect(message.Text);
-        var intent = quick is { } q
-            ? new IntentDetectionResult(q, 1.0, "en", "quick")
-            : await ai.DetectIntentAsync(message.Text ?? string.Empty, ct);
-        if (intent.Intent == IntentKind.Confirmation)
+        if (QuickIntent.Detect(message.Text) == IntentKind.Confirmation)
         {
             draft.StepTo(RegistrationStep.AwaitingConsent, now);
             await drafts.UpsertAsync(draft, ct);
@@ -385,10 +317,7 @@ public sealed class RegistrationOrchestrator(
     private async Task CollectConsentAsync(RegistrationDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
     {
         var quick = QuickIntent.Detect(message.Text);
-        var intent = quick is { } q
-            ? new IntentDetectionResult(q, 1.0, "en", "quick")
-            : await ai.DetectIntentAsync(message.Text ?? string.Empty, ct);
-        bool? consent = intent.Intent switch
+        bool? consent = quick switch
         {
             IntentKind.Confirmation => true,
             IntentKind.Rejection => false,

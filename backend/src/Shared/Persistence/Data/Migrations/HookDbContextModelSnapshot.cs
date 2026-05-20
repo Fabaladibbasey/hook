@@ -442,6 +442,9 @@ namespace Hook.Shared.Persistence.Data.Migrations
                     b.Property<bool?>("DraftShareContact")
                         .HasColumnType("boolean");
 
+                    b.Property<DateTimeOffset?>("ResolveStartedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset>("StartedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -490,6 +493,9 @@ namespace Hook.Shared.Persistence.Data.Migrations
 
                     b.Property<bool?>("DraftSharePhoneConsent")
                         .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset?>("ResolveStartedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTimeOffset>("StartedAt")
                         .HasColumnType("timestamp with time zone");

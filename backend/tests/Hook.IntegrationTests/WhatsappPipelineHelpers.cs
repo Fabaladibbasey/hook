@@ -99,7 +99,7 @@ public static class WhatsappPipelineHelpers
             (await inject(client)).EnsureSuccessStatusCode();
         };
         return host.TrackActivity()
-            .Timeout(timeout ?? TimeSpan.FromSeconds(10))
+            .Timeout(timeout ?? TimeSpan.FromSeconds(30))
             .ExecuteAndWaitAsync(action);
     }
 
@@ -133,9 +133,10 @@ public static class WhatsappPipelineHelpers
     /// Polling fallback for assertions that span things Wolverine TrackActivity cannot
     /// observe (SignalR push, scheduled retention sweeps, etc.). Most pipeline tests
     /// should use the tracked inject helpers + <see cref="ExpectOutboundAsync"/>.
-    /// 5s default timeout matches the typical handler-cascade ceiling on CI; longer
-    /// waits indicate a bug, not a slow path. <paramref name="since"/> is strict
-    /// greater-than. Throws <see cref="TimeoutException"/> on miss.
+    /// 5s default timeout matches the typical handler-cascade ceiling on CI under the
+    /// inline send path; <see cref="TrackedInjectAsync"/> uses a 30s ceiling to absorb
+    /// the now-deferred outbox round-trip on AI-stage handlers. <paramref name="since"/>
+    /// is strict greater-than. Throws <see cref="TimeoutException"/> on miss.
     /// </summary>
     public static async Task<OutboxMessage> WaitForOutboundAsync(
         this HttpClient client,

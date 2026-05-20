@@ -11,6 +11,8 @@ using Hook.Features.ServiceRequest.IterateMatches;
 using Hook.Features.ServiceRequest.RequestAggregate;
 using Hook.Features.Whatsapp.Models;
 using Hook.Features.Whatsapp.Phone;
+using Hook.Features.Whatsapp.ReceiveWebhook.ClassifyInboundIntent;
+using Hook.Features.Whatsapp.ReceiveWebhook.ColdReply;
 using Hook.Shared.Pipeline.PostCommitSends;
 using Npgsql;
 using Wolverine;
@@ -26,7 +28,6 @@ public sealed class InboundRouterHandler(
     IFeedbackRepository feedback,
     IMatchRepository matches,
     IProviderAvailabilityRepository providers,
-    IConversationAi ai,
     IMessageBus bus,
     ClientRequestOrchestrator clientOrchestrator,
     RegistrationOrchestrator registrationOrchestrator,
@@ -51,23 +52,43 @@ public sealed class InboundRouterHandler(
     internal const string DisambiguationPrompt =
         "Quick check — do you want to REQUEST a service (you need help) or REGISTER as a provider (you offer one)? Reply REQUEST or REGISTER.";
 
-    public async Task Handle(InboundMessageReceived evt, CancellationToken ct)
+    public Task Handle(InboundMessageReceived evt, CancellationToken ct) =>
+        RouteAsync(evt.Message, prefetchedIntent: null, ct);
+
+    // Post-classification re-entry: ClassifyInboundIntentHandler runs the LLM
+    // outside the user-visible critical path, then bus.InvokeAsync's RouteClassifiedIntent
+    // so the switch dispatch happens inside a normal Wolverine handler context.
+    // Pre-classification deterministic checks re-run on this path too, in case
+    // state changed during the Ollama window.
+    public Task Handle(RouteClassifiedIntent evt, CancellationToken ct) =>
+        RouteAsync(evt.Message, evt.Detected, ct);
+
+    private async Task RouteAsync(InboundMessage msg, IntentDetectionResult? prefetchedIntent, CancellationToken ct)
     {
-        var msg = evt.Message;
         var phone = msg.From.Value;
         var text = msg.Text ?? string.Empty;
         var masked = msg.From.Mask();
+        // Re-entry from RouteClassifiedIntent: the original entry already advanced the
+        // contact's LastInboundAt and ran CANCEL detection. These are durable side effects
+        // and must not repeat — UpsertInboundAsync would push LastInboundAt forward by
+        // the Ollama window (60-150s), and re-running CANCEL detection here would race
+        // a non-locked Get→Delete against any state that genuinely changed during that
+        // window. Deterministic draft/feedback/active-request checks below DO re-run.
+        var isReentry = prefetchedIntent is not null;
 
         logger.LogDebug("Routing inbound {MessageId} from {From} kind={Kind}", msg.MessageId, masked, msg.Kind);
 
-        if (QuickIntent.Detect(text) == IntentKind.Cancel)
+        if (!isReentry)
         {
-            if (await AbandonAsync(phone, msg.From, ct)) return;
-        }
+            if (QuickIntent.Detect(text) == IntentKind.Cancel)
+            {
+                if (await AbandonAsync(phone, msg.From, ct)) return;
+            }
 
-        // Persist contact AFTER the cancel/abandon detection so a CANCEL inbound that
-        // tears down a draft does not extend the contact's last-inbound timestamp.
-        await contacts.UpsertInboundAsync(phone, clock.GetUtcNow(), ct);
+            // Persist contact AFTER the cancel/abandon detection so a CANCEL inbound that
+            // tears down a draft does not extend the contact's last-inbound timestamp.
+            await contacts.UpsertInboundAsync(phone, clock.GetUtcNow(), ct);
+        }
 
         // Compute hint up front so we can detect cross-flow intent switches before
         // dispatching into an active draft. Hint is deterministic regex; LLM intent
@@ -113,12 +134,10 @@ public sealed class InboundRouterHandler(
 
         if (await TryResolveAmbiguousAsync(msg, text, masked, ct)) return;
 
-        var intent = new LazyIntent(ai, text);
-
         if (await feedback.GetLatestPendingForClientAsync(phone, ct) is { } pendingFeedback)
         {
             logger.LogDebug("Route → FeedbackResponseService (pending feedback) for {Phone}", masked);
-            await feedbackService.HandleAsync(msg, pendingFeedback, intent, ct);
+            await feedbackService.HandleAsync(msg, pendingFeedback, ct);
             return;
         }
 
@@ -155,10 +174,22 @@ public sealed class InboundRouterHandler(
             return;
         }
 
-        // Deterministic hint short-circuits the LLM intent call entirely.
-        var detected = hint is { } h
+        // Deterministic hint short-circuits the LLM intent call entirely; a prefetched
+        // intent from ClassifyInboundIntentHandler does the same on the re-entry path.
+        // Otherwise we publish a deterministic ack + ClassifyInboundIntentRequested so
+        // the 60-150s Ollama window happens off the user-visible critical path.
+        var detected = prefetchedIntent ?? (hint is { } h
             ? new IntentDetectionResult(h, 1.0, "en", "hint")
-            : await intent.GetAsync(ct);
+            : null);
+
+        if (detected is null)
+        {
+            logger.LogDebug("Deferring LLM intent classification for {Phone}", masked);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+                "Got your message — one sec…"));
+            await bus.PublishAsync(new ClassifyInboundIntentRequested(msg));
+            return;
+        }
 
         // One lookup, reused below by the ambiguity guard and the Greeting/Unknown branch.
         // Listed providers shouldn't see the HIRE/OFFER prompt — they're already on the
@@ -312,24 +343,8 @@ public sealed class InboundRouterHandler(
         };
     }
 
-    private async Task SendColdReplyAsync(PhoneNumber from, string text, IntentDetectionResult detected, string purpose, CancellationToken ct)
-    {
-        var ctx = new ReplyContext(
-            Purpose: purpose,
-            RecentTurns: [new ConversationTurn(TurnRole.User, text)],
-            LanguageHint: detected.LanguageCode)
-        {
-            Facts = new Dictionary<string, string>
-            {
-                ["intent"] = detected.Intent.ToString()
-            }
-        };
-        var fallback = purpose == "greeting-reply"
-            ? "Hi! I connect people with local service providers. REQUEST a service if you need help, or REGISTER as a provider if you offer one."
-            : "I help connect people who need services with providers. Reply REQUEST if you need help, or REGISTER if you offer a service.";
-        var reply = await AiReplyHelper.TryGenerateOrFallbackAsync(ai, ctx, purpose, fallback, logger, ct);
-        await bus.PublishAsync(new SendWhatsAppTextRequested(from, reply));
-    }
+    private ValueTask SendColdReplyAsync(PhoneNumber from, string text, IntentDetectionResult detected, string purpose, CancellationToken ct) =>
+        bus.PublishAsync(new SendColdReplyRequested(from, text, detected, purpose));
 
     private async Task TryPickAsync(ServiceRequest.RequestAggregate.ServiceRequest request, string text, string maskedPhone, CancellationToken ct)
     {

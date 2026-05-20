@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Hook.Features.Observability;
 using Hook.Features.ServiceRequest.RequestAggregate;
+using Hook.Shared.Persistence;
 using Hook.Shared.Persistence.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -28,6 +29,7 @@ public sealed class RetentionSweeper(
 
         var nowUtc = clock.GetUtcNow();
         var cutoff = nowUtc - TimeSpan.FromDays(opts.RetentionDays);
+        var dlqCutoff = nowUtc - TimeSpan.FromDays(opts.DeadLetterRetentionDays);
 
         var sweeps = new (string Key, Func<Task<int>> Run)[]
         {
@@ -51,6 +53,12 @@ public sealed class RetentionSweeper(
                 () => db.AmbiguousIntentDrafts.Where(d => d.CreatedAt < cutoff).ExecuteDeleteAsync(ct)),
             (RetentionTableKeys.MatchFeedback,
                 () => db.MatchFeedback.Where(f => f.PromptedAt < cutoff).ExecuteDeleteAsync(ct)),
+            // Wolverine DLQ rows persist indefinitely after MaxAttempts failure;
+            // their JSON body may include user text + unmasked phone for AI-stage envelopes.
+            (RetentionTableKeys.WolverineDeadLetterQueue,
+                () => db.Database.ExecuteSqlInterpolatedAsync(
+                    $"DELETE FROM {WolverineConfig.Schema}.wolverine_dead_letter_queue WHERE received_at < {dlqCutoff}",
+                    ct)),
         };
 
         var counts = new Dictionary<string, int>(sweeps.Length);

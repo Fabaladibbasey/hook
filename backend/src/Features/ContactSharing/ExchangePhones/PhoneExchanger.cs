@@ -2,10 +2,11 @@ using Hook.Features.ContactSharing.Events;
 using Hook.Features.Matching.MatchAggregate;
 using Hook.Features.ProviderAvailability.AvailabilityAggregate;
 using Hook.Features.ServiceRequest.RequestAggregate;
-using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Core;
+using Hook.Shared.Pipeline.PostCommitSends;
 using Hook.Shared.Whatsapp;
+using Wolverine;
 
 namespace Hook.Features.ContactSharing.ExchangePhones;
 
@@ -13,7 +14,7 @@ public sealed class PhoneExchanger(
     IMatchRepository matches,
     IServiceRequestRepository requests,
     IProviderAvailabilityRepository providers,
-    IWhatsappClient whatsapp,
+    IMessageBus bus,
     IEventPublisher events,
     TimeProvider clock,
     ILogger<PhoneExchanger> logger)
@@ -50,7 +51,8 @@ public sealed class PhoneExchanger(
 
         if (match.ContactShared)
         {
-            await whatsapp.SendTextAsync(clientPhone, FormatProviderResend(matchPosition, match.ServiceSlug, providerPhone), ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone,
+                FormatProviderResend(matchPosition, match.ServiceSlug, providerPhone)));
             return ExchangeOutcome.AlreadyShared;
         }
 
@@ -59,8 +61,8 @@ public sealed class PhoneExchanger(
             // Re-pick of a chat-routed match: ChatRoutingRequestedHandler is idempotent
             // on ChatId, so re-publishing wouldn't re-deliver the link. Send a brief
             // notice pointing the client at the existing chat thread instead.
-            await whatsapp.SendTextAsync(clientPhone,
-                $"Match #{matchPosition} ({providerPhone.Mask()}): already connected to chat with the provider for {match.ServiceSlug}. Check your earlier messages for the chat link.", ct);
+            await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone,
+                $"Match #{matchPosition} ({providerPhone.Mask()}): already connected to chat with the provider for {match.ServiceSlug}. Check your earlier messages for the chat link."));
             return ExchangeOutcome.AlreadyRouted;
         }
 
@@ -91,11 +93,12 @@ public sealed class PhoneExchanger(
             return ExchangeOutcome.RoutedToChat;
         }
 
-        await whatsapp.SendTextAsync(clientPhone, FormatProviderResend(matchPosition, match.ServiceSlug, providerPhone), ct);
+        await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone,
+            FormatProviderResend(matchPosition, match.ServiceSlug, providerPhone)));
         var providerMsg = RequestDetailsFormatter.AppendIfPresent(
             $"Client wants {match.ServiceSlug} ({clientPhone.Value}). Expect a message.",
             request.Description);
-        await whatsapp.SendTextAsync(providerPhone, providerMsg, ct);
+        await bus.PublishAsync(new SendWhatsAppTextRequested(providerPhone, providerMsg));
         await events.PublishAsync(new ContactExchanged(match.Id, request.Id, request.ClientPhone, provider.Phone), ct);
         return ExchangeOutcome.Exchanged;
     }

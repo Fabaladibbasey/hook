@@ -5,6 +5,10 @@ namespace Hook.Features.ServiceRequest.Create;
 public enum ClientRequestStep
 {
     AwaitingService,
+    // Transient: parked while ExtractServicesHandler runs Ollama in the background.
+    // Any inbound during this step re-acks "still looking"; falls back to AwaitingService
+    // if the resolve hangs past the orchestrator's TTL guard.
+    ResolvingService,
     ConfirmService,
     AwaitingLocation,
     ConfirmLocation,
@@ -25,6 +29,10 @@ public class ClientRequestDraft : IAggregateRoot
     public bool? DraftSharePhoneConsent { get; private set; }
     public DateTimeOffset StartedAt { get; init; }
     public DateTimeOffset UpdatedAt { get; private set; }
+    // Set when entering ResolvingService, cleared on leaving. The TTL revert relies on
+    // this rather than UpdatedAt so a follow-up "Touch" while resolving cannot keep the
+    // draft trapped indefinitely.
+    public DateTimeOffset? ResolveStartedAt { get; private set; }
 
     public static ClientRequestDraft Start(string phone, DateTimeOffset now) => new()
     {
@@ -37,6 +45,7 @@ public class ClientRequestDraft : IAggregateRoot
     {
         Step = step;
         UpdatedAt = now;
+        ResolveStartedAt = step == ClientRequestStep.ResolvingService ? now : null;
     }
 
     public void SwitchSlug(string slug, DateTimeOffset now)
@@ -77,5 +86,6 @@ public class ClientRequestDraft : IAggregateRoot
         DraftDescription = source.DraftDescription;
         DraftSharePhoneConsent = source.DraftSharePhoneConsent;
         UpdatedAt = source.UpdatedAt;
+        ResolveStartedAt = source.ResolveStartedAt;
     }
 }

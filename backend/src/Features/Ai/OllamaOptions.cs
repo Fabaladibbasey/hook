@@ -28,6 +28,7 @@ public class OllamaOptions
     // Ollama `keep_alive` request field. Holds the model in memory between calls
     // so the next inbound after an idle period hits the warm path instead of
     // paying a 20-30s reload. Accepts Ollama duration syntax: "30m", "1h",
-    // "-1" (infinite), "0" (unload immediately).
+    // "-1" (infinite), "0" (unload immediately). Default "30m" is the memory-aware
+    // setting for shared dev / single-box deploys; warm-always hosts can override to "-1".
     public string KeepAlive { get; init; } = "30m";
 }

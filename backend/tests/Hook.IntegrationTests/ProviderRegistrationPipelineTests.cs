@@ -71,7 +71,7 @@ public class ProviderRegistrationPipelineTests : PipelineTestBase
         // silent heartbeats leave them wondering whether the system is broken.
         await _fx.InjectTextAndAwaitAsync(phone, "I offer carpentry");
 
-        var ack = await client.ExpectOutboundAsync(
+        var ack = await client.WaitForOutboundAsync(
             phone,
             m => m.Body.Contains("listed as a provider for", StringComparison.OrdinalIgnoreCase),
             since: listed.At);

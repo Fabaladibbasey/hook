@@ -23,6 +23,9 @@ public static class HookMetrics
     public static readonly Counter<long> AiOutboundDropped =
         Meter.CreateCounter<long>("hook.ai.outbound_dropped");
 
+    public static readonly Counter<long> AiClassifyFailures =
+        Meter.CreateCounter<long>("hook.ai.classify_failures");
+
     public static readonly Counter<long> GeocodeCacheHits =
         Meter.CreateCounter<long>("hook.geocode.cache_hits");
 
