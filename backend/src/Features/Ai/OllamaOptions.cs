@@ -31,4 +31,20 @@ public class OllamaOptions
     // "-1" (infinite), "0" (unload immediately). Default "30m" is the memory-aware
     // setting for shared dev / single-box deploys; warm-always hosts can override to "-1".
     public string KeepAlive { get; init; } = "30m";
+
+    // Per-task `num_predict` caps. Ollama aborts generation when the cap is hit, so
+    // structured-output (JSON-schema) calls must have enough headroom to fit the
+    // expected object — truncated JSON will fail to parse. Numbers reflect observed
+    // median + headroom from the existing prompts; raise if a prompt grows.
+    public OllamaTaskBudgets MaxOutputTokens { get; init; } = new();
+}
+
+public sealed class OllamaTaskBudgets
+{
+    public int Intent { get; init; } = 60;
+    public int Extract { get; init; } = 120;
+    public int Judge { get; init; } = 60;
+    public int Eta { get; init; } = 60;
+    public int Reply { get; init; } = 200;
+    public int Language { get; init; } = 30;
 }
