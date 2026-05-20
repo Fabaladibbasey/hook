@@ -23,5 +23,8 @@ public class ServiceRequestConfiguration : IEntityTypeConfiguration<ServiceReque
                .HasDatabaseName("ix_service_requests_client_phone_status");
         builder.HasIndex(r => r.Location).HasDatabaseName("ix_service_requests_location").HasMethod("gist");
         builder.HasIndex(r => r.CreatedAt).HasDatabaseName("ix_service_requests_created_at");
+        builder.HasIndex(r => r.CreatedAt)
+               .HasDatabaseName("ix_service_requests_closed_created_at")
+               .HasFilter($"\"Status\" = '{nameof(ServiceRequestStatus.Closed)}'");
     }
 }
