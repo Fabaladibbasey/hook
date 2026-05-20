@@ -64,6 +64,16 @@ try
             npgsql.MigrationsAssembly(typeof(HookDbContext).Assembly.GetName().Name);
         }));
 
+    // Factory for InboundPrefetchRepository's parallel read-only lookups —
+    // the scoped HookDbContext is reserved for tracked entities + the Wolverine
+    // handler tx and can't run concurrent operations.
+    builder.Services.AddDbContextFactory<HookDbContext>(options =>
+        options.UseNpgsql(connectionString, npgsql =>
+        {
+            npgsql.UseNetTopologySuite();
+            npgsql.MigrationsAssembly(typeof(HookDbContext).Assembly.GetName().Name);
+        }));
+
     // Wolverine scrapes raised events from tracked AggregateRoot entities and
     // publishes them at EF tx commit — same path as direct PublishAsync, so
     // outgoing envelopes enrol in the durable outbox alongside the entity write.
