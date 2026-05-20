@@ -12,6 +12,7 @@ using Hook.Features.ServiceRequest.RequestAggregate;
 using Hook.Features.Whatsapp.Models;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Pipeline.PostCommitSends;
+using Npgsql;
 using Wolverine;
 using IMatchRepository = Hook.Features.Matching.MatchAggregate.IMatchRepository;
 
@@ -316,11 +317,13 @@ public sealed class InboundRouterHandler(
         var ctx = new ReplyContext(
             Purpose: purpose,
             RecentTurns: [new ConversationTurn(TurnRole.User, text)],
-            LanguageHint: detected.LanguageCode,
-            Facts: new Dictionary<string, string>
+            LanguageHint: detected.LanguageCode)
+        {
+            Facts = new Dictionary<string, string>
             {
                 ["intent"] = detected.Intent.ToString()
-            });
+            }
+        };
         var fallback = purpose == "greeting-reply"
             ? "Hi! I connect people with local service providers. REQUEST a service if you need help, or REGISTER as a provider if you offer one."
             : "I help connect people who need services with providers. Reply REQUEST if you need help, or REGISTER if you offer a service.";
@@ -410,11 +413,11 @@ public sealed class InboundRouterHandler(
 
     private static bool IsTransientPostgres(string sqlState) => sqlState switch
     {
-        "40001" => true,  // serialization_failure
-        "40P01" => true,  // deadlock_detected
-        "53300" => true,  // too_many_connections
-        "08000" => true,  // connection_exception
-        "08006" => true,  // connection_failure
+        PostgresErrorCodes.SerializationFailure => true,
+        PostgresErrorCodes.DeadlockDetected => true,
+        PostgresErrorCodes.TooManyConnections => true,
+        PostgresErrorCodes.ConnectionException => true,
+        PostgresErrorCodes.ConnectionFailure => true,
         _ => false
     };
 

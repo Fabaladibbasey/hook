@@ -11,6 +11,7 @@ obj-alt/
 obj-test/
 obj-alt-tests/
 altobj/
+altbuild-*/
 
 ## Build output
 publish/

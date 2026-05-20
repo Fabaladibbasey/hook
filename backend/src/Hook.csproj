@@ -21,12 +21,24 @@
   </PropertyGroup>
 
   <!--
+    Ensure wwwroot/ exists before the SDK's static-web-assets machinery enumerates
+    it. The directory is gitignored and only populated by BuildFrontend; without
+    this, fresh clones and SkipFrontendBuild=true builds hit a missing directory.
+  -->
+  <Target Name="EnsureWwwroot"
+          BeforeTargets="AssignTargetPaths"
+          Condition="!Exists('$(MSBuildProjectDirectory)/wwwroot')">
+    <MakeDir Directories="$(MSBuildProjectDirectory)/wwwroot" />
+  </Target>
+
+  <!--
     Run before AssignTargetPaths so the generated wwwroot/ files are picked
     up by the SDK's static-web-assets collection. ComputeFilesToPublish runs
     after asset collection, which left wwwroot/ out of the published image.
   -->
   <Target Name="BuildFrontend"
           BeforeTargets="AssignTargetPaths"
+          DependsOnTargets="EnsureWwwroot"
           Condition="'$(SkipFrontendBuild)' != 'true'">
     <Message Importance="high" Text="Building frontend in $(FrontendDir)" />
     <Exec Command="npm ci" WorkingDirectory="$(FrontendDir)" />

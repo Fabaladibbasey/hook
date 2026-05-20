@@ -83,6 +83,25 @@ public class ChatPrivacyRoutingPipelineTests : PipelineTestBase
     }
 
     [Fact]
+    public async Task Pick_ProviderWithoutConsent_ProviderBodyIncludesForwardedClientDescription()
+    {
+        using var client = _fx.Factory.CreateClient();
+        var phone = "+2207030004";
+
+        var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(_fx, phone);
+        await _fx.InjectTextAndAwaitAsync(phone, "PICK 2");
+
+        var providerLink = await client.ExpectOutboundAsync(
+            ShareDisabledProviderPhone,
+            m => m.Body.Contains("wants to chat", StringComparison.OrdinalIgnoreCase),
+            since: presented.At);
+
+        providerLink.Body.ShouldContain("— client message (forwarded, not verified) —");
+        providerLink.Body.ShouldContain("kitchen sink leak");
+        providerLink.Body.ShouldContain("— end client message —");
+    }
+
+    [Fact]
     public async Task ChatLinks_PersistChatSessionAndTwoParticipants()
     {
         using var client = _fx.Factory.CreateClient();

@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
+using Shouldly;
 using Wolverine;
 using MatchEntity = Hook.Features.Matching.MatchAggregate.Match;
 
@@ -167,6 +168,74 @@ public class ChatRoutingRequestedHandlerTests
         Assert.Empty(_sessions);
     }
 
-    private static ChatRoutingRequested MakeEvt(Guid matchId, bool clientConsented, bool providerConsented) =>
-        new(matchId, Guid.NewGuid(), ClientPhone, ProviderPhone, clientConsented, providerConsented, Address, Lat, Lon, MatchPosition);
+    private static ChatRoutingRequested MakeEvt(
+        Guid matchId,
+        bool clientConsented,
+        bool providerConsented,
+        string description = "") =>
+        new(matchId, Guid.NewGuid(), ClientPhone, ProviderPhone,
+            clientConsented, providerConsented, Address, Lat, Lon, MatchPosition,
+            Description: description);
+
+    [Fact]
+    public async Task Handle_NonBlankDescription_AppendsForwardedClientMessageToProviderBody()
+    {
+        var match = SeedMatch();
+
+        await Build().Handle(
+            MakeEvt(match.Id, clientConsented: false, providerConsented: false,
+                description: "kitchen sink leak"),
+            _busMock.Object, CancellationToken.None);
+
+        var provider = _sent.Single(s => s.To == ProviderPhone);
+        provider.Body.ShouldContain("— client message (forwarded, not verified) —");
+        provider.Body.ShouldContain("kitchen sink leak");
+        provider.Body.ShouldContain("— end client message —");
+        provider.Body.IndexOf("— client message").ShouldBeGreaterThan(provider.Body.IndexOf("Open: "));
+    }
+
+    [Fact]
+    public async Task Handle_NonBlankDescription_ClientBodyHasNoForwardedSegment()
+    {
+        var match = SeedMatch();
+
+        await Build().Handle(
+            MakeEvt(match.Id, clientConsented: false, providerConsented: false,
+                description: "kitchen sink leak"),
+            _busMock.Object, CancellationToken.None);
+
+        var client = _sent.Single(s => s.To == ClientPhone);
+        client.Body.ShouldNotContain("— client message");
+        client.Body.ShouldNotContain("kitchen sink leak");
+    }
+
+    [Fact]
+    public async Task Handle_WhitespaceOnlyDescription_ProviderBodyHasNoForwardedSegment()
+    {
+        var match = SeedMatch();
+
+        await Build().Handle(
+            MakeEvt(match.Id, clientConsented: false, providerConsented: false,
+                description: "   \n\t  "),
+            _busMock.Object, CancellationToken.None);
+
+        var provider = _sent.Single(s => s.To == ProviderPhone);
+        provider.Body.ShouldNotContain("— client message");
+    }
+
+    [Fact]
+    public async Task Handle_DescriptionWithBidiAndControlChars_StrippedBeforeForwarding()
+    {
+        var match = SeedMatch();
+
+        await Build().Handle(
+            MakeEvt(match.Id, clientConsented: false, providerConsented: false,
+                description: "hi‮there\x07now"),
+            _busMock.Object, CancellationToken.None);
+
+        var provider = _sent.Single(s => s.To == ProviderPhone);
+        provider.Body.ShouldContain("hitherenow");
+        provider.Body.ShouldNotContain("‮");
+        provider.Body.ShouldNotContain("\x07");
+    }
 }

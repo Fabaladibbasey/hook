@@ -48,7 +48,6 @@ public sealed class DevPipelineFixture : IAsyncLifetime
     [ModuleInitializer]
     internal static void StaticInit()
     {
-        Environment.SetEnvironmentVariable("TESTCONTAINERS_RYUK_DISABLED", "true");
         AppDomain.CurrentDomain.ProcessExit += static (_, _) =>
         {
             if (_shared is { } c)
@@ -184,10 +183,11 @@ public sealed class DevPipelineFixture : IAsyncLifetime
     {
         await Factory.DisposeAsync();
 
-        // Static container; the per-shard clone is dropped here. Ryuk is disabled,
-        // so the container itself only releases on graceful exit (ProcessExit hook
-        // in this file) — abnormal kill leaks it. CI runners are ephemeral; locally
-        // use `docker container prune` if needed.
+        // Static container; the per-shard clone is dropped here. The container itself
+        // is reaped by Testcontainers' Ryuk sidecar (enabled by default) on abnormal
+        // exit. The ProcessExit hook at the top of this file disposes it on graceful
+        // exit and tolerates the "container already gone" race with Ryuk via the
+        // outer empty catch.
         if (_shared is not null && !string.IsNullOrEmpty(_shardDbName))
         {
             await using var admin = new NpgsqlConnection(BuildAdminConnString(_shared));

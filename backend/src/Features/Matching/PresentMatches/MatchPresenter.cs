@@ -50,8 +50,10 @@ public sealed class MatchPresenter(
         var ctx = new ReplyContext(
             Purpose: "present-top-matches",
             RecentTurns: [],
-            LanguageHint: "en",
-            Facts: facts);
+            LanguageHint: "en")
+        {
+            Facts = facts
+        };
 
         var fallbackLines = capped
             .Select((s, i) =>
@@ -67,7 +69,7 @@ public sealed class MatchPresenter(
         // the body.
         var pickHint = capped.Count == 1
             ? "Reply PICK 1 to connect with this provider. NEXT for more, NEW for a different service."
-            : $"Reply PICK 1 (or e.g. PICK 1,2 or PICK ALL) to connect with one or more providers. NEXT for more, NEW for a different service.";
+            : "Reply PICK 1 (or e.g. PICK 1,2 or PICK ALL) to connect with one or more providers. NEXT for more, NEW for a different service.";
         var fallback = $"Top matches for {serviceSlug}:\n{string.Join("\n", fallbackLines)}";
 
         var reply = await AiReplyHelper.TryGenerateOrFallbackAsync(ai, ctx, "match_presenter", fallback, logger, ct);
