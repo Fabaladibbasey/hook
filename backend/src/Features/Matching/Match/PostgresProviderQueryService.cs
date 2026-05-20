@@ -40,7 +40,7 @@ public sealed class PostgresProviderQueryService(
         var rows = branchResults
             .SelectMany(b => b)
             .GroupBy(r => r.Phone, StringComparer.Ordinal)
-            .Select(g => g.First())
+            .Select(g => g.MinBy(r => r.DistanceMeters)!)
             .OrderBy(r => r.DistanceMeters)
             .Take(opts.MaxCandidatePoolSize)
             .ToList();

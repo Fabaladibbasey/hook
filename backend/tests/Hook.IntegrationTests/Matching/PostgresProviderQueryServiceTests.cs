@@ -16,6 +16,8 @@ public sealed class PostgresProviderQueryServiceTests : PipelineTestBase
     public PostgresProviderQueryServiceTests(DevPipelineFixture fx) : base(fx) { }
 
     private const double LatDegPerKm = 1.0 / 110.574;
+    private static int _phoneSeq;
+    private static string NextPhone() => $"+22070{Interlocked.Increment(ref _phoneSeq):D6}";
 
     [Fact]
     public async Task FindCandidates_AcrossHierarchyBranches_MergesTopKByDistance()
@@ -115,7 +117,7 @@ public sealed class PostgresProviderQueryServiceTests : PipelineTestBase
         var parentSlug = $"par-{Guid.NewGuid():N}";
         var now = DateTimeOffset.UtcNow;
         var location = new Location(DevPipelineFixture.SeedRefLat, DevPipelineFixture.SeedRefLng);
-        var phone = $"+22070{Random.Shared.Next(100_000, 999_999)}";
+        var phone = NextPhone();
 
         db.ProviderAvailabilities.Add(ProviderAvailability.Register(
             phone, [requestedSlug, parentSlug], location, "Banjul", shareContact: true,
