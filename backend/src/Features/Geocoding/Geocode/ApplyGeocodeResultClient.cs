@@ -20,8 +20,6 @@ public sealed class ApplyGeocodeResultClientHandler(
 
         if (!PhoneNumber.TryParse(evt.Phone, out var phone)) return;
 
-        // Race guard: user may have advanced past the location step (e.g. sent a GPS pin)
-        // while the geocoder was running. Only act if we're still in a location step.
         if (draft.Step is not (ClientRequestStep.AwaitingLocation or ClientRequestStep.ConfirmLocation))
         {
             logger.LogDebug("Stale geocode apply for {Phone}; draft now at {Step}", phone.Mask(), draft.Step);

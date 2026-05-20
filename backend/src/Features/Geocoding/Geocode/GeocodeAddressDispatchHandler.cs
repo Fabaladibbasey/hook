@@ -9,9 +9,8 @@ public sealed class GeocodeAddressDispatchHandler(
     GeocodingService geocoding,
     ILogger<GeocodeAddressDispatchHandler> logger)
 {
-    // [NonTransactional]: Google Geocoding HTTP can wait up to ~10s (its default client
-    // timeout). bus.InvokeAsync re-enters a transactional apply handler so the draft
-    // mutation + outgoing prompt commit atomically with the outbox envelope.
+    // [NonTransactional]: Google Geocoding HTTP can wait ~10s; do not pin an Npgsql tx
+    // across it. bus.InvokeAsync re-enters a transactional apply for the draft mutation.
     [NonTransactional]
     public async Task Handle(GeocodeAddressRequested evt, IMessageBus bus, CancellationToken ct)
     {

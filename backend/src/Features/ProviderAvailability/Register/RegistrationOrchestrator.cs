@@ -272,9 +272,7 @@ public sealed class RegistrationOrchestrator(
 
         if (message.Kind == InboundMessageKind.Text && !string.IsNullOrWhiteSpace(message.Text))
         {
-            // Defer the Google Geocoding HTTP (default ~10s timeout) off the inbound
-            // critical path; GeocodeAddressDispatchHandler does the lookup then re-enters
-            // ApplyGeocodeResultProvider to capture the location and emit the Found prompt.
+            // Defer geocoding HTTP off the inbound critical path (~10s Google timeout).
             await drafts.UpsertAsync(draft, ct);
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
                 "Looking up that address — one sec…"));
