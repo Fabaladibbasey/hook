@@ -32,8 +32,8 @@ public sealed class InboundPrefetchRepository(
             orderby f.PromptedAt descending
             select f).FirstOrDefaultAsync(ct), ct);
 
-        // activeRequest stays on the main context so .Close() in the router persists
-        // via SaveChanges. Awaited last so it overlaps the parallel batch.
+        // activeRequest tracks on the scoped context so router-side .Close() commits via
+        // Wolverine AutoApplyTransactions SaveChanges. Only valid inside a handler context.
         var activeRequestTask = db.ServiceRequests
             .Where(r => r.ClientPhone == phone && r.Status != ServiceRequestStatus.Closed)
             .OrderByDescending(r => r.CreatedAt)
