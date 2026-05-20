@@ -18,7 +18,7 @@ public sealed class Step1PromptDispatchHandler(
     public async Task Handle(Step1PromptDispatchRequested evt, CancellationToken ct)
     {
         var facts = new Dictionary<string, string> { ["service"] = evt.ServiceSlug };
-        if (evt.PickedFormatted.Length > 0)
+        if (!string.IsNullOrEmpty(evt.PickedFormatted))
         {
             facts["pickedProviders"] = evt.PickedFormatted;
             facts["instruction"] =
@@ -32,8 +32,10 @@ public sealed class Step1PromptDispatchHandler(
         var ctx = new ReplyContext(
             Purpose: "feedback-step-1-did-you-find",
             RecentTurns: [],
-            LanguageHint: "en",
-            Facts: facts);
+            LanguageHint: "en")
+        {
+            Facts = facts
+        };
 
         var reply = await AiReplyHelper.TryGenerateAsync(ai, ctx, "step1_feedback", logger, ct);
         if (reply is null)

@@ -17,12 +17,14 @@ public sealed class Step2PromptDispatchHandler(
         var ctx = new ReplyContext(
             Purpose: "feedback-step-2-job-completed",
             RecentTurns: [],
-            LanguageHint: "en",
-            Facts: new Dictionary<string, string>
+            LanguageHint: "en")
+        {
+            Facts = new Dictionary<string, string>
             {
                 ["service"] = evt.ServiceSlug,
                 ["instruction"] = "Ask whether the job is completed. Possible answers: YES, NO, IN PROGRESS."
-            });
+            }
+        };
 
         var reply = await AiReplyHelper.TryGenerateAsync(ai, ctx, "step2_feedback", logger, ct);
         if (reply is null)

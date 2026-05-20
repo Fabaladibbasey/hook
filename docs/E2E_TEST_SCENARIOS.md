@@ -589,8 +589,8 @@ Both finalize the request and publish `ServiceRequestCreated`.
 
 **Preconditions:** picked provider has `ShareContact=false`.
 **Expected:** `PhoneExchanger.TryExchangeAsync` publishes `ChatRoutingRequested`. **No phone number** sent to either side. `ChatRoutingRequestedHandler` creates `chat_sessions` row + 2 `chat_participants` with random tokens.
-- Client outbound: `"The other party prefers a private chat. Open: <ClientUrl>"`
-- Provider outbound: `"A client wants to chat with you. Open: <ProviderUrl>"`
+- Client outbound: `"Match #N (+220***NN): your private chat is ready. Open: <ClientUrl>"` (or `"…the other party prefers a private chat. Open: <ClientUrl>"` when only the client consented).
+- Provider outbound: `"<slug> client at <address> (<mapsUrl>) wants to chat. Open: <ProviderUrl>"` (or `"…prefers a private chat. Open: <ProviderUrl>"` when only the provider consented). When the client supplied a description, the provider message ends with a forwarded-and-framed segment: `\n\n— client message (forwarded, not verified) —\n<sanitized description>\n— end client message —`.
 - `match.ChatId` set to new chat id.
 - Idempotent: re-firing `ChatRoutingRequested` for an already-routed match is a no-op (`if (match.ChatId is not null) return`).
 **Dev exec:** seed share=false provider; run pick; assert `chat_sessions` row, both outbounds with link.

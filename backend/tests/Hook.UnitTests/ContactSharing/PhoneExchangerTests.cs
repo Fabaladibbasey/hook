@@ -9,6 +9,7 @@ using Hook.Shared.Core;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
+using Shouldly;
 using MatchEntity = Hook.Features.Matching.MatchAggregate.Match;
 using ProviderEntity = Hook.Features.ProviderAvailability.AvailabilityAggregate.ProviderAvailability;
 using ProviderRepoIface = Hook.Features.ProviderAvailability.AvailabilityAggregate.IProviderAvailabilityRepository;
@@ -76,7 +77,8 @@ public class PhoneExchangerTests
         DateTimeOffset? providerExpiresAt = null,
         bool sharePhone = true,
         bool providerConsent = true,
-        string clientPhone = "+2203339999")
+        string clientPhone = "+2203339999",
+        string description = "")
     {
         var providerPhone = "+2203331234";
         var match = MatchEntity.Create(Guid.NewGuid(), providerPhone, "plumbing", 0, 0, _clock.GetUtcNow());
@@ -85,7 +87,7 @@ public class PhoneExchangerTests
         var request = ServiceRequestEntity.Create(
             clientPhone, "plumbing",
             new Location(13.45, -16.6), "Banjul",
-            "req-test", 5.0, DateTimeOffset.UtcNow, sharePhone);
+            description, 5.0, DateTimeOffset.UtcNow, sharePhone);
         _requests[match.RequestId] = request;
 
         var now = _clock.GetUtcNow();
@@ -261,5 +263,52 @@ public class PhoneExchangerTests
         var match = SeedMatch(clientPhone: "not-a-phone");
         var outcome = await Build().TryExchangeAsync(match.Id, 1);
         Assert.Equal(ExchangeOutcome.InvalidData, outcome);
+    }
+
+    [Fact]
+    public async Task TryExchange_BothConsent_NonBlankDescription_ProviderMessageHasForwardedSegment()
+    {
+        var match = SeedMatch(sharePhone: true, providerConsent: true, description: "leaking pipe under sink");
+
+        await Build().TryExchangeAsync(match.Id, 1);
+
+        var providerMsg = _sent.Single(s => s.To.Value == "+2203331234").Body;
+        providerMsg.ShouldContain("— client message (forwarded, not verified) —");
+        providerMsg.ShouldContain("leaking pipe under sink");
+        providerMsg.ShouldContain("— end client message —");
+    }
+
+    [Fact]
+    public async Task TryExchange_BothConsent_EmptyDescription_ProviderMessageHasNoForwardedSegment()
+    {
+        var match = SeedMatch(sharePhone: true, providerConsent: true, description: string.Empty);
+
+        await Build().TryExchangeAsync(match.Id, 1);
+
+        var providerMsg = _sent.Single(s => s.To.Value == "+2203331234").Body;
+        providerMsg.ShouldNotContain("— client message");
+    }
+
+    [Fact]
+    public async Task TryExchange_BothConsent_NonBlankDescription_ClientResendNotificationHasNoForwardedSegment()
+    {
+        var match = SeedMatch(sharePhone: true, providerConsent: true, description: "leaking pipe");
+
+        await Build().TryExchangeAsync(match.Id, 1);
+
+        var clientMsg = _sent.Single(s => s.To.Value == "+2203339999").Body;
+        clientMsg.ShouldNotContain("— client message");
+        clientMsg.ShouldNotContain("leaking pipe");
+    }
+
+    [Fact]
+    public async Task TryExchange_NoBilateralConsent_PublishesChatRoutingRequestedCarryingDescription()
+    {
+        var match = SeedMatch(sharePhone: false, providerConsent: true, description: "kitchen sink leak");
+
+        await Build().TryExchangeAsync(match.Id, 1);
+
+        var evt = Assert.IsType<ChatRoutingRequested>(_published[0]);
+        evt.Description.ShouldBe("kitchen sink leak");
     }
 }

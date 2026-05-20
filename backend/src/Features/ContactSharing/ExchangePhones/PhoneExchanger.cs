@@ -5,6 +5,7 @@ using Hook.Features.ServiceRequest.RequestAggregate;
 using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Core;
+using Hook.Shared.Whatsapp;
 
 namespace Hook.Features.ContactSharing.ExchangePhones;
 
@@ -35,9 +36,15 @@ public sealed class PhoneExchanger(
         var now = clock.GetUtcNow();
         if (provider.ExpiresAt <= now) return ExchangeOutcome.ProviderExpired;
 
-        if (!PhoneNumber.TryParse(request.ClientPhone, out var clientPhone) ||
-            !PhoneNumber.TryParse(provider.Phone, out var providerPhone))
+        if (!PhoneNumber.TryParse(request.ClientPhone, out var clientPhone))
         {
+            logger.LogWarning("Match {MatchId} request has unparseable client phone", matchId);
+            return ExchangeOutcome.InvalidData;
+        }
+        if (!PhoneNumber.TryParse(provider.Phone, out var providerPhone))
+        {
+            logger.LogError("Match {MatchId} provider {ProviderPhone} has unparseable phone — data integrity issue",
+                matchId, provider.Phone);
             return ExchangeOutcome.InvalidData;
         }
 
@@ -79,13 +86,16 @@ public sealed class PhoneExchanger(
                 request.FormattedAddress,
                 request.Location.Y,
                 request.Location.X,
-                matchPosition), ct);
+                matchPosition,
+                request.Description), ct);
             return ExchangeOutcome.RoutedToChat;
         }
 
         await whatsapp.SendTextAsync(clientPhone, FormatProviderResend(matchPosition, match.ServiceSlug, providerPhone), ct);
-        await whatsapp.SendTextAsync(providerPhone,
-            $"Client wants {match.ServiceSlug} ({clientPhone.Value}). Expect a message.", ct);
+        var providerMsg = RequestDetailsFormatter.AppendIfPresent(
+            $"Client wants {match.ServiceSlug} ({clientPhone.Value}). Expect a message.",
+            request.Description);
+        await whatsapp.SendTextAsync(providerPhone, providerMsg, ct);
         await events.PublishAsync(new ContactExchanged(match.Id, request.Id, request.ClientPhone, provider.Phone), ct);
         return ExchangeOutcome.Exchanged;
     }

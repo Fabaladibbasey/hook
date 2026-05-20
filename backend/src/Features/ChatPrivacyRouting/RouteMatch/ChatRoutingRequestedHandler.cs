@@ -3,6 +3,7 @@ using Hook.Features.ChatSession;
 using Hook.Features.ContactSharing.Events;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Pipeline.PostCommitSends;
+using Hook.Shared.Whatsapp;
 using Wolverine;
 using IMatchRepository = Hook.Features.Matching.MatchAggregate.IMatchRepository;
 
@@ -54,6 +55,7 @@ public sealed class ChatRoutingRequestedHandler(
         var providerBody = evt.ProviderConsented
             ? $"{match.ServiceSlug} client at {evt.RequesterAddress} ({mapsUrl}) prefers a private chat. Open: {links.ProviderUrl}"
             : $"{match.ServiceSlug} client at {evt.RequesterAddress} ({mapsUrl}) wants to chat. Open: {links.ProviderUrl}";
+        providerBody = RequestDetailsFormatter.AppendIfPresent(providerBody, evt.Description);
 
         if (PhoneNumber.TryParse(evt.ClientPhone, out var client))
             await bus.PublishAsync(new SendWhatsAppTextRequested(client, clientBody));

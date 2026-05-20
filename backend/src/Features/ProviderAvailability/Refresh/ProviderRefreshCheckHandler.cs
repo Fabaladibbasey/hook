@@ -28,12 +28,14 @@ public sealed class ProviderRefreshCheckHandler(
         var ctx = new ReplyContext(
             Purpose: "provider-availability-check",
             RecentTurns: [],
-            LanguageHint: "en",
-            Facts: new Dictionary<string, string>
+            LanguageHint: "en")
+        {
+            Facts = new Dictionary<string, string>
             {
                 ["services"] = string.Join(", ", provider.Services),
                 ["instruction"] = "Ask the provider whether they are still available. Mention they can reply YES to stay listed."
-            });
+            }
+        };
 
         var reply = await AiReplyHelper.TryGenerateAsync(ai, ctx, "provider_refresh", logger, ct);
         if (reply is null) return;

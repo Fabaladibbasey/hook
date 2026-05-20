@@ -12,4 +12,5 @@ public sealed record ChatRoutingRequested(
     string RequesterAddress,
     double RequesterLatitude,
     double RequesterLongitude,
-    int MatchPosition);
+    int MatchPosition,
+    string Description = "");
