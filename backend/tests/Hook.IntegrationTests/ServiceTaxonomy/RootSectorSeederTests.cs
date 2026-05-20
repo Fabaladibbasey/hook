@@ -1,5 +1,4 @@
 using Hook.Features.ServiceTaxonomy.SeedRoots;
-using Hook.Features.ServiceTaxonomy.ServiceAggregate;
 using Hook.Shared.Persistence.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;

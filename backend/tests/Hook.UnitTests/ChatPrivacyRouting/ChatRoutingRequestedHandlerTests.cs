@@ -5,7 +5,6 @@ using Hook.Features.ChatSession.ParticipantAggregate;
 using Hook.Features.ChatSession.SessionAggregate;
 using Hook.Features.ContactSharing.Events;
 using Hook.Features.Matching.MatchAggregate;
-using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Pipeline.PostCommitSends;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;

@@ -10,7 +10,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using Shouldly;
-using MatchEntity = Hook.Features.Matching.MatchAggregate.Match;
 
 namespace Hook.UnitTests.Matching;
 
@@ -132,7 +131,7 @@ public class MatchPresenterFactsShapeTests
     {
         var presenter = Build(cap: 100);
 
-        var batch = MakeBatchWith(scoredCount: 2, kind: Hook.Features.Matching.MatchAggregate.MatchKind.Broadened);
+        var batch = MakeBatchWith(scoredCount: 2, kind: Features.Matching.MatchAggregate.MatchKind.Broadened);
         await presenter.PresentAsync(PhoneNumber.Parse("+15550000001"), batch, "plumbing");
 
         using var doc = JsonDocument.Parse(_capturedFacts!["matches"]);
@@ -147,7 +146,7 @@ public class MatchPresenterFactsShapeTests
     {
         var presenter = Build(cap: 100);
 
-        var batch = MakeBatchWith(scoredCount: 2, kind: Hook.Features.Matching.MatchAggregate.MatchKind.Exact);
+        var batch = MakeBatchWith(scoredCount: 2, kind: Features.Matching.MatchAggregate.MatchKind.Exact);
         await presenter.PresentAsync(PhoneNumber.Parse("+15550000001"), batch, "plumbing");
 
         using var doc = JsonDocument.Parse(_capturedFacts!["matches"]);
@@ -177,7 +176,7 @@ public class MatchPresenterFactsShapeTests
             options: Options.Create(new MatchingOptions { TopMatchesPerBatch = cap }),
             logger: NullLogger<MatchPresenter>.Instance);
 
-    private static MatchBatch MakeBatchWith(int scoredCount, Hook.Features.Matching.MatchAggregate.MatchKind kind = Hook.Features.Matching.MatchAggregate.MatchKind.Exact)
+    private static MatchBatch MakeBatchWith(int scoredCount, Hook.Features.Matching.MatchAggregate.MatchKind kind = Features.Matching.MatchAggregate.MatchKind.Exact)
     {
         var scored = Enumerable.Range(0, scoredCount)
             .Select(i => new ScoredCandidate(

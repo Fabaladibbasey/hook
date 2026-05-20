@@ -1,6 +1,3 @@
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Hosting;
-
 namespace Hook.Shared.Security;
 
 internal static class SecurityHeadersMiddleware
