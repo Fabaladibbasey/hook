@@ -41,10 +41,10 @@ public class OllamaOptions
 
 public sealed class OllamaTaskBudgets
 {
-    public int Intent { get; init; } = 60;
-    public int Extract { get; init; } = 120;
-    public int Judge { get; init; } = 60;
-    public int Eta { get; init; } = 60;
-    public int Reply { get; init; } = 200;
-    public int Language { get; init; } = 30;
+    [System.ComponentModel.DataAnnotations.Range(1, 4096)] public int Intent { get; init; } = 60;
+    [System.ComponentModel.DataAnnotations.Range(1, 4096)] public int Extract { get; init; } = 120;
+    [System.ComponentModel.DataAnnotations.Range(1, 4096)] public int Judge { get; init; } = 60;
+    [System.ComponentModel.DataAnnotations.Range(1, 4096)] public int Eta { get; init; } = 60;
+    [System.ComponentModel.DataAnnotations.Range(1, 4096)] public int Reply { get; init; } = 200;
+    [System.ComponentModel.DataAnnotations.Range(1, 4096)] public int Language { get; init; } = 30;
 }
