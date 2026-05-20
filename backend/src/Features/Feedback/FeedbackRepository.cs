@@ -9,12 +9,12 @@ namespace Hook.Features.Feedback;
 public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
 {
     public Task<MatchFeedback?> GetLatestPendingForClientAsync(string clientPhone, CancellationToken ct = default) =>
-        db.MatchFeedback
-            .Where(f => f.Answer == FeedbackAnswer.Pending
-                && db.Matches.Any(m => m.Id == f.MatchId
-                    && db.ServiceRequests.Any(r => r.Id == m.RequestId && r.ClientPhone == clientPhone)))
-            .OrderByDescending(f => f.PromptedAt)
-            .FirstOrDefaultAsync(ct);
+        (from f in db.MatchFeedback
+         join m in db.Matches on f.MatchId equals m.Id
+         join r in db.ServiceRequests on m.RequestId equals r.Id
+         where f.Answer == FeedbackAnswer.Pending && r.ClientPhone == clientPhone
+         orderby f.PromptedAt descending
+         select f).FirstOrDefaultAsync(ct);
 
     public Task<MatchFeedback?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
         db.MatchFeedback.FirstOrDefaultAsync(f => f.Id == id, ct);
