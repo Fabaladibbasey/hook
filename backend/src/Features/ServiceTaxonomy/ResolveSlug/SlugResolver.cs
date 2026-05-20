@@ -1,6 +1,8 @@
 using Hook.Features.Ai;
 using Hook.Features.ServiceTaxonomy.JudgeParent;
 using Hook.Features.ServiceTaxonomy.ServiceAggregate;
+using Hook.Shared.Persistence.Data;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Wolverine;
 
@@ -11,8 +13,45 @@ public class SlugResolver(
     IConversationAi ai,
     IMessageBus bus,
     IOptions<ServiceTaxonomyOptions> options,
-    ILogger<SlugResolver> logger)
+    ILogger<SlugResolver> logger,
+    IDbContextFactory<HookDbContext>? dbFactory = null)
 {
+    private const int MaxBatchParallelism = 4;
+
+    public virtual async Task<IReadOnlyList<ResolveSlugResult>> ResolveBatchAsync(
+        IReadOnlyList<string> proposedSlugs,
+        string rawExample = "",
+        CancellationToken ct = default)
+    {
+        if (proposedSlugs.Count == 0) return [];
+        if (proposedSlugs.Count == 1 || dbFactory is null)
+        {
+            var sequential = new List<ResolveSlugResult>(proposedSlugs.Count);
+            foreach (var slug in proposedSlugs)
+                sequential.Add(await ResolveAsync(slug, rawExample, ct));
+            return sequential;
+        }
+
+        using var gate = new SemaphoreSlim(MaxBatchParallelism, MaxBatchParallelism);
+        var tasks = proposedSlugs.Select(async slug =>
+        {
+            await gate.WaitAsync(ct);
+            try { return await ResolveIsolatedAsync(slug, rawExample, ct); }
+            finally { gate.Release(); }
+        });
+        return await Task.WhenAll(tasks);
+    }
+
+    private async Task<ResolveSlugResult> ResolveIsolatedAsync(string proposedSlug, string rawExample, CancellationToken ct)
+    {
+        await using var db = await dbFactory!.CreateDbContextAsync(ct);
+        var perCallRepo = new ServiceRepository(db);
+        var perCallResolver = new SlugResolver(perCallRepo, ai, bus, options, logger);
+        var result = await perCallResolver.ResolveAsync(proposedSlug, rawExample, ct);
+        await db.SaveChangesAsync(ct);
+        return result;
+    }
+
     public virtual async Task<ResolveSlugResult> ResolveAsync(
         string proposedSlug,
         string rawExample = "",

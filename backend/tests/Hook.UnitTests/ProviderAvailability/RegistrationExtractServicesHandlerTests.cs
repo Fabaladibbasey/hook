@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
 using Hook.Features.ProviderAvailability.Register.AdvanceDraft;
@@ -27,8 +28,23 @@ public class RegistrationExtractServicesHandlerTests
             _aiMock.Object,
             _busMock.Object,
             Options.Create(new ServiceTaxonomyOptions()),
-            NullLogger<SlugResolver>.Instance)
+            NullLogger<SlugResolver>.Instance,
+            null!)
         { CallBase = false };
+        _slugResolverMock.Setup(x => x.ResolveBatchAsync(
+                It.IsAny<IReadOnlyList<string>>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (IReadOnlyList<string> slugs, string raw, CancellationToken ct) =>
+            {
+                using var gate = new SemaphoreSlim(4, 4);
+                var tasks = slugs.Select(async slug =>
+                {
+                    await gate.WaitAsync(ct);
+                    try { return await _slugResolverMock.Object.ResolveAsync(slug, raw, ct); }
+                    finally { gate.Release(); }
+                });
+                IReadOnlyList<ResolveSlugResult> results = await Task.WhenAll(tasks);
+                return results;
+            });
         _busMock.Setup(x => x.InvokeAsync(It.IsAny<AdvanceRegistrationDraft>(), It.IsAny<CancellationToken>(), It.IsAny<TimeSpan?>()))
             .Callback<object, CancellationToken, TimeSpan?>((m, _, _) => _invoked.Add((AdvanceRegistrationDraft)m))
             .Returns(Task.CompletedTask);
@@ -119,5 +135,39 @@ public class RegistrationExtractServicesHandlerTests
             _busMock.Object, cts.Token));
 
         _invoked.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Handle_MultipleSlugs_ResolvesInParallel()
+    {
+        string[] slugs = ["plumbing", "electrical", "carpentry", "tiling", "painting", "roofing", "welding", "masonry"];
+        _aiMock.Setup(x => x.ExtractServicesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ServiceExtractionResult(slugs));
+
+        var perSlugDelay = TimeSpan.FromMilliseconds(200);
+        foreach (var slug in slugs)
+        {
+            var captured = slug;
+            _slugResolverMock.Setup(x => x.ResolveAsync(captured, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns(async (string s, string _, CancellationToken ct) =>
+                {
+                    await Task.Delay(perSlugDelay, ct);
+                    return new ResolveSlugResult(s, SlugResolution.AutoMerged, 0.9);
+                });
+        }
+
+        var sw = Stopwatch.StartNew();
+        await Build().Handle(
+            new RegistrationExtractServicesRequested("+220300001", "I do everything", RegistrationExtractMode.NewRegistration),
+            _busMock.Object, CancellationToken.None);
+        sw.Stop();
+
+        _invoked.ShouldHaveSingleItem();
+        _invoked[0].CanonicalSlugs.ShouldBe(slugs);
+
+        // Sequential = 8 * 200ms = 1600ms. Bounded parallel (cap=4) = 2 batches = ~400ms.
+        // 900ms gives margin for CI scheduling noise.
+        sw.Elapsed.ShouldBeLessThan(TimeSpan.FromMilliseconds(900),
+            $"Resolution appears sequential: {sw.ElapsedMilliseconds}ms");
     }
 }
