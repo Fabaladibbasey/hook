@@ -82,6 +82,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish container
+        env:
+          VITE_SUPPORT_WHATSAPP: ${{ vars.VITE_SUPPORT_WHATSAPP }}
         run: |
           dotnet publish src/Hook.csproj \
             -c Release \
