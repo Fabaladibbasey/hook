@@ -14,6 +14,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Npgsql;
+using Polly;
+using Polly.Retry;
 using Testcontainers.PostgreSql;
 using Wolverine;
 
@@ -224,25 +226,38 @@ public sealed class DevPipelineFixture : IAsyncLifetime
         }
     }
 
+    private static readonly string[] WolverineTransactionalTables =
+    {
+        "wolverine.wolverine_incoming_envelopes",
+        "wolverine.wolverine_outgoing_envelopes",
+        "wolverine.wolverine_dead_letters"
+    };
+
+    // Combined TRUNCATE can still 40P01 against the Wolverine durability worker's
+    // bookkeeping tx. Bounded retry lets the worker's millisecond-scale tx clear,
+    // then TRUNCATE wins on the next attempt.
+    private static readonly ResiliencePipeline TruncateRetry = new ResiliencePipelineBuilder()
+        .AddRetry(new RetryStrategyOptions
+        {
+            ShouldHandle = new PredicateBuilder().Handle<PostgresException>(
+                ex => ex.SqlState == PostgresErrorCodes.DeadlockDetected),
+            MaxRetryAttempts = 3,
+            Delay = TimeSpan.FromMilliseconds(50),
+            BackoffType = DelayBackoffType.Exponential,
+        })
+        .Build();
+
     public async Task ResetAsync()
     {
         await using var scope = Factory.Services.CreateAsyncScope();
         var ctx = scope.ServiceProvider.GetRequiredService<HookDbContext>();
 
         _truncateSql ??= "TRUNCATE TABLE "
-            + string.Join(", ", AllTransactionalTables(ctx).Distinct())
+            + string.Join(", ", AllTransactionalTables(ctx).Concat(WolverineTransactionalTables).Distinct())
             + " RESTART IDENTITY CASCADE;";
-        await ctx.Database.ExecuteSqlRawAsync(_truncateSql);
 
-        // Wolverine creates the schema during host build (before any ResetAsync call),
-        // so the unconditional TRUNCATE is safe — no IF EXISTS guard needed.
-        await ctx.Database.ExecuteSqlRawAsync("""
-            TRUNCATE TABLE
-                wolverine.wolverine_incoming_envelopes,
-                wolverine.wolverine_outgoing_envelopes,
-                wolverine.wolverine_dead_letters
-            RESTART IDENTITY CASCADE;
-            """);
+        await TruncateRetry.ExecuteAsync(
+            async ct => await ctx.Database.ExecuteSqlRawAsync(_truncateSql, ct));
 
         var seeder = scope.ServiceProvider.GetRequiredService<DevProviderSeeder>();
         await seeder.SeedAsync();

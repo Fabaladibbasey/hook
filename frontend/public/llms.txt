@@ -1,0 +1,16 @@
+# Hook
+
+> Hook connects you with nearby service providers in The Gambia through WhatsApp. Secure end-to-end-encrypted chat, no app to install.
+
+Hook is a WhatsApp-funnel platform. Clients describe a service need over WhatsApp, the bot matches them with nearby providers, and the parties continue on either WhatsApp directly or a browser-based end-to-end-encrypted chat room. The web surface is intentionally minimal — the funnel lives in WhatsApp; the website hosts only the landing page, ephemeral chat sessions, and legal documents.
+
+## Public pages
+
+- [Landing page](https://hook.drop.africa/): explains the service and links to the WhatsApp entry point.
+- [Terms of Service](https://hook.drop.africa/terms): user agreement and acceptable-use policy.
+- [Privacy Policy](https://hook.drop.africa/privacy): data handling, retention, and end-to-end-encryption details.
+
+## Not for crawling
+
+- `/c/:chatId/:token`: ephemeral end-to-end-encrypted chat rooms. Tokens are single-use and the content is unreadable to the server. Do not crawl.
+- `/dev`: internal development console. Do not crawl.

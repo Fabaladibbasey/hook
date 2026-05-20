@@ -100,7 +100,7 @@ Wolverine messaging runs in-process. `Wolverine.DefaultExecutionTimeout` (defaul
 - `/` — landing page (post-WhatsApp link target).
 - `/c/:chatId/:token` — ephemeral E2E chat room.
 - `/dev` — dev console (WhatsApp simulation).
-- `/terms`, `/privacy` — legal pages, lazy-loaded; `RETENTION_DAYS` literal lives in `frontend/src/legal/RetentionDays.ts` and `SUPPORT_EMAIL` is driven by `VITE_SUPPORT_EMAIL`.
+- `/terms`, `/privacy` — legal pages, lazy-loaded; `RETENTION_DAYS` literal lives in `frontend/src/legal/RetentionDays.ts` and `SUPPORT_WHATSAPP` (digits-only E.164) is driven by `VITE_SUPPORT_WHATSAPP` — contact links render as `https://wa.me/<digits>`.
 
 ## Style Principles
 

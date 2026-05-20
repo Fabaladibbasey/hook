@@ -24,6 +24,8 @@ using Hook.Shared.Domain;
 using Hook.Shared.Persistence;
 using Hook.Shared.Persistence.Data;
 using Hook.Shared.Retention;
+using Hook.Shared.Security;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Serilog;
@@ -89,20 +91,33 @@ try
     builder.Services.AddReverseProxy()
         .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
 
+    // Caddy re-honours Content-Encoding upstream rather than re-compressing.
+    builder.Services.AddResponseCompression(opts =>
+    {
+        opts.EnableForHttps = true;
+        opts.Providers.Add<BrotliCompressionProvider>();
+        opts.Providers.Add<GzipCompressionProvider>();
+        opts.MimeTypes =
+        [
+            "text/html",
+            "text/css",
+            "text/plain",
+            "text/xml",
+            "application/javascript",
+            "application/xml",
+            "image/svg+xml",
+        ];
+    });
+
     builder.Services.AddGlobalRateLimiter(builder.Configuration);
 
     builder.Services.AddProblemDetails();
     builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
-    // Dev default so the Step1 feedback prompt surfaces in minutes instead of the
-    // 30-minute production cadence during local hacking. Step2 is now published
-    // immediately on Step1=Yes (Pillar A — no separate delay knob), so only Step1
-    // is overridden here. Devs can still override via env or appsettings.Development.json.
+    // Dev override so the Step1 feedback prompt surfaces in minutes instead of the
+    // 30-minute production cadence during local hacking.
     if (builder.Environment.IsDevelopment())
     {
-        // IsNullOrWhiteSpace catches the (admittedly unlikely) "   " case as well as
-        // truly-unset; keeping the dev override to a 2-min cadence so the prompt
-        // fires inside a single hacking session.
         if (string.IsNullOrWhiteSpace(builder.Configuration["Feedback:Step1InitialDelay"]))
             builder.Configuration["Feedback:Step1InitialDelay"] = "00:02:00";
     }
@@ -171,12 +186,10 @@ try
         app.UseForwardedHeaders(ForwardedHeadersConfigurator.Build(builder.Configuration));
     }
 
-    // Token-in-URL pattern leaks via Referer; strip referrer on all responses.
-    app.Use(async (ctx, next) =>
-    {
-        ctx.Response.Headers["Referrer-Policy"] = "no-referrer";
-        await next();
-    });
+    // Full baseline of response security headers (CSP, HSTS in prod, frame/COOP/etc.)
+    // also covers the Referrer-Policy strip needed for the token-in-URL chat pattern.
+    app.UseSecurityHeaders(app.Environment);
+    app.UseResponseCompression();
     app.UseExceptionHandler();
     app.UseObservability();
     app.UseRateLimiter();
@@ -216,7 +229,22 @@ try
     app.MapChat();
     app.MapReverseProxy();
     app.UseDefaultFiles();
-    app.UseStaticFiles();
+    // Cache content-hashed /assets forever; force revalidation on everything at the root.
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        OnPrepareResponse = ctx =>
+        {
+            var path = ctx.Context.Request.Path.Value ?? string.Empty;
+            if (path.StartsWith("/assets/", StringComparison.OrdinalIgnoreCase))
+            {
+                ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=31536000, immutable";
+            }
+            else
+            {
+                ctx.Context.Response.Headers["Cache-Control"] = "no-cache";
+            }
+        }
+    });
     app.MapHub<ChatHub>(ChatHubConstants.HubPath);
     app.MapFallbackToFile("index.html");
 

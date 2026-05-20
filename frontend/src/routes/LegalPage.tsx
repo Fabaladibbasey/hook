@@ -2,14 +2,6 @@ import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
 import LegalFooter from "../components/LegalFooter";
 
-const env = (import.meta.env.VITE_SUPPORT_EMAIL as string | undefined)?.trim();
-export const SUPPORT_EMAIL = env && env.length > 0 ? env : "support@example.invalid";
-
-if (SUPPORT_EMAIL.endsWith(".invalid")) {
-  // eslint-disable-next-line no-console
-  console.warn("VITE_SUPPORT_EMAIL is unset; Privacy/Terms show a placeholder.");
-}
-
 export default function LegalPage({
   title,
   effective,
@@ -24,7 +16,7 @@ export default function LegalPage({
       <header className="border-b border-slate-200 px-4 py-3">
         <div className="mx-auto flex max-w-3xl items-center gap-3">
           <Link to="/" className="flex items-center gap-2">
-            <img src="/hook-logo.png" alt="Hook" className="h-8 w-auto rounded" />
+            <img src="/hook-logo.svg" alt="Hook" width={32} height={32} className="rounded" />
             <span className="text-lg font-semibold">Hook</span>
           </Link>
           <span className="ml-auto text-sm text-slate-500">

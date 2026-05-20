@@ -4,7 +4,6 @@ using Hook.Features.Feedback.Step1Prompt;
 using Hook.Features.Geocoding.Models;
 using Hook.Features.Matching.MatchAggregate;
 using Hook.Features.ServiceRequest.RequestAggregate;
-using Hook.Features.Whatsapp.Phone;
 using Moq;
 using Wolverine;
 using MatchEntity = Hook.Features.Matching.MatchAggregate.Match;

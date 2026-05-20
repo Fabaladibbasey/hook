@@ -1,18 +1,14 @@
-import LegalPage, { SUPPORT_EMAIL } from "./LegalPage";
+import LegalPage from "./LegalPage";
+import { WhatsAppContact } from "../legal/SupportContact";
 import { RETENTION_DAYS_LABEL } from "../legal/RetentionDays";
-
-const supportMailto = `mailto:${SUPPORT_EMAIL}`;
+import { LEGAL_EFFECTIVE_DATE } from "../legal/EffectiveDate";
 
 export default function Privacy() {
   return (
-    <LegalPage title="Privacy Policy" effective="2026-05-06">
+    <LegalPage title="Privacy Policy" effective={LEGAL_EFFECTIVE_DATE}>
       <p>
         This policy describes what information Hook (“Hook”, “we”, “us”) collects, how we use it,
-        and the choices you have. Contact:{" "}
-        <a href={supportMailto}>
-          <code>{SUPPORT_EMAIL}</code>
-        </a>
-        .
+        and the choices you have. Contact us on WhatsApp: <WhatsAppContact />.
       </p>
 
       <h2 id="section-1">1. What we collect</h2>
@@ -196,19 +192,14 @@ export default function Privacy() {
         </li>
         <li>
           <strong>Early deletion request</strong> — in addition to the automatic schedule in
-          Section 6, you can ask us to delete any of your data sooner by emailing{" "}
-          <a href={supportMailto}>
-            <code>{SUPPORT_EMAIL}</code>
-          </a>{" "}
-          from the WhatsApp number tied to your data. We will delete it across all live tables;
+          Section 6, you can ask us to delete any of your data sooner by sending{" "}
+          <code>DELETE</code> on WhatsApp to <WhatsAppContact /> from the phone number tied to
+          your data. We will delete it across all live tables;
           backups rotate out within 14 days.
         </li>
         <li>
-          <strong>Access and correction</strong> — email{" "}
-          <a href={supportMailto}>
-            <code>{SUPPORT_EMAIL}</code>
-          </a>{" "}
-          for a copy of your data or to correct an inaccuracy.
+          <strong>Access and correction</strong> — message <WhatsAppContact /> on WhatsApp for a
+          copy of your data or to correct an inaccuracy.
         </li>
         <li>
           <strong>Local data</strong> — clearing your browser storage deletes your chat keypair;
@@ -225,11 +216,8 @@ export default function Privacy() {
       <h2 id="section-10">10. Children</h2>
       <p>
         Hook is not directed at children under 13. We do not knowingly collect data from children.
-        If you believe a minor has used the Service, contact{" "}
-        <a href={supportMailto}>
-          <code>{SUPPORT_EMAIL}</code>
-        </a>
-        .
+        If you believe a minor has used the Service, message us on WhatsApp at{" "}
+        <WhatsAppContact />.
       </p>
 
       <h2 id="section-11">11. Cookies and local storage</h2>
@@ -244,11 +232,7 @@ export default function Privacy() {
 
       <h2 id="section-13">13. Contact</h2>
       <p>
-        Questions or requests:{" "}
-        <a href={supportMailto}>
-          <code>{SUPPORT_EMAIL}</code>
-        </a>
-        .
+        Questions or requests — message us on WhatsApp: <WhatsAppContact />.
       </p>
     </LegalPage>
   );

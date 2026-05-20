@@ -1,5 +1,4 @@
 using Hook.Features.ChatLifecycle.EndChat;
-using Hook.Features.ChatSession;
 using Hook.Features.ChatSession.SessionAggregate;
 using Hook.Shared.Pipeline.PostCommitSends;
 using Shouldly;
