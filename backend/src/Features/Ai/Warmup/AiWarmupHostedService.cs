@@ -4,14 +4,20 @@ namespace Hook.Features.Ai.Warmup;
 // hit finds the 10s cache warm. Detached Task.Run keeps Kestrel from blocking
 // on Ollama cold-start (20-30s for qwen2.5:3b on CPU). StopAsync grants the inner
 // task a short grace period to cancel cleanly so the scope is not disposed mid-await.
+// WarmupCompletion lets Program.cs gate Kestrel bind on a bounded wait so the first
+// inbound after deploy does not race the model cold-load.
 public sealed class AiWarmupHostedService(
     IServiceProvider services,
     IHostApplicationLifetime appLifetime,
     ILogger<AiWarmupHostedService> logger) : IHostedService
 {
     private static readonly TimeSpan StopGrace = TimeSpan.FromSeconds(5);
+    private readonly TaskCompletionSource _warmupCompletion =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
     private CancellationTokenSource? _linkedCts;
     private Task? _runner;
+
+    public Task WarmupCompletion => _warmupCompletion.Task;
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
@@ -34,6 +40,10 @@ public sealed class AiWarmupHostedService(
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "AI warm-up probe failed");
+            }
+            finally
+            {
+                _warmupCompletion.TrySetResult();
             }
         }, ct);
         return Task.CompletedTask;

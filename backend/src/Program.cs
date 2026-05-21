@@ -98,7 +98,8 @@ try
     builder.Services.AddMetaTemplates();
     builder.Services.AddObservability();
 
-    builder.Services.AddHostedService<AiWarmupHostedService>();
+    builder.Services.AddSingleton<AiWarmupHostedService>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<AiWarmupHostedService>());
     if (builder.Environment.IsDevelopment() || builder.Environment.IsStaging())
     {
         builder.Services.AddHostedService<DevProviderSeederHostedService>();
@@ -267,7 +268,18 @@ try
     app.MapHub<ChatHub>(ChatHubConstants.HubPath);
     app.MapFallbackToFile("index.html");
 
-    await app.RunAsync();
+    await app.StartAsync();
+
+    {
+        var warmup = app.Services.GetRequiredService<AiWarmupHostedService>();
+        var completed = await Task.WhenAny(warmup.WarmupCompletion, Task.Delay(TimeSpan.FromSeconds(15)));
+        if (completed != warmup.WarmupCompletion)
+        {
+            app.Logger.LogWarning("AI warmup did not complete within 15s — starting anyway, /readyz will gate.");
+        }
+    }
+
+    await app.WaitForShutdownAsync();
 }
 catch (Exception ex) when (ex is not HostAbortedException)
 {
