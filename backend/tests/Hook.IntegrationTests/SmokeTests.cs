@@ -21,7 +21,7 @@ public sealed class HookAppFixture : IAsyncLifetime
         .WithPassword("hook")
         .Build();
 
-    public WebApplicationFactory<global::Hook.Program> Factory { get; private set; } = default!;
+    public WebApplicationFactory<Program> Factory { get; private set; } = default!;
 
     public async Task InitializeAsync()
     {

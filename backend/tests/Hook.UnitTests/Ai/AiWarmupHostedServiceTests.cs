@@ -17,7 +17,7 @@ public sealed class AiWarmupHostedServiceTests
         var services = new ServiceCollection();
         services.AddSingleton(aiMock.Object);
         services.AddSingleton(TimeProvider.System);
-        services.AddSingleton<IOptions<OllamaOptions>>(Options.Create(new OllamaOptions()));
+        services.AddSingleton(Options.Create(new OllamaOptions()));
         services.AddLogging();
         services.AddScoped<AiReadinessProbe>();
         return services.BuildServiceProvider();
@@ -36,8 +36,9 @@ public sealed class AiWarmupHostedServiceTests
     {
         var ai = new Mock<IConversationAi>();
         ai.Setup(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Hook.Features.Ai.Models.IntentDetectionResult(Hook.Features.Ai.Models.IntentKind.ServiceRequest, 1.0, "en", "ok"));
+            .ReturnsAsync(new Features.Ai.Models.IntentDetectionResult(Hook.Features.Ai.Models.IntentKind.ServiceRequest, 1.0, "en", "ok"));
         var svc = new AiWarmupHostedService(BuildProvider(ai), new FakeLifetime(),
+            Options.Create(new OllamaOptions()),
             NullLogger<AiWarmupHostedService>.Instance);
 
         await svc.StartAsync(default);
@@ -54,6 +55,7 @@ public sealed class AiWarmupHostedServiceTests
         ai.Setup(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("simulated ollama down"));
         var svc = new AiWarmupHostedService(BuildProvider(ai), new FakeLifetime(),
+            Options.Create(new OllamaOptions()),
             NullLogger<AiWarmupHostedService>.Instance);
 
         await svc.StartAsync(default);
@@ -72,9 +74,10 @@ public sealed class AiWarmupHostedServiceTests
             .Returns(async (string _, CancellationToken token) =>
             {
                 await Task.Delay(Timeout.Infinite, token);
-                return default(Hook.Features.Ai.Models.IntentDetectionResult)!;
+                return default(Features.Ai.Models.IntentDetectionResult)!;
             });
         var svc = new AiWarmupHostedService(BuildProvider(ai), new FakeLifetime(),
+            Options.Create(new OllamaOptions()),
             NullLogger<AiWarmupHostedService>.Instance);
 
         await svc.StartAsync(default);

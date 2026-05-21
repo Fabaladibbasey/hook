@@ -58,7 +58,7 @@ public sealed class DevPipelineFixture : IAsyncLifetime
         };
     }
 
-    public WebApplicationFactory<global::Hook.Program> Factory { get; private set; } = default!;
+    public WebApplicationFactory<Program> Factory { get; private set; } = default!;
 
     public async Task InitializeAsync()
     {
@@ -124,7 +124,7 @@ public sealed class DevPipelineFixture : IAsyncLifetime
             MaxPoolSize = 20
         }.ConnectionString;
 
-        Factory = new WebApplicationFactory<global::Hook.Program>()
+        Factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(b =>
             {
                 b.UseEnvironment("Test");

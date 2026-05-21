@@ -27,7 +27,7 @@ public class HookDbContext(DbContextOptions<HookDbContext> options) : DbContext(
     public DbSet<ServiceRequest> ServiceRequests => Set<ServiceRequest>();
     public DbSet<ClientRequestDraft> ClientRequestDrafts => Set<ClientRequestDraft>();
     public DbSet<Match> Matches => Set<Match>();
-    public DbSet<Hook.Features.ChatSession.SessionAggregate.ChatSession> ChatSessions => Set<Hook.Features.ChatSession.SessionAggregate.ChatSession>();
+    public DbSet<ChatSession> ChatSessions => Set<ChatSession>();
     public DbSet<ChatParticipant> ChatParticipants => Set<ChatParticipant>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<ChatAccessLog> ChatAccessLogs => Set<ChatAccessLog>();

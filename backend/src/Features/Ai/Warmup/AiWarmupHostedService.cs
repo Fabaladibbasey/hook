@@ -1,14 +1,21 @@
+using System.Diagnostics;
+using Microsoft.Extensions.Options;
+
 namespace Hook.Features.Ai.Warmup;
 
-// Fires AiReadinessProbe in the background at startup so the first real /readyz
-// hit finds the 10s cache warm. Detached Task.Run keeps Kestrel from blocking
-// on Ollama cold-start (20-30s for qwen2.5:3b on CPU). StopAsync grants the inner
-// task a short grace period to cancel cleanly so the scope is not disposed mid-await.
+// Fires a single DetectIntentAsync call against Ollama in the background at startup
+// so the first user-visible inbound finds the model already loaded. Detached Task.Run
+// keeps Kestrel from blocking on Ollama's 20-30s cold-load (qwen2.5:3b on CPU).
+// Bypasses the /readyz probe deliberately: that probe runs on a strict 2s budget,
+// far too tight to cover a cold model load. Warmup uses the full HttpClient
+// TimeoutSeconds budget so it does not give up before Ollama finishes loading.
 // WarmupCompletion lets Program.cs gate Kestrel bind on a bounded wait so the first
-// inbound after deploy does not race the model cold-load.
+// inbound after deploy does not race the model cold-load. StopAsync grants the inner
+// task a short grace period to cancel cleanly so the scope is not disposed mid-await.
 public sealed class AiWarmupHostedService(
     IServiceProvider services,
     IHostApplicationLifetime appLifetime,
+    IOptions<OllamaOptions> options,
     ILogger<AiWarmupHostedService> logger) : IHostedService
 {
     private static readonly TimeSpan StopGrace = TimeSpan.FromSeconds(5);
@@ -24,22 +31,31 @@ public sealed class AiWarmupHostedService(
         _linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken, appLifetime.ApplicationStopping);
         var ct = _linkedCts.Token;
+        var budget = TimeSpan.FromSeconds(Math.Max(1, options.Value.TimeoutSeconds));
 
         _runner = Task.Run(async () =>
         {
+            using var budgetCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            budgetCts.CancelAfter(budget);
+            var sw = Stopwatch.StartNew();
             try
             {
                 await using var scope = services.CreateAsyncScope();
-                var probe = scope.ServiceProvider.GetRequiredService<AiReadinessProbe>();
-                var result = await probe.ProbeAsync(ct);
+                var ai = scope.ServiceProvider.GetRequiredService<IConversationAi>();
+                _ = await ai.DetectIntentAsync("ping", budgetCts.Token);
                 logger.LogInformation(
-                    "AI warm-up probe complete healthy={Healthy} error={Error}",
-                    result.Healthy, result.Error);
+                    "AI warm-up complete after {ElapsedMs} ms", sw.ElapsedMilliseconds);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+            catch (OperationCanceledException)
+            {
+                logger.LogWarning(
+                    "AI warm-up did not finish within {BudgetSeconds}s; first inbound may pay cold-start tax",
+                    budget.TotalSeconds);
+            }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "AI warm-up probe failed");
+                logger.LogWarning(ex, "AI warm-up failed");
             }
             finally
             {

@@ -392,7 +392,7 @@ public sealed class InboundRouterHandler(
                             nameof(outcome), outcome, "Unhandled ExchangeOutcome — extend the switch.");
                 }
             }
-            catch (Npgsql.PostgresException ex) when (IsTransientPostgres(ex.SqlState))
+            catch (PostgresException ex) when (IsTransientPostgres(ex.SqlState))
             {
                 logger.LogWarning(ex, "Transient Postgres failure during PhoneExchanger for match {MatchId}", p.Match.Id);
                 transientFail++;

@@ -117,9 +117,9 @@ public sealed class FeedbackDispatchPipelineTests : PipelineTestBase
         // the row's MatchId is the same one that ranked first in MatchRepository.
         await using var winnerScope = _fx.Factory.Services.CreateAsyncScope();
         var winnerCtx = winnerScope.ServiceProvider.GetRequiredService<HookDbContext>();
-        var clientReq = await winnerCtx.Set<Hook.Features.ServiceRequest.RequestAggregate.ServiceRequest>()
+        var clientReq = await winnerCtx.Set<Features.ServiceRequest.RequestAggregate.ServiceRequest>()
             .FirstAsync(r => r.ClientPhone == clientPhone);
-        var picked = await winnerCtx.Set<Hook.Features.Matching.MatchAggregate.Match>()
+        var picked = await winnerCtx.Set<Features.Matching.MatchAggregate.Match>()
             .Where(m => m.RequestId == clientReq.Id && m.PickedAt != null)
             .OrderByDescending(m => m.Score)
             .ThenBy(m => m.DistanceKm)

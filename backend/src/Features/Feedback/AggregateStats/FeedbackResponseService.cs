@@ -249,7 +249,7 @@ public sealed class FeedbackResponseService(
         return EtaKeywordRegex.IsMatch(text);
     }
 
-    private async Task<IReadOnlyList<Hook.Features.Matching.MatchAggregate.Match>> GetPickedMatchesAsync(Guid anchorMatchId, CancellationToken ct)
+    private async Task<IReadOnlyList<Matching.MatchAggregate.Match>> GetPickedMatchesAsync(Guid anchorMatchId, CancellationToken ct)
     {
         var anchor = await matches.GetAsync(anchorMatchId, ct);
         if (anchor is null) return [];

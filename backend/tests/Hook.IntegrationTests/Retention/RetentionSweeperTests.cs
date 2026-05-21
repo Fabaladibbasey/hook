@@ -47,6 +47,7 @@ public sealed class RetentionSweeperTests : PipelineTestBase
         {
             Enabled = true,
             RetentionDays = configured.RetentionDays,
+            DeadLetterRetentionDays = configured.DeadLetterRetentionDays,
             SweepInterval = configured.SweepInterval,
             StartupDelay = configured.StartupDelay
         });
@@ -69,7 +70,7 @@ public sealed class RetentionSweeperTests : PipelineTestBase
         // EF model — it is swept via raw SQL. Exempt that one key from the EF-mapped check.
         var rawSweeps = new HashSet<string>(StringComparer.Ordinal)
         {
-            RetentionTableKeys.WolverineDeadLetterQueue,
+            RetentionTableKeys.WolverineDeadLetters,
         };
 
         foreach (var key in result.DeletedByTable.Keys)
@@ -307,6 +308,48 @@ public sealed class RetentionSweeperTests : PipelineTestBase
             // If the cascade sweeper failed mid-test, force-delete the seeded session so
             // the shared fixture container does not leak rows into later tests.
             await db.ChatSessions.Where(s => s.Id == session.Id).ExecuteDeleteAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Sweep_DeletesExpiredWolverineDeadLetter_KeepsRecent()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var opts = scope.ServiceProvider.GetRequiredService<IOptions<RetentionOptions>>().Value;
+        var ancient = DateTimeOffset.UtcNow - TimeSpan.FromDays(opts.DeadLetterRetentionDays + 2);
+        var fresh = DateTimeOffset.UtcNow - TimeSpan.FromHours(1);
+
+        var oldId = Guid.NewGuid();
+        var freshId = Guid.NewGuid();
+        const string Insert =
+            "INSERT INTO wolverine.wolverine_dead_letters (id, message_type, body, received_at) " +
+            "VALUES ({0}, 'TestMsg', E'\\\\x00', {1})";
+        await db.Database.ExecuteSqlRawAsync(Insert, oldId, ancient);
+        await db.Database.ExecuteSqlRawAsync(Insert, freshId, fresh);
+
+        try
+        {
+            var sweeper = Resolve(scope.ServiceProvider);
+            var result = await sweeper.RunOnceAsync(CancellationToken.None);
+
+            Assert.True(result.DeletedByTable[RetentionTableKeys.WolverineDeadLetters] >= 1,
+                "Expected ancient DLQ row to be deleted (must not be -1, which signals SQL error).");
+
+            var oldStill = await db.Database
+                .SqlQueryRaw<int>("SELECT 1 AS \"Value\" FROM wolverine.wolverine_dead_letters WHERE id = {0}", oldId)
+                .AnyAsync();
+            var freshStill = await db.Database
+                .SqlQueryRaw<int>("SELECT 1 AS \"Value\" FROM wolverine.wolverine_dead_letters WHERE id = {0}", freshId)
+                .AnyAsync();
+            Assert.False(oldStill, "ancient DLQ row should be swept");
+            Assert.True(freshStill, "recent DLQ row should survive");
+        }
+        finally
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "DELETE FROM wolverine.wolverine_dead_letters WHERE id IN ({0}, {1})",
+                oldId, freshId);
         }
     }
 
