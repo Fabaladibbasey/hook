@@ -4,7 +4,7 @@ using System.Text;
 using Hook.Shared.Persistence.Data;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 using Shouldly;
 using Testcontainers.PostgreSql;
 
@@ -27,9 +27,20 @@ public sealed class HookAppFixture : IAsyncLifetime
     {
         await Db.StartAsync();
 
+        // Pre-apply migrations on a standalone DbContext before the host boots —
+        // Program.cs only verifies the schema head and refuses to start with pending
+        // migrations. Mirrors the prod model where deploys migrate out-of-band.
+        var connectionString = Db.GetConnectionString();
+        var opts = new DbContextOptionsBuilder<HookDbContext>()
+            .UseNpgsql(connectionString, npgsql => npgsql.UseNetTopologySuite())
+            .Options;
+        await using (var migrateCtx = new HookDbContext(opts))
+        {
+            await migrateCtx.Database.MigrateAsync();
+        }
+
         // Per-Factory UseSetting so this fixture can run in parallel with
         // DevPipelineFixture shards without racing on process-wide env vars.
-        var connectionString = Db.GetConnectionString();
         Factory = new WebApplicationFactory<global::Hook.Program>()
             .WithWebHostBuilder(b =>
             {
@@ -43,10 +54,17 @@ public sealed class HookAppFixture : IAsyncLifetime
                 b.UseSetting("Wolverine:Durable", "false");
             });
 
-        // Force host build & create schema from current model.
-        using var scope = Factory.Services.CreateScope();
-        var ctx = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-        await ctx.Database.EnsureCreatedAsync();
+        // Shared with DevPipelineFixture so concurrent host builds across fixtures
+        // don't race on Serilog's ReloadableLogger.Freeze().
+        await DevPipelineFixture.HostInitLock.WaitAsync();
+        try
+        {
+            _ = Factory.Services;
+        }
+        finally
+        {
+            DevPipelineFixture.HostInitLock.Release();
+        }
     }
 
     public async Task DisposeAsync()

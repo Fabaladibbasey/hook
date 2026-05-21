@@ -181,12 +181,19 @@ try
     var app = builder.Build();
 
     {
-        // Migration + root taxonomy seed are data-integrity preconditions — keep
-        // these awaited. Dev provider seeding + AI warm-up moved to hosted services
-        // so they don't block Kestrel bind.
+        // Migrations are applied out-of-band (CI deploy step, or `dotnet ef database
+        // update` locally). At boot we only verify the schema head — running the full
+        // MigrateAsync scan/apply on every cold start blocked Kestrel bind for hundreds
+        // of ms with 50+ migrations. Fail fast so a missed deploy step is loud.
         await using var scope = app.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-        await db.Database.MigrateAsync();
+        var pending = (await db.Database.GetPendingMigrationsAsync()).ToList();
+        if (pending.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Pending migrations not applied: {string.Join(", ", pending)}. " +
+                "Run `dotnet ef database update` before starting the host.");
+        }
 
         var rootSeeder = scope.ServiceProvider.GetRequiredService<RootSectorSeeder>();
         await rootSeeder.EnsureRootSectorsAsync();

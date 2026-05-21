@@ -21,6 +21,9 @@ cd backend && dotnet test --configuration Release --no-build
 # Format
 cd backend && dotnet format
 
+# Apply pending EF migrations (host no longer auto-migrates at boot — fails fast if pending)
+cd backend && dotnet tool restore && dotnet ef database update --project src/Hook.csproj
+
 # Run dev backend (binds :5212)
 cd backend/src && dotnet run
 
