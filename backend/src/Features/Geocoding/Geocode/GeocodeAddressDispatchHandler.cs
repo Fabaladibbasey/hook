@@ -31,10 +31,10 @@ public sealed class GeocodeAddressDispatchHandler(
         switch (evt.Flow)
         {
             case GeocodeFlow.Client:
-                await bus.InvokeAsync(new ApplyGeocodeResultClient(evt.Phone, result), ct);
+                await bus.InvokeAsync(new ApplyGeocodeResultClient(evt.Phone, result, evt.DraftStampedAt), ct);
                 return;
             case GeocodeFlow.Provider:
-                await bus.InvokeAsync(new ApplyGeocodeResultProvider(evt.Phone, result), ct);
+                await bus.InvokeAsync(new ApplyGeocodeResultProvider(evt.Phone, result, evt.DraftStampedAt), ct);
                 return;
             default:
                 throw new ArgumentOutOfRangeException(nameof(evt), evt.Flow, "Unknown GeocodeFlow");

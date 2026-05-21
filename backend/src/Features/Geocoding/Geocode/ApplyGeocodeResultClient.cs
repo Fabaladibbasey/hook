@@ -6,7 +6,11 @@ using Wolverine;
 
 namespace Hook.Features.Geocoding.Geocode;
 
-public sealed record ApplyGeocodeResultClient(string Phone, GeocodeResult Result, string Reserved = "");
+public sealed record ApplyGeocodeResultClient(
+    string Phone,
+    GeocodeResult Result,
+    DateTimeOffset DraftStampedAt = default,
+    string Reserved = "");
 
 public sealed class ApplyGeocodeResultClientHandler(
     IClientRequestDraftRepository drafts,
@@ -19,6 +23,20 @@ public sealed class ApplyGeocodeResultClientHandler(
         if (draft is null) return;
 
         if (!PhoneNumber.TryParse(evt.Phone, out var phone)) return;
+
+        // Stamp guard: a CANCEL+restart sequence can land the user back at
+        // AwaitingLocation on a NEW draft while the original Google round-trip
+        // is still in flight; without this the stale coordinates apply to the
+        // new draft. evt.DraftStampedAt = draft.UpdatedAt at publish time.
+        // 1µs tolerance absorbs Postgres timestamptz truncation; the CANCEL+restart
+        // race is many seconds wide so the tolerance does not collapse the guard.
+        if (evt.DraftStampedAt != default
+            && Math.Abs((draft.UpdatedAt - evt.DraftStampedAt).Ticks) > 10)
+        {
+            logger.LogDebug("Stale geocode apply for {Phone}; draft restamped at {Now} vs envelope {Then}",
+                phone.Mask(), draft.UpdatedAt, evt.DraftStampedAt);
+            return;
+        }
 
         if (draft.Step is not (ClientRequestStep.AwaitingLocation or ClientRequestStep.ConfirmLocation))
         {

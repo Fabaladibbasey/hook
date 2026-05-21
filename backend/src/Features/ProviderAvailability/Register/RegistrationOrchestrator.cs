@@ -277,7 +277,7 @@ public sealed class RegistrationOrchestrator(
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
                 "Looking up that address — one sec…"));
             await bus.PublishAsync(new GeocodeAddressRequested(
-                phone.Value, message.Text!, GeocodeFlow.Provider));
+                phone.Value, message.Text!, GeocodeFlow.Provider, DraftStampedAt: draft.UpdatedAt));
             return;
         }
 

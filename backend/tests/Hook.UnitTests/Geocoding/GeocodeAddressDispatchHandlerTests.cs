@@ -93,6 +93,22 @@ public class GeocodeAddressDispatchHandlerTests
     }
 
     [Fact]
+    public async Task Handle_GeocodeSucceeds_ForwardsDraftStampedAt_OnApplyEnvelope()
+    {
+        var result = new GeocodeResult(new Location(13.4549, -16.5790), "Banjul, The Gambia", "static-dev", FromCache: false);
+        _geocoderMock.Setup(x => x.GeocodeAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(result);
+        var stamp = new DateTimeOffset(2026, 5, 21, 9, 0, 0, TimeSpan.Zero);
+
+        await Build().Handle(
+            new GeocodeAddressRequested("+2207000001", "Banjul", GeocodeFlow.Client, DraftStampedAt: stamp),
+            _busMock.Object, CancellationToken.None);
+
+        var apply = _invoked[0].ShouldBeOfType<ApplyGeocodeResultClient>();
+        apply.DraftStampedAt.ShouldBe(stamp);
+    }
+
+    [Fact]
     public async Task Handle_UnparseablePhone_NoOp()
     {
         await Build().Handle(

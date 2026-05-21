@@ -188,7 +188,7 @@ public sealed class ClientRequestOrchestrator(
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
                 "Looking up that address — one sec…"));
             await bus.PublishAsync(new GeocodeAddressRequested(
-                phone.Value, message.Text!, GeocodeFlow.Client));
+                phone.Value, message.Text!, GeocodeFlow.Client, DraftStampedAt: draft.UpdatedAt));
             return;
         }
 
