@@ -13,16 +13,28 @@ public static class AiReplyHelper
         @"^\s*(i'?m sorry,?\s+(but\s+)?(i\s+)?(can'?t|cannot)|sorry,?\s+(but\s+)?(i\s+)?(can'?t|cannot)|i\s+(can'?t|cannot)\s+(assist|help|do)|as an ai|i'?m (just )?an ai)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    // Drop-on-failure callers (Step1/Step2 feedback, provider-refresh) cap inference
+    // at 30s so a slow Ollama doesn't pin a Wolverine handler for the full 150s
+    // execution budget — failure here just drops the message.
+    public static readonly TimeSpan NonCriticalReplyTimeout = TimeSpan.FromSeconds(30);
+
     public static async Task<string?> TryGenerateAsync(
         IConversationAi ai,
         ReplyContext ctx,
         string stage,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        TimeSpan? perCallTimeout = null)
     {
+        using var aiCts = perCallTimeout.HasValue
+            ? CancellationTokenSource.CreateLinkedTokenSource(ct)
+            : null;
+        aiCts?.CancelAfter(perCallTimeout!.Value);
+        var aiToken = aiCts?.Token ?? ct;
+
         try
         {
-            var reply = await ai.GenerateReplyAsync(ctx, ct);
+            var reply = await ai.GenerateReplyAsync(ctx, aiToken);
             if (string.IsNullOrWhiteSpace(reply))
             {
                 logger.LogWarning("AI returned blank reply for stage {Stage}", stage);
@@ -52,6 +64,15 @@ public static class AiReplyHelper
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
+        }
+        catch (OperationCanceledException) when (aiCts?.IsCancellationRequested == true)
+        {
+            logger.LogWarning("AI reply timed out after {Timeout}s for stage {Stage}; dropping",
+                perCallTimeout!.Value.TotalSeconds, stage);
+            HookMetrics.AiOutboundDropped.Add(1,
+                new KeyValuePair<string, object?>("stage", stage),
+                new KeyValuePair<string, object?>("reason", "timeout"));
+            return null;
         }
         catch (Exception ex)
         {

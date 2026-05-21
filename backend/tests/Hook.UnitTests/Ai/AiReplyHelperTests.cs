@@ -58,6 +58,23 @@ public class AiReplyHelperTests
             AiReplyHelper.TryGenerateAsync(_aiMock.Object, Ctx, "test", NullLogger.Instance, cts.Token));
     }
 
+    [Fact]
+    public async Task TryGenerateAsync_ShouldReturnNull_WhenPerCallTimeoutElapses()
+    {
+        _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
+            .Returns(async (ReplyContext _, CancellationToken token) =>
+            {
+                await Task.Delay(Timeout.Infinite, token);
+                return "never";
+            });
+
+        var result = await AiReplyHelper.TryGenerateAsync(
+            _aiMock.Object, Ctx, "test", NullLogger.Instance, CancellationToken.None,
+            perCallTimeout: TimeSpan.FromMilliseconds(50));
+
+        result.ShouldBeNull();
+    }
+
     [Theory]
     [InlineData("I'm sorry, but I can't assist with that.")]
     [InlineData("I cannot help with that request.")]
