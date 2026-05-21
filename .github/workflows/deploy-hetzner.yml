@@ -140,3 +140,24 @@ jobs:
           done
           echo "healthz never returned 200" >&2
           exit 1
+
+      - name: Diagnose on smoke failure
+        if: failure()
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PROD_SSH_HOST }}
+          username: ${{ secrets.PROD_SSH_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          port: ${{ secrets.PROD_SSH_PORT || 22 }}
+          script: |
+            set +e
+            echo "===== caddy env (HOOK_DOMAIN / LOGS_DOMAIN) ====="
+            docker exec hook-caddy printenv | grep -E '^(HOOK_DOMAIN|LOGS_DOMAIN|ACME_EMAIL)=' || true
+            echo "===== caddy logs (tail 200) ====="
+            docker logs --tail 200 hook-caddy 2>&1 || true
+            echo "===== caddy cert directory ====="
+            docker exec hook-caddy ls -laR /data/caddy/certificates 2>&1 | head -80 || true
+            echo "===== api logs (tail 100) ====="
+            docker logs --tail 100 hook-api 2>&1 || true
+            echo "===== local /healthz from host ====="
+            curl -kv --max-time 10 https://localhost/healthz 2>&1 | tail -40 || true
