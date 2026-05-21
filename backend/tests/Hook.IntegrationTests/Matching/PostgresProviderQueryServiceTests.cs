@@ -107,6 +107,55 @@ public sealed class PostgresProviderQueryServiceTests : PipelineTestBase
     }
 
     [Fact]
+    public async Task FindCandidates_MultiBranch_PerBranchLimitFloor_PreservesTopK()
+    {
+        // Per-branch K is now max(50, MaxK / branchCount). With 4 branches and the
+        // default MaxK=200, per-branch K = max(50, 50) = 50. Seed 60 per branch so
+        // each branch is over the per-branch limit; verify the merge still produces
+        // the globally-closest MaxK.
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var query = scope.ServiceProvider.GetRequiredService<IProviderQueryService>();
+        var maxK = scope.ServiceProvider.GetRequiredService<IOptions<MatchingOptions>>().Value.MaxCandidatePoolSize;
+
+        var slugs = new[]
+        {
+            $"mb-req-{Guid.NewGuid():N}",
+            $"mb-par-{Guid.NewGuid():N}",
+            $"mb-ch1-{Guid.NewGuid():N}",
+            $"mb-ch2-{Guid.NewGuid():N}",
+        };
+        var now = DateTimeOffset.UtcNow;
+        var requestLocation = new Location(DevPipelineFixture.SeedRefLat, DevPipelineFixture.SeedRefLng);
+
+        // 60 distinct phones per branch, interleaved so the global top-MaxK is a
+        // mix from every branch (not concentrated in one). Each provider gets one
+        // slug from the four (no cross-branch overlap), so GroupBy(Phone).First()
+        // is exercised but dedup is not the focus here.
+        const int perBranchCount = 60;
+        var totalRows = perBranchCount * slugs.Length;
+        for (var i = 0; i < totalRows; i++)
+        {
+            var slug = slugs[i % slugs.Length];
+            var phone = $"+220720{i:D5}";
+            var northKm = 0.05 + i * 0.01;
+            db.ProviderAvailabilities.Add(ProviderAvailability.Register(
+                phone, [slug],
+                new Location(requestLocation.Latitude + northKm * LatDegPerKm, requestLocation.Longitude),
+                "Banjul", shareContact: true, ttl: TimeSpan.FromHours(1), now));
+        }
+        await db.SaveChangesAsync();
+
+        var expanded = new ExpandedSlugs(slugs[0], slugs[1], [slugs[2], slugs[3]]);
+        var result = await query.FindCandidatesAsync(
+            requestLocation.ToPoint(), expanded, radiusKm: 50, excludePhones: [], now);
+
+        result.Count.ShouldBe(maxK);
+        var distances = result.Select(r => r.Candidate.DistanceKm).ToList();
+        distances.ShouldBe(distances.OrderBy(d => d).ToList());
+    }
+
+    [Fact]
     public async Task FindCandidates_DedupesProviderListedUnderMultipleBranches()
     {
         await using var scope = _fx.Factory.Services.CreateAsyncScope();

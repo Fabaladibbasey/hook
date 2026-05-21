@@ -24,7 +24,11 @@ public sealed class PostgresProviderQueryService(
         var radiusMeters = radiusKm * 1000.0;
         var excludeArray = excludePhones as string[] ?? excludePhones.ToArray();
         var opts = options.Value;
-        var perBranchLimit = opts.MaxCandidatePoolSize;
+        // Per-branch K is sized so the cross-branch merge has enough candidates to
+        // fill MaxCandidatePoolSize without over-fetching N × MaxK rows on a wide
+        // hierarchy expansion. Floor of 50 keeps the GiST KNN useful for tight
+        // single-branch queries where MaxK / 1 would otherwise equal MaxK.
+        var perBranchLimit = Math.Max(50, opts.MaxCandidatePoolSize / Math.Max(slugs.All.Count, 1));
 
         // Per-slug branches each push `ORDER BY <-> + LIMIT K` into the plan so the
         // GiST KNN scan trims to K rows BEFORE transport, then merge top-K
@@ -40,7 +44,7 @@ public sealed class PostgresProviderQueryService(
         var rows = branchResults
             .SelectMany(b => b)
             .GroupBy(r => r.Phone, StringComparer.Ordinal)
-            .Select(g => g.MinBy(r => r.DistanceMeters)!)
+            .Select(g => g.OrderBy(r => r.DistanceMeters).ThenBy(r => r.Phone, StringComparer.Ordinal).First())
             .OrderBy(r => r.DistanceMeters)
             .Take(opts.MaxCandidatePoolSize)
             .ToList();
