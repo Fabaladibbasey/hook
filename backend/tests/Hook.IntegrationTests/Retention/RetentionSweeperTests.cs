@@ -322,11 +322,14 @@ public sealed class RetentionSweeperTests : PipelineTestBase
 
         var oldId = Guid.NewGuid();
         var freshId = Guid.NewGuid();
-        // sent_at is the timestamptz axis the sweeper compares against;
-        // received_at is a varchar holding the listener URI and is irrelevant here.
+        // sent_at is the timestamptz axis the sweeper compares against.
+        // received_at is a varchar listener-URI column and a NOT NULL component of the
+        // composite PK (id, received_at) — a constant stub keeps each row unique via its
+        // fresh id while still satisfying the NOT NULL.
         const string Insert =
-            "INSERT INTO wolverine.wolverine_dead_letters (id, message_type, body, sent_at) " +
-            "VALUES ({0}, 'TestMsg', E'\\\\x00', {1})";
+            "INSERT INTO wolverine.wolverine_dead_letters " +
+            "(id, message_type, body, received_at, sent_at) " +
+            "VALUES ({0}, 'TestMsg', E'\\\\x00', 'local://retention-test', {1})";
         await db.Database.ExecuteSqlRawAsync(Insert, oldId, ancient);
         await db.Database.ExecuteSqlRawAsync(Insert, freshId, fresh);
 
