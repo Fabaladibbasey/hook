@@ -28,6 +28,7 @@ using Hook.Shared.Retention;
 using Hook.Shared.Security;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Serilog;
 using Wolverine;
 using Wolverine.EntityFrameworkCore;
@@ -52,13 +53,34 @@ try
     var connectionString = builder.Configuration.GetConnectionString("HookDb")
         ?? throw new InvalidOperationException("Connection string 'HookDb' is not configured.");
 
+    // Single NpgsqlDataSource shared by EF (scoped + factory) and Wolverine so
+    // pool bounds + NetTopologySuite mapping apply uniformly. Default pool min=0
+    // makes cold-start pay connection-establishment for the first concurrent
+    // burst — pin min=5 / max=50 (matches RateLimit:WebhookConcurrencyLimit) so
+    // the pool is sized for steady-state and a saturated webhook limiter does
+    // not queue on connection establishment. Defaults are only applied when the
+    // caller has not pinned them explicitly in the connection string, so test
+    // shards that scope down (MaxPoolSize=20 per DevPipelineFixture) retain
+    // their override.
+    var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
+    if (!dataSourceBuilder.ConnectionStringBuilder.ContainsKey("Minimum Pool Size"))
+        dataSourceBuilder.ConnectionStringBuilder.MinPoolSize = 5;
+    if (!dataSourceBuilder.ConnectionStringBuilder.ContainsKey("Maximum Pool Size"))
+        dataSourceBuilder.ConnectionStringBuilder.MaxPoolSize = 50;
+    dataSourceBuilder.UseNetTopologySuite();
+    var dataSource = dataSourceBuilder.Build();
+    builder.Services.AddSingleton(dataSource);
+
     // AddDbContextWithWolverineIntegration installs a model customizer that
     // requires Wolverine.RDBMS.DatabaseSettings in DI — paired with
     // PersistMessagesWithPostgresql in the UseWolverine block so every
     // environment (including tests) gets the EF transactional outbox.
     // Per-test isolation relies on each fixture using its own Postgres database.
+    // The EF-side npgsql.UseNetTopologySuite() registers the EF model
+    // mapping for Point -> geography(Point,4326); the data-source-side
+    // UseNetTopologySuite registers the underlying Npgsql type info resolver.
     builder.Services.AddDbContextWithWolverineIntegration<HookDbContext>(options =>
-        options.UseNpgsql(connectionString, npgsql =>
+        options.UseNpgsql(dataSource, npgsql =>
         {
             npgsql.UseNetTopologySuite();
             npgsql.MigrationsAssembly(typeof(HookDbContext).Assembly.GetName().Name);
@@ -68,7 +90,7 @@ try
     // the scoped HookDbContext is reserved for tracked entities + the Wolverine
     // handler tx and can't run concurrent operations.
     builder.Services.AddDbContextFactory<HookDbContext>(options =>
-        options.UseNpgsql(connectionString, npgsql =>
+        options.UseNpgsql(dataSource, npgsql =>
         {
             npgsql.UseNetTopologySuite();
             npgsql.MigrationsAssembly(typeof(HookDbContext).Assembly.GetName().Name);
@@ -165,7 +187,9 @@ try
 
         // Durable outbox in every environment so scheduled messages survive
         // restarts and handler commits stay atomic with outgoing envelopes.
-        opts.PersistMessagesWithPostgresql(connectionString, schemaName: WolverineConfig.Schema);
+        // Share the EF data source so Wolverine pulls connections from the
+        // same pinned pool (no parallel pool with default min=0 / max=100).
+        opts.PersistMessagesWithPostgresql(dataSource, schemaName: WolverineConfig.Schema);
         // Promote in-process local queues to durable so [NonTransactional] handlers
         // (Ollama AI stages) survive a crash between bus.PublishAsync and the inner
         // commit. Without this, locally-routed envelopes live only in memory.
