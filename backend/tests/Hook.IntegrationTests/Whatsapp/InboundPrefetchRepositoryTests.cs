@@ -21,22 +21,52 @@ public sealed class InboundPrefetchRepositoryTests : PipelineTestBase
     private static string UniquePhone() => $"+220{Guid.NewGuid().ToString("N")[..8]}";
 
     [Fact]
-    public async Task GetAllAsync_EmptyState_ReturnsAllNull()
+    public async Task GetRegistrationDraftAsync_EmptyState_ReturnsNull()
     {
         await using var scope = _fx.Factory.Services.CreateAsyncScope();
         var prefetch = scope.ServiceProvider.GetRequiredService<InboundPrefetchRepository>();
 
-        var pre = await prefetch.GetAllAsync(UniquePhone(), default);
-
-        pre.RegistrationDraft.ShouldBeNull();
-        pre.ClientDraft.ShouldBeNull();
-        pre.AmbiguousDraft.ShouldBeNull();
-        pre.PendingFeedback.ShouldBeNull();
-        pre.ActiveRequest.ShouldBeNull();
+        (await prefetch.GetRegistrationDraftAsync(UniquePhone(), default)).ShouldBeNull();
     }
 
     [Fact]
-    public async Task GetAllAsync_AllFiveBucketsSeeded_AllPopulate()
+    public async Task GetClientDraftAsync_EmptyState_ReturnsNull()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var prefetch = scope.ServiceProvider.GetRequiredService<InboundPrefetchRepository>();
+
+        (await prefetch.GetClientDraftAsync(UniquePhone(), default)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task GetAmbiguousDraftAsync_EmptyState_ReturnsNull()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var prefetch = scope.ServiceProvider.GetRequiredService<InboundPrefetchRepository>();
+
+        (await prefetch.GetAmbiguousDraftAsync(UniquePhone(), default)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task GetPendingFeedbackAsync_EmptyState_ReturnsNull()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var prefetch = scope.ServiceProvider.GetRequiredService<InboundPrefetchRepository>();
+
+        (await prefetch.GetPendingFeedbackAsync(UniquePhone(), default)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task GetActiveRequestAsync_EmptyState_ReturnsNull()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var prefetch = scope.ServiceProvider.GetRequiredService<InboundPrefetchRepository>();
+
+        (await prefetch.GetActiveRequestAsync(UniquePhone(), default)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task AllMethods_AllBucketsSeeded_AllPopulate()
     {
         var phone = UniquePhone();
         var now = DateTimeOffset.UtcNow;
@@ -66,20 +96,22 @@ public sealed class InboundPrefetchRepositoryTests : PipelineTestBase
 
         await using var scope = _fx.Factory.Services.CreateAsyncScope();
         var prefetch = scope.ServiceProvider.GetRequiredService<InboundPrefetchRepository>();
-        var pre = await prefetch.GetAllAsync(phone, default);
 
-        pre.RegistrationDraft.ShouldNotBeNull();
-        pre.ClientDraft.ShouldNotBeNull();
-        pre.AmbiguousDraft.ShouldNotBeNull();
-        pre.AmbiguousDraft!.OriginalText.ShouldBe("ambiguous original");
-        pre.PendingFeedback.ShouldNotBeNull();
-        pre.PendingFeedback!.Step.ShouldBe(FeedbackStep.DidYouFind);
-        pre.ActiveRequest.ShouldNotBeNull();
-        pre.ActiveRequest!.ServiceSlug.ShouldBe("plumbing");
+        (await prefetch.GetRegistrationDraftAsync(phone, default)).ShouldNotBeNull();
+        (await prefetch.GetClientDraftAsync(phone, default)).ShouldNotBeNull();
+        var ambig = await prefetch.GetAmbiguousDraftAsync(phone, default);
+        ambig.ShouldNotBeNull();
+        ambig!.OriginalText.ShouldBe("ambiguous original");
+        var pf = await prefetch.GetPendingFeedbackAsync(phone, default);
+        pf.ShouldNotBeNull();
+        pf!.Step.ShouldBe(FeedbackStep.DidYouFind);
+        var active = await prefetch.GetActiveRequestAsync(phone, default);
+        active.ShouldNotBeNull();
+        active!.ServiceSlug.ShouldBe("plumbing");
     }
 
     [Fact]
-    public async Task GetAllAsync_OnlyPendingFeedback_OthersStayNull()
+    public async Task GetPendingFeedbackAsync_OnlyPendingFeedback_OthersStayNull()
     {
         var phone = UniquePhone();
         var now = DateTimeOffset.UtcNow;
@@ -102,17 +134,16 @@ public sealed class InboundPrefetchRepositoryTests : PipelineTestBase
 
         await using var scope = _fx.Factory.Services.CreateAsyncScope();
         var prefetch = scope.ServiceProvider.GetRequiredService<InboundPrefetchRepository>();
-        var pre = await prefetch.GetAllAsync(phone, default);
 
-        pre.RegistrationDraft.ShouldBeNull();
-        pre.ClientDraft.ShouldBeNull();
-        pre.AmbiguousDraft.ShouldBeNull();
-        pre.ActiveRequest.ShouldBeNull();
-        pre.PendingFeedback.ShouldNotBeNull();
+        (await prefetch.GetRegistrationDraftAsync(phone, default)).ShouldBeNull();
+        (await prefetch.GetClientDraftAsync(phone, default)).ShouldBeNull();
+        (await prefetch.GetAmbiguousDraftAsync(phone, default)).ShouldBeNull();
+        (await prefetch.GetActiveRequestAsync(phone, default)).ShouldBeNull();
+        (await prefetch.GetPendingFeedbackAsync(phone, default)).ShouldNotBeNull();
     }
 
     [Fact]
-    public async Task GetAllAsync_AnsweredFeedback_NotReturned()
+    public async Task GetPendingFeedbackAsync_AnsweredFeedback_NotReturned()
     {
         var phone = UniquePhone();
         var now = DateTimeOffset.UtcNow;
@@ -136,14 +167,13 @@ public sealed class InboundPrefetchRepositoryTests : PipelineTestBase
 
         await using var scope = _fx.Factory.Services.CreateAsyncScope();
         var prefetch = scope.ServiceProvider.GetRequiredService<InboundPrefetchRepository>();
-        var pre = await prefetch.GetAllAsync(phone, default);
 
-        pre.PendingFeedback.ShouldBeNull();
-        pre.ActiveRequest.ShouldNotBeNull();
+        (await prefetch.GetPendingFeedbackAsync(phone, default)).ShouldBeNull();
+        (await prefetch.GetActiveRequestAsync(phone, default)).ShouldNotBeNull();
     }
 
     [Fact]
-    public async Task GetAllAsync_ActiveRequestIsTracked_CloseAndSaveChangesPersists()
+    public async Task GetActiveRequestAsync_IsTracked_CloseAndSaveChangesPersists()
     {
         var phone = UniquePhone();
         var now = DateTimeOffset.UtcNow;
@@ -165,11 +195,11 @@ public sealed class InboundPrefetchRepositoryTests : PipelineTestBase
             var prefetch = scope.ServiceProvider.GetRequiredService<InboundPrefetchRepository>();
             var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
 
-            var pre = await prefetch.GetAllAsync(phone, default);
-            pre.ActiveRequest.ShouldNotBeNull();
-            requestId = pre.ActiveRequest!.Id;
+            var active = await prefetch.GetActiveRequestAsync(phone, default);
+            active.ShouldNotBeNull();
+            requestId = active!.Id;
 
-            pre.ActiveRequest.Close();
+            active.Close();
             await db.SaveChangesAsync();
         }
 
@@ -181,12 +211,12 @@ public sealed class InboundPrefetchRepositoryTests : PipelineTestBase
     }
 
     [Fact]
-    public async Task GetAllAsync_PrefetchedDrafts_AreDetached_ChatSessionStaysTracked()
+    public async Task PrefetchedDrafts_AreDetached_ActiveRequestStaysTracked()
     {
-        // Drafts are AsNoTracking (read-only by callers). The ActiveRequest is
-        // tracked on the scoped context because the router calls .Close() and
-        // relies on Wolverine AutoApplyTransactions SaveChanges to persist that
-        // mutation.
+        // Drafts + pending feedback are AsNoTracking (read-only by callers).
+        // The ActiveRequest is tracked on the scoped context because the router
+        // calls .Close() and relies on Wolverine AutoApplyTransactions SaveChanges
+        // to persist that mutation.
         var phone = UniquePhone();
         var now = DateTimeOffset.UtcNow;
         await using (var seed = _fx.Factory.Services.CreateAsyncScope())
@@ -205,16 +235,20 @@ public sealed class InboundPrefetchRepositoryTests : PipelineTestBase
         await using var scope = _fx.Factory.Services.CreateAsyncScope();
         var prefetch = scope.ServiceProvider.GetRequiredService<InboundPrefetchRepository>();
         var db2 = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-        var pre = await prefetch.GetAllAsync(phone, default);
 
-        db2.Entry(pre.RegistrationDraft!).State.ShouldBe(EntityState.Detached);
-        db2.Entry(pre.ClientDraft!).State.ShouldBe(EntityState.Detached);
-        db2.Entry(pre.AmbiguousDraft!).State.ShouldBe(EntityState.Detached);
-        db2.Entry(pre.ActiveRequest!).State.ShouldBe(EntityState.Unchanged);
+        var reg = await prefetch.GetRegistrationDraftAsync(phone, default);
+        var client = await prefetch.GetClientDraftAsync(phone, default);
+        var ambig = await prefetch.GetAmbiguousDraftAsync(phone, default);
+        var active = await prefetch.GetActiveRequestAsync(phone, default);
+
+        db2.Entry(reg!).State.ShouldBe(EntityState.Detached);
+        db2.Entry(client!).State.ShouldBe(EntityState.Detached);
+        db2.Entry(ambig!).State.ShouldBe(EntityState.Detached);
+        db2.Entry(active!).State.ShouldBe(EntityState.Unchanged);
     }
 
     [Fact]
-    public async Task GetAllAsync_OnlyMatchesOnClientPhone_OtherClientsExcluded()
+    public async Task AllMethods_OnlyMatchOnClientPhone_OtherClientsExcluded()
     {
         var phoneA = UniquePhone();
         var phoneB = UniquePhone();
@@ -241,12 +275,11 @@ public sealed class InboundPrefetchRepositoryTests : PipelineTestBase
 
         await using var scope = _fx.Factory.Services.CreateAsyncScope();
         var prefetch = scope.ServiceProvider.GetRequiredService<InboundPrefetchRepository>();
-        var pre = await prefetch.GetAllAsync(phoneA, default);
 
-        pre.RegistrationDraft.ShouldBeNull();
-        pre.ClientDraft.ShouldBeNull();
-        pre.AmbiguousDraft.ShouldBeNull();
-        pre.PendingFeedback.ShouldBeNull();
-        pre.ActiveRequest.ShouldBeNull();
+        (await prefetch.GetRegistrationDraftAsync(phoneA, default)).ShouldBeNull();
+        (await prefetch.GetClientDraftAsync(phoneA, default)).ShouldBeNull();
+        (await prefetch.GetAmbiguousDraftAsync(phoneA, default)).ShouldBeNull();
+        (await prefetch.GetPendingFeedbackAsync(phoneA, default)).ShouldBeNull();
+        (await prefetch.GetActiveRequestAsync(phoneA, default)).ShouldBeNull();
     }
 }

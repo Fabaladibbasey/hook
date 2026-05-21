@@ -322,8 +322,10 @@ public sealed class RetentionSweeperTests : PipelineTestBase
 
         var oldId = Guid.NewGuid();
         var freshId = Guid.NewGuid();
+        // sent_at is the timestamptz axis the sweeper compares against;
+        // received_at is a varchar holding the listener URI and is irrelevant here.
         const string Insert =
-            "INSERT INTO wolverine.wolverine_dead_letters (id, message_type, body, received_at) " +
+            "INSERT INTO wolverine.wolverine_dead_letters (id, message_type, body, sent_at) " +
             "VALUES ({0}, 'TestMsg', E'\\\\x00', {1})";
         await db.Database.ExecuteSqlRawAsync(Insert, oldId, ancient);
         await db.Database.ExecuteSqlRawAsync(Insert, freshId, fresh);

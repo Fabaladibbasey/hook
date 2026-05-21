@@ -93,9 +93,9 @@ public sealed class InboundRouterHandler(
         // detection happens only on the no-active-draft path below.
         var hint = QuickIntent.DetectIntentHint(text);
 
-        var pre = await prefetch.GetAllAsync(phone, ct);
-
-        if (pre.RegistrationDraft is not null)
+        // Lazy lookups in the order the router consumes them — first hit short-circuits
+        // and avoids the remaining RTTs. Happy-path "active registration draft" is one RTT.
+        if (await prefetch.GetRegistrationDraftAsync(phone, ct) is not null)
         {
             // Cross-flow switch: provider mid-registration sends a strong service-request
             // hint ("I need …", "my X is broken", "no power"). Discard the reg draft and
@@ -114,7 +114,7 @@ public sealed class InboundRouterHandler(
             return;
         }
 
-        if (pre.ClientDraft is not null)
+        if (await prefetch.GetClientDraftAsync(phone, ct) is not null)
         {
             // Cross-flow switch: client mid-request sends a strong provider-registration
             // hint ("I'm a plumber", "I offer carpentry"). Discard client draft and route
@@ -132,16 +132,17 @@ public sealed class InboundRouterHandler(
             return;
         }
 
-        if (await TryResolveAmbiguousAsync(msg, pre.AmbiguousDraft, text, masked, ct)) return;
+        var ambiguousDraft = await prefetch.GetAmbiguousDraftAsync(phone, ct);
+        if (await TryResolveAmbiguousAsync(msg, ambiguousDraft, text, masked, ct)) return;
 
-        if (pre.PendingFeedback is { } pendingFeedback)
+        if (await prefetch.GetPendingFeedbackAsync(phone, ct) is { } pendingFeedback)
         {
             logger.LogDebug("Route → FeedbackResponseService (pending feedback) for {Phone}", masked);
             await feedbackService.HandleAsync(msg, pendingFeedback, ct);
             return;
         }
 
-        var activeRequest = pre.ActiveRequest;
+        var activeRequest = await prefetch.GetActiveRequestAsync(phone, ct);
 
         if (activeRequest is not null && PickProviderResolver.IsPickIntent(text))
         {

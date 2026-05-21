@@ -109,8 +109,8 @@ public sealed class PostgresProviderQueryServiceTests : PipelineTestBase
     [Fact]
     public async Task FindCandidates_MultiBranch_PerBranchLimitFloor_PreservesTopK()
     {
-        // Per-branch K is now max(50, MaxK / branchCount). With 4 branches and the
-        // default MaxK=200, per-branch K = max(50, 50) = 50. Seed 60 per branch so
+        // Per-branch K is now max(25, MaxK / branchCount). With 4 branches and the
+        // default MaxK=200, per-branch K = max(25, 50) = 50. Seed 60 per branch so
         // each branch is over the per-branch limit; verify the merge still produces
         // the globally-closest MaxK.
         await using var scope = _fx.Factory.Services.CreateAsyncScope();
@@ -153,6 +153,64 @@ public sealed class PostgresProviderQueryServiceTests : PipelineTestBase
         result.Count.ShouldBe(maxK);
         var distances = result.Select(r => r.Candidate.DistanceKm).ToList();
         distances.ShouldBe(distances.OrderBy(d => d).ToList());
+    }
+
+    [Fact]
+    public async Task FindCandidates_BranchCountExceedsCap_TruncatesPreservingRequestedFirst()
+    {
+        // 1 requested + 1 parent + 20 children → 22 branches. MaxBranchCount=8 caps
+        // fanout to (requested, parent, first 6 children). Providers attached to the
+        // un-fanned-out children must NOT appear in the result.
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var query = scope.ServiceProvider.GetRequiredService<IProviderQueryService>();
+        var cap = scope.ServiceProvider.GetRequiredService<IOptions<MatchingOptions>>().Value.MaxBranchCount;
+        cap.ShouldBe(8);
+
+        var requestedSlug = $"trunc-req-{Guid.NewGuid():N}";
+        var parentSlug = $"trunc-par-{Guid.NewGuid():N}";
+        var children = Enumerable.Range(0, 20)
+            .Select(i => $"trunc-ch{i:D2}-{Guid.NewGuid():N}")
+            .ToList();
+
+        var now = DateTimeOffset.UtcNow;
+        var requestLocation = new Location(DevPipelineFixture.SeedRefLat, DevPipelineFixture.SeedRefLng);
+
+        var phoneByBranch = new Dictionary<string, string>(StringComparer.Ordinal);
+        var branchOrder = new List<string> { requestedSlug, parentSlug };
+        branchOrder.AddRange(children);
+        for (var i = 0; i < branchOrder.Count; i++)
+        {
+            var slug = branchOrder[i];
+            var phone = $"+22073{i:D6}";
+            var northKm = 0.05 + i * 0.05;
+            db.ProviderAvailabilities.Add(ProviderAvailability.Register(
+                phone, [slug],
+                new Location(requestLocation.Latitude + northKm * LatDegPerKm, requestLocation.Longitude),
+                "Banjul", shareContact: true, ttl: TimeSpan.FromHours(1), now));
+            phoneByBranch[slug] = phone;
+        }
+        await db.SaveChangesAsync();
+
+        var expanded = new ExpandedSlugs(requestedSlug, parentSlug, children);
+        var result = await query.FindCandidatesAsync(
+            requestLocation.ToPoint(), expanded, radiusKm: 50, excludePhones: [], now);
+
+        var resultPhones = result.Select(r => r.Candidate.Phone).ToHashSet(StringComparer.Ordinal);
+
+        // 8 in-cap branches: requested + parent + first 6 children.
+        var keptBranches = new List<string> { requestedSlug, parentSlug };
+        keptBranches.AddRange(children.Take(cap - 2));
+        foreach (var slug in keptBranches)
+        {
+            resultPhones.ShouldContain(phoneByBranch[slug], $"in-cap branch {slug} missing");
+        }
+
+        // Children beyond the cap must NOT be queried — their providers are absent.
+        foreach (var slug in children.Skip(cap - 2))
+        {
+            resultPhones.ShouldNotContain(phoneByBranch[slug], $"truncated branch {slug} leaked");
+        }
     }
 
     [Fact]

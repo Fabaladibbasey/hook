@@ -57,9 +57,12 @@ public sealed class RetentionSweeper(
             // their JSON body may include user text + unmasked phone for AI-stage envelopes.
             // Schema is a code const, not user input — must be concatenated, not parameterized,
             // since Postgres rejects parameters in identifier position (42601).
+            // NOTE: Wolverine's `received_at` is the listener address URI (varchar) — not a
+            // timestamp. `sent_at` (timestamptz) is the actual envelope send time and the
+            // right axis for retention.
             (RetentionTableKeys.WolverineDeadLetters,
                 () => db.Database.ExecuteSqlRawAsync(
-                    $"DELETE FROM {WolverineConfig.Schema}.{RetentionTableKeys.WolverineDeadLetters} WHERE received_at < {{0}}",
+                    $"DELETE FROM {WolverineConfig.Schema}.{RetentionTableKeys.WolverineDeadLetters} WHERE sent_at < {{0}}",
                     [dlqCutoff], ct)),
         };
 

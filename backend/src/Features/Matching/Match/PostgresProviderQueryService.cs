@@ -24,11 +24,19 @@ public sealed class PostgresProviderQueryService(
         var radiusMeters = radiusKm * 1000.0;
         var excludeArray = excludePhones as string[] ?? excludePhones.ToArray();
         var opts = options.Value;
+        // Truncate runaway branch fanout (root sector with many children) while
+        // preserving the Requested → Parent? → Children priority order baked into
+        // ExpandedSlugs.All.
+        var branches = slugs.All.Count <= opts.MaxBranchCount
+            ? slugs.All
+            : slugs.All.Take(opts.MaxBranchCount).ToList();
+
         // Per-branch K is sized so the cross-branch merge has enough candidates to
         // fill MaxCandidatePoolSize without over-fetching N × MaxK rows on a wide
-        // hierarchy expansion. Floor of 50 keeps the GiST KNN useful for tight
-        // single-branch queries where MaxK / 1 would otherwise equal MaxK.
-        var perBranchLimit = Math.Max(50, opts.MaxCandidatePoolSize / Math.Max(slugs.All.Count, 1));
+        // hierarchy expansion. Floor of 25 keeps the GiST KNN useful for tight
+        // single-branch queries where MaxK / 1 would otherwise equal MaxK; at the
+        // MaxBranchCount cap of 8 with MaxK=200 the per-branch falls naturally to 25.
+        var perBranchLimit = Math.Max(25, opts.MaxCandidatePoolSize / branches.Count);
 
         // Per-slug branches each push `ORDER BY <-> + LIMIT K` into the plan so the
         // GiST KNN scan trims to K rows BEFORE transport, then merge top-K
@@ -36,7 +44,7 @@ public sealed class PostgresProviderQueryService(
         // sort memory before applying the outer Take. Parallel branches use the
         // factory ctx — the scoped HookDbContext is reserved for the Wolverine
         // handler tx and cannot multiplex.
-        var branchTasks = slugs.All.Select(slug => RunBranchAsync(
+        var branchTasks = branches.Select(slug => RunBranchAsync(
             slug, requestLocation, radiusMeters, excludeArray, now, perBranchLimit, ct));
 
         var branchResults = await Task.WhenAll(branchTasks);

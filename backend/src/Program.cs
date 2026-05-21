@@ -88,9 +88,10 @@ try
             npgsql.MigrationsAssembly(typeof(HookDbContext).Assembly.GetName().Name);
         }));
 
-    // Factory for InboundPrefetchRepository's parallel read-only lookups —
-    // the scoped HookDbContext is reserved for tracked entities + the Wolverine
-    // handler tx and can't run concurrent operations.
+    // Factory for read-only parallel reads (PostgresProviderQueryService branch
+    // fan-in, SlugResolver.ResolveBatchAsync isolated paths) — the scoped
+    // HookDbContext is reserved for tracked entities + the Wolverine handler tx
+    // and can't run concurrent operations.
     builder.Services.AddDbContextFactory<HookDbContext>(options =>
         options.UseNpgsql(dataSource, npgsql =>
         {
@@ -264,13 +265,19 @@ try
     app.MapPrometheusScrapingEndpoint();
     app.MapWhatsappWebhook();
 
-    if (builder.Configuration.GetValue<bool>($"{DevWhatsappOptions.SectionName}:Enabled"))
+    // Belt-and-suspenders: an accidental DevWhatsapp__Enabled=true in prod would
+    // expose inbound spoofing + AI/WhatsApp sends to any E.164. IsProduction()
+    // makes the prod exposure structurally impossible.
+    if (!builder.Environment.IsProduction())
     {
-        app.MapDevWhatsapp();
-    }
-    if (builder.Configuration.GetValue<bool>($"{DevProviderSeedOptions.SectionName}:Enabled"))
-    {
-        app.MapDevProviders();
+        if (builder.Configuration.GetValue<bool>($"{DevWhatsappOptions.SectionName}:Enabled"))
+        {
+            app.MapDevWhatsapp();
+        }
+        if (builder.Configuration.GetValue<bool>($"{DevProviderSeedOptions.SectionName}:Enabled"))
+        {
+            app.MapDevProviders();
+        }
     }
     app.MapChat();
     app.MapReverseProxy();
@@ -299,8 +306,10 @@ try
     {
         // Kestrel is already bound at this point; this wait only defers
         // WaitForShutdownAsync so /readyz returning 503 lasts at most ~15s in
-        // happy cases (warmup usually completes faster). The strict gate for
-        // traffic is /readyz, not this delay.
+        // happy cases (warmup usually completes faster). WarmupCompletion resolves
+        // ONLY on successful warm-up — budget elapsed and transport failure leave
+        // it unresolved so the Delay wins and the warning below fires. The strict
+        // gate for traffic is /readyz, not this delay.
         var warmup = app.Services.GetRequiredService<AiWarmupHostedService>();
         var completed = await Task.WhenAny(warmup.WarmupCompletion, Task.Delay(TimeSpan.FromSeconds(15)));
         if (completed != warmup.WarmupCompletion)

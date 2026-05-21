@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using Hook.Features.Ai;
+using Hook.Features.Ai.Models;
 using Hook.Features.Feedback.Eta;
 using Hook.Features.Feedback.Models;
 using Hook.Features.Feedback.ProviderStatsAggregate;
@@ -289,9 +291,11 @@ public sealed class FeedbackResponseService(
 
     internal static FeedbackAnswer? ParseAnswer(string text)
     {
+        var intent = QuickIntent.Detect(text);
+        if (intent == IntentKind.Confirmation) return FeedbackAnswer.Yes;
+        if (intent == IntentKind.Rejection) return FeedbackAnswer.No;
+
         var lower = text.Trim().ToLowerInvariant();
-        if (lower is "yes" or "y") return FeedbackAnswer.Yes;
-        if (lower is "no" or "n") return FeedbackAnswer.No;
         if (NotInProgressRegex.IsMatch(lower)) return FeedbackAnswer.No;
         if (InProgressRegex.IsMatch(lower)) return FeedbackAnswer.InProgress;
         return null;

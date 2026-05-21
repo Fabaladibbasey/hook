@@ -48,9 +48,11 @@ public sealed class AiWarmupHostedServiceTests
     }
 
     [Fact]
-    public async Task StartAsync_ProbeThrows_StillCompletesWarmupTask()
+    public async Task StartAsync_ProbeThrows_LeavesWarmupTaskUnresolved()
     {
-        // Probe failure must not deadlock /readyz gating downstream.
+        // Probe failure must leave the TCS unresolved so the 15s gate in Program.cs
+        // wins and the cold-start warning fires. Resolving on failure would let
+        // Kestrel claim "warm" against a cold model.
         var ai = new Mock<IConversationAi>();
         ai.Setup(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("simulated ollama down"));
@@ -59,9 +61,56 @@ public sealed class AiWarmupHostedServiceTests
             NullLogger<AiWarmupHostedService>.Instance);
 
         await svc.StartAsync(default);
-        var winner = await Task.WhenAny(svc.WarmupCompletion, Task.Delay(TimeSpan.FromSeconds(5)));
+        var delay = Task.Delay(TimeSpan.FromMilliseconds(500));
+        var winner = await Task.WhenAny(svc.WarmupCompletion, delay);
 
-        winner.ShouldBe(svc.WarmupCompletion);
+        winner.ShouldBe(delay);
+        svc.WarmupCompletion.IsCompleted.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task StartAsync_BudgetElapses_LeavesWarmupTaskUnresolved()
+    {
+        // Probe blocks past the budget. The budget OCE branch must leave the TCS
+        // unresolved so the 15s outer gate wins (same invariant as the throw path).
+        var ai = new Mock<IConversationAi>();
+        ai.Setup(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string _, CancellationToken token) =>
+            {
+                await Task.Delay(Timeout.Infinite, token);
+                return default(Features.Ai.Models.IntentDetectionResult)!;
+            });
+        var svc = new AiWarmupHostedService(BuildProvider(ai), new FakeLifetime(),
+            Options.Create(new OllamaOptions { TimeoutSeconds = 1 }),
+            NullLogger<AiWarmupHostedService>.Instance);
+
+        await svc.StartAsync(default);
+        // Budget fires at ~1s; wait ~1.5s for the OCE branch to run.
+        await Task.Delay(TimeSpan.FromMilliseconds(1500));
+
+        svc.WarmupCompletion.IsCompleted.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task StopAsync_DuringInFlightProbe_ResolvesWarmupTaskViaShutdownBranch()
+    {
+        // Shutdown OCE branch resolves the TCS so any pending awaiter unblocks
+        // and the shutdown path is not held back.
+        var ai = new Mock<IConversationAi>();
+        ai.Setup(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string _, CancellationToken token) =>
+            {
+                await Task.Delay(Timeout.Infinite, token);
+                return default(Features.Ai.Models.IntentDetectionResult)!;
+            });
+        var svc = new AiWarmupHostedService(BuildProvider(ai), new FakeLifetime(),
+            Options.Create(new OllamaOptions { TimeoutSeconds = 120 }),
+            NullLogger<AiWarmupHostedService>.Instance);
+
+        await svc.StartAsync(default);
+        await svc.StopAsync(default);
+
+        svc.WarmupCompletion.IsCompletedSuccessfully.ShouldBeTrue();
     }
 
     [Fact]

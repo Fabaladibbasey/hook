@@ -24,14 +24,7 @@ public sealed class ApplyGeocodeResultClientHandler(
 
         if (!PhoneNumber.TryParse(evt.Phone, out var phone)) return;
 
-        // Stamp guard: a CANCEL+restart sequence can land the user back at
-        // AwaitingLocation on a NEW draft while the original Google round-trip
-        // is still in flight; without this the stale coordinates apply to the
-        // new draft. evt.DraftStampedAt = draft.UpdatedAt at publish time.
-        // 1µs tolerance absorbs Postgres timestamptz truncation; the CANCEL+restart
-        // race is many seconds wide so the tolerance does not collapse the guard.
-        if (evt.DraftStampedAt != default
-            && Math.Abs((draft.UpdatedAt - evt.DraftStampedAt).Ticks) > 10)
+        if (GeocodeStampGuard.IsStale(draft.UpdatedAt, evt.DraftStampedAt))
         {
             logger.LogDebug("Stale geocode apply for {Phone}; draft restamped at {Now} vs envelope {Then}",
                 phone.Mask(), draft.UpdatedAt, evt.DraftStampedAt);
