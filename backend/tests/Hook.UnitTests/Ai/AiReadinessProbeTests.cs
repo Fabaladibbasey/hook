@@ -10,8 +10,8 @@ namespace Hook.UnitTests.Ai;
 
 public class AiReadinessProbeTests
 {
-    private static IOptions<OllamaOptions> Opts(int probeTimeoutSeconds = 2) =>
-        Options.Create(new OllamaOptions { ReadinessProbeTimeoutSeconds = probeTimeoutSeconds });
+    private static IOptions<OllamaOptions> Opts(int probeTimeoutSeconds = 2, int cacheSeconds = 10) =>
+        Options.Create(new OllamaOptions { ReadinessProbeTimeoutSeconds = probeTimeoutSeconds, ReadinessCacheSeconds = cacheSeconds });
 
     [Fact]
     public async Task ProbeAsync_ShouldReturnHealthy_WhenAiSucceeds()

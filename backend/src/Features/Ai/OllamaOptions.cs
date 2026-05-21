@@ -16,6 +16,11 @@ public class OllamaOptions
     // local CPU dev should override (e.g. 8s) to accommodate qwen2.5:3b warm-up.
     public int ReadinessProbeTimeoutSeconds { get; init; } = 2;
 
+    // /readyz cache TTL. At the prior 10s default, sparse-traffic deployments paid
+    // the cold-load penalty every minute. 60s keeps the model warm for typical idle
+    // windows while still responding to genuine outages within a minute.
+    public int ReadinessCacheSeconds { get; init; } = 60;
+
     // Minimum confidence the LLM must report on a classified intent before the router
     // will act on it; below this we route to the existing disambiguation flow. Matches
     // InboundRouterHandler.AmbiguityConfidenceThreshold.
