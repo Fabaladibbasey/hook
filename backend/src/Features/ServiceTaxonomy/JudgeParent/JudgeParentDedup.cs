@@ -7,6 +7,4 @@ public sealed class JudgeParentDedup
 
     public static JudgeParentDedup Stamp(string slug, DateTimeOffset now) =>
         new() { Slug = slug, JudgedAt = now };
-
-    public void Refresh(DateTimeOffset now) => JudgedAt = now;
 }

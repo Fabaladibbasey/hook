@@ -73,4 +73,37 @@ public sealed class JudgeParentDedupGateTests : PipelineTestBase
 
         (await ReadStampAsync(slug)).ShouldBe(laterNow, StampTolerance);
     }
+
+    [Fact]
+    public async Task TryClaimAsync_AtExactWindowBoundary_RefreshesStamp_AndReturnsTrue()
+    {
+        // Cutoff is inclusive: WHERE judged_at <= now - Window. At exactly the
+        // boundary the existing stamp equals cutoff, so the refresh fires.
+        var slug = $"boundary-{Guid.NewGuid():N}";
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+        (await ClaimAsync(slug, clock)).ShouldBeTrue();
+
+        clock.Advance(JudgeParentDedupGate.Window);
+        var atBoundary = clock.GetUtcNow();
+        (await ClaimAsync(slug, clock)).ShouldBeTrue();
+
+        (await ReadStampAsync(slug)).ShouldBe(atBoundary, StampTolerance);
+    }
+
+    [Fact]
+    public async Task TryClaimAsync_ConcurrentClaimsOnFreshSlug_ExactlyOneWins()
+    {
+        // Two parallel claims race on an unseen slug. Postgres serializes inserts
+        // on the PK; one succeeds, the loser falls through to ON CONFLICT DO
+        // UPDATE WHERE judged_at <= cutoff — but the winner just stamped to now,
+        // so judged_at > cutoff and the loser's update is suppressed.
+        var slug = $"race-{Guid.NewGuid():N}";
+        var clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
+
+        var t1 = ClaimAsync(slug, clock);
+        var t2 = ClaimAsync(slug, clock);
+        var results = await Task.WhenAll(t1, t2);
+
+        results.Count(b => b).ShouldBe(1);
+    }
 }

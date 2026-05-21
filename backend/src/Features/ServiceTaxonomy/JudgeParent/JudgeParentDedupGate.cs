@@ -1,4 +1,3 @@
-using Hook.Shared.Persistence;
 using Hook.Shared.Persistence.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -13,16 +12,25 @@ public sealed class JudgeParentDedupGate(HookDbContext db, TimeProvider clock) :
 {
     public static readonly TimeSpan Window = TimeSpan.FromMinutes(5);
 
+    // Single round-trip: INSERT new row OR refresh-on-conflict only when judged_at
+    // has aged past the window. RETURNING emits a row on both INSERT and the WHERE-
+    // satisfied UPDATE path; an unsatisfied WHERE leaves the row untouched and
+    // returns nothing. FirstOrDefaultAsync(0) ⇒ claimed=false for the hot
+    // "seen <5min ago" path.
     public async Task<bool> TryClaimAsync(string slug, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
-        if (await db.TryInsertUniqueAsync(JudgeParentDedup.Stamp(slug, now), ct, JudgeParentDedupConstants.PrimaryKeyName))
-            return true;
-
         var cutoff = now - Window;
-        var refreshed = await db.JudgeParentDedups
-            .Where(d => d.Slug == slug && d.JudgedAt <= cutoff)
-            .ExecuteUpdateAsync(u => u.SetProperty(d => d.JudgedAt, now), ct);
-        return refreshed > 0;
+        const string sql = """
+            INSERT INTO judge_parent_dedup ("Slug", "JudgedAt") VALUES ({0}, {1})
+            ON CONFLICT ON CONSTRAINT "PK_judge_parent_dedup" DO UPDATE
+                SET "JudgedAt" = EXCLUDED."JudgedAt"
+              WHERE judge_parent_dedup."JudgedAt" <= {2}
+            RETURNING 1
+            """;
+        var rows = await db.Database
+            .SqlQueryRaw<int>(sql, slug, now, cutoff)
+            .ToListAsync(ct);
+        return rows.Count > 0;
     }
 }
