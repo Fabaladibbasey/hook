@@ -49,9 +49,13 @@ public sealed class DevProviderSeederHostedService(
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        if (_runner is null) return;
-        _linkedCts?.Cancel();
+        // IHost.Dispose calls StopAsync a second time after the initial host
+        // shutdown; claim the CTS atomically so the second pass is a no-op
+        // instead of throwing ObjectDisposedException on the disposed source.
+        var cts = Interlocked.Exchange(ref _linkedCts, null);
+        if (cts is null || _runner is null) return;
+        cts.Cancel();
         await Task.WhenAny(_runner, Task.Delay(StopGrace, cancellationToken));
-        _linkedCts?.Dispose();
+        cts.Dispose();
     }
 }

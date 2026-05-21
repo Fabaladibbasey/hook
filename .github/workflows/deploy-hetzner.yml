@@ -22,11 +22,15 @@ permissions:
   contents: read
   packages: write
 
+env:
+  DOTNET_VERSION: "10.0.x"
+
 jobs:
   build-push:
     name: Build & Push image (dotnet publish /t:PublishContainer)
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
+    environment: &deploy-env production
     outputs:
       image: ${{ steps.meta.outputs.image }}
       sha_tag: ${{ steps.meta.outputs.sha_tag }}
@@ -38,10 +42,10 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
-      - name: Setup .NET 10
+      - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: "10.0.x"
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Setup Node 20
         uses: actions/setup-node@v5
@@ -96,7 +100,7 @@ jobs:
     name: SSH compose pull & up
     needs: build-push
     runs-on: ubuntu-latest
-    environment: production
+    environment: *deploy-env
     steps:
       - name: SSH deploy
         uses: appleboy/ssh-action@v1.2.0
@@ -160,3 +164,24 @@ jobs:
           done
           echo "healthz never returned 200" >&2
           exit 1
+
+      - name: Diagnose on smoke failure
+        if: failure()
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PROD_SSH_HOST }}
+          username: ${{ secrets.PROD_SSH_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          port: ${{ secrets.PROD_SSH_PORT || 22 }}
+          script: |
+            set +e
+            echo "===== caddy env (HOOK_DOMAIN / LOGS_DOMAIN) ====="
+            docker exec hook-caddy printenv | grep -E '^(HOOK_DOMAIN|LOGS_DOMAIN|ACME_EMAIL)=' || true
+            echo "===== caddy logs (tail 200) ====="
+            docker logs --tail 200 hook-caddy 2>&1 || true
+            echo "===== caddy cert directory ====="
+            docker exec hook-caddy ls -laR /data/caddy/certificates 2>&1 | head -80 || true
+            echo "===== api logs (tail 100) ====="
+            docker logs --tail 100 hook-api 2>&1 || true
+            echo "===== local /healthz from host ====="
+            curl -kv --max-time 10 https://localhost/healthz 2>&1 | tail -40 || true
