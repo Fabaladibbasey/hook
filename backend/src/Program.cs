@@ -66,7 +66,9 @@ try
     if (!dataSourceBuilder.ConnectionStringBuilder.ContainsKey("Minimum Pool Size"))
         dataSourceBuilder.ConnectionStringBuilder.MinPoolSize = 5;
     if (!dataSourceBuilder.ConnectionStringBuilder.ContainsKey("Maximum Pool Size"))
-        dataSourceBuilder.ConnectionStringBuilder.MaxPoolSize = 50;
+        // RateLimit:WebhookConcurrencyLimit (50) + 14 headroom for Wolverine outbox
+        // pollers + ambient EF factory reads. See Features/RateLimiting/README.md.
+        dataSourceBuilder.ConnectionStringBuilder.MaxPoolSize = 64;
     dataSourceBuilder.UseNetTopologySuite();
     var dataSource = dataSourceBuilder.Build();
     builder.Services.AddSingleton(dataSource);
@@ -295,6 +297,10 @@ try
     await app.StartAsync();
 
     {
+        // Kestrel is already bound at this point; this wait only defers
+        // WaitForShutdownAsync so /readyz returning 503 lasts at most ~15s in
+        // happy cases (warmup usually completes faster). The strict gate for
+        // traffic is /readyz, not this delay.
         var warmup = app.Services.GetRequiredService<AiWarmupHostedService>();
         var completed = await Task.WhenAny(warmup.WarmupCompletion, Task.Delay(TimeSpan.FromSeconds(15)));
         if (completed != warmup.WarmupCompletion)

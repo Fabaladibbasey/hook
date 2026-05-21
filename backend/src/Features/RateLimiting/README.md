@@ -7,7 +7,7 @@ Two HTTP-side limiters protect the API:
 
 ## Sizing the webhook limiter
 
-Use the ASP.NET rate-limiter OTel counters (auto-emitted via `AddRateLimiter` + `AddOpenTelemetry().WithMetrics()`):
+Counters auto-emit via `AddRateLimiter` + `AddOpenTelemetry().WithMetrics(m => m.AddAspNetCoreInstrumentation())`. Without `AddAspNetCoreInstrumentation`, the `aspnetcore.rate_limiting.*` instruments do not ship. See `Features/Observability/ObservabilityServiceCollectionExtensions.cs`.
 
 | Metric | What it means |
 | --- | --- |
@@ -17,7 +17,7 @@ Use the ASP.NET rate-limiter OTel counters (auto-emitted via `AddRateLimiter` + 
 
 ### Tune-up checklist
 
-1. `aspnetcore.rate_limiting.rejected_requests` non-zero for the webhook policy → bump `RateLimit:WebhookConcurrencyLimit` (and confirm Npgsql `MaxPoolSize` ≥ `WebhookConcurrencyLimit + 5` headroom for the outbox).
+1. `aspnetcore.rate_limiting.rejected_requests` non-zero for the webhook policy → bump `RateLimit:WebhookConcurrencyLimit` (and confirm Npgsql `MaxPoolSize` ≥ `WebhookConcurrencyLimit + 14` headroom for Wolverine outbox pollers + ambient EF factory reads; default is `64`).
 2. `request_lease_duration` P95 > 5s → root-cause downstream (AI stage backed up, PG slow query, geocoding HTTP timing out). Don't raise the limit until the slowdown is found — raising it just queues more requests on the slow handler.
 3. `queued_requests` sustained > 5/min for >10min → traffic genuinely above the configured limit, raise gradually (×1.5) and watch `rejected_requests` go to zero.
 

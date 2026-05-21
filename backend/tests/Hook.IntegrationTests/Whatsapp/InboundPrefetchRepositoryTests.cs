@@ -7,6 +7,7 @@ using Hook.Features.ServiceRequest.Create;
 using Hook.Features.ServiceRequest.RequestAggregate;
 using Hook.Features.Whatsapp.ReceiveWebhook;
 using Hook.Shared.Persistence.Data;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 
@@ -177,6 +178,39 @@ public sealed class InboundPrefetchRepositoryTests : PipelineTestBase
         var reloaded = await verifyDb.ServiceRequests.FindAsync(requestId);
         reloaded.ShouldNotBeNull();
         reloaded!.Status.ShouldBe(ServiceRequestStatus.Closed);
+    }
+
+    [Fact]
+    public async Task GetAllAsync_PrefetchedDrafts_AreDetached_ChatSessionStaysTracked()
+    {
+        // Drafts are AsNoTracking (read-only by callers). The ActiveRequest is
+        // tracked on the scoped context because the router calls .Close() and
+        // relies on Wolverine AutoApplyTransactions SaveChanges to persist that
+        // mutation.
+        var phone = UniquePhone();
+        var now = DateTimeOffset.UtcNow;
+        await using (var seed = _fx.Factory.Services.CreateAsyncScope())
+        {
+            var db = seed.ServiceProvider.GetRequiredService<HookDbContext>();
+            db.RegistrationDrafts.Add(RegistrationDraft.Start(phone, now));
+            db.ClientRequestDrafts.Add(ClientRequestDraft.Start(phone, now));
+            db.AmbiguousIntentDrafts.Add(AmbiguousIntentDraft.Start(phone, "ambig", now));
+            db.ServiceRequests.Add(ServiceRequest.Create(
+                phone, "plumbing",
+                new Location(13.45, -16.6), "Banjul",
+                "tracked", 5.0, now, sharePhoneNumber: false));
+            await db.SaveChangesAsync();
+        }
+
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var prefetch = scope.ServiceProvider.GetRequiredService<InboundPrefetchRepository>();
+        var db2 = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var pre = await prefetch.GetAllAsync(phone, default);
+
+        db2.Entry(pre.RegistrationDraft!).State.ShouldBe(EntityState.Detached);
+        db2.Entry(pre.ClientDraft!).State.ShouldBe(EntityState.Detached);
+        db2.Entry(pre.AmbiguousDraft!).State.ShouldBe(EntityState.Detached);
+        db2.Entry(pre.ActiveRequest!).State.ShouldBe(EntityState.Unchanged);
     }
 
     [Fact]
