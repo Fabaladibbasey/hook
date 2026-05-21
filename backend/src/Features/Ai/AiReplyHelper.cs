@@ -26,10 +26,11 @@ public static class AiReplyHelper
         CancellationToken ct,
         TimeSpan? perCallTimeout = null)
     {
+        var timeout = perCallTimeout ?? Timeout.InfiniteTimeSpan;
         using var aiCts = perCallTimeout.HasValue
             ? CancellationTokenSource.CreateLinkedTokenSource(ct)
             : null;
-        aiCts?.CancelAfter(perCallTimeout!.Value);
+        aiCts?.CancelAfter(timeout);
         var aiToken = aiCts?.Token ?? ct;
 
         try
@@ -68,7 +69,7 @@ public static class AiReplyHelper
         catch (OperationCanceledException) when (aiCts?.IsCancellationRequested == true)
         {
             logger.LogWarning("AI reply timed out after {Timeout}s for stage {Stage}; dropping",
-                perCallTimeout!.Value.TotalSeconds, stage);
+                timeout.TotalSeconds, stage);
             HookMetrics.AiOutboundDropped.Add(1,
                 new KeyValuePair<string, object?>("stage", stage),
                 new KeyValuePair<string, object?>("reason", "timeout"));
