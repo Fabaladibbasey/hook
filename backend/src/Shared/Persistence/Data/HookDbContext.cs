@@ -10,6 +10,7 @@ using Hook.Features.ProviderAvailability.AvailabilityAggregate;
 using Hook.Features.ProviderAvailability.Register;
 using Hook.Features.ServiceRequest.Create;
 using Hook.Features.ServiceRequest.RequestAggregate;
+using Hook.Features.ServiceTaxonomy.JudgeParent;
 using Hook.Features.ServiceTaxonomy.ServiceAggregate;
 using Hook.Features.Whatsapp.ReceiveWebhook;
 using Microsoft.EntityFrameworkCore;
@@ -19,6 +20,7 @@ namespace Hook.Shared.Persistence.Data;
 public class HookDbContext(DbContextOptions<HookDbContext> options) : DbContext(options)
 {
     public DbSet<Service> Services => Set<Service>();
+    public DbSet<JudgeParentDedup> JudgeParentDedups => Set<JudgeParentDedup>();
     public DbSet<GeocodeCacheEntry> GeocodeCache => Set<GeocodeCacheEntry>();
     public DbSet<ProviderAvailability> ProviderAvailabilities => Set<ProviderAvailability>();
     public DbSet<RegistrationDraft> RegistrationDrafts => Set<RegistrationDraft>();

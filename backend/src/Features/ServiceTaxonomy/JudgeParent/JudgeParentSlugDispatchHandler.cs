@@ -10,6 +10,7 @@ public sealed class JudgeParentSlugDispatchHandler(
     IServiceRepository repository,
     IConversationAi ai,
     IMessageBus bus,
+    IJudgeParentDedupGate dedup,
     ILogger<JudgeParentSlugDispatchHandler> logger)
 {
     // [NonTransactional] avoids pinning an Npgsql connection across the 60-150s
@@ -21,6 +22,12 @@ public sealed class JudgeParentSlugDispatchHandler(
         var svc = await repository.GetBySlugAsync(evt.Slug, ct);
         if (svc is null || !svc.IsRoot) return;
         if (RootSectorSeeder.RootSlugSet.Contains(evt.Slug)) return;
+
+        if (!await dedup.TryClaimAsync(evt.Slug, ct))
+        {
+            logger.LogDebug("[Taxonomy] Dedup: skipping JudgeParent for {Slug}.", evt.Slug);
+            return;
+        }
 
         string? parent;
         try
