@@ -15,7 +15,11 @@ public sealed class OutboundDispatcher(
 {
     public const string HttpClientName = "whatsapp.outbound";
 
-    public async Task SendAsync(PhoneNumber to, string freeFormBody, string servicesCsvForTemplate, CancellationToken ct = default)
+    public async Task SendAsync(
+        PhoneNumber to,
+        string freeFormBody,
+        string servicesCsvForTemplate,
+        CancellationToken ct = default)
     {
         var lastInbound = await contacts.GetLastInboundAtAsync(to.Value, ct);
         var insideWindow = lastInbound is not null && (clock.GetUtcNow() - lastInbound.Value) < TimeSpan.FromHours(24);

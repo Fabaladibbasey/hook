@@ -27,8 +27,10 @@ public sealed class SendColdReplyHandler(
             }
         };
         var fallback = evt.Purpose == "greeting-reply"
-            ? "Hi! I connect people with local service providers. REQUEST a service if you need help, or REGISTER as a provider if you offer one."
-            : "I help connect people who need services with providers. Reply REQUEST if you need help, or REGISTER if you offer a service.";
+            ? "Hi! I connect people with local service providers. "
+                + "REQUEST a service if you need help, or REGISTER as a provider if you offer one."
+            : "I help connect people who need services with providers. "
+                + "Reply REQUEST if you need help, or REGISTER if you offer a service.";
         var reply = await AiReplyHelper.TryGenerateOrFallbackAsync(ai, ctx, evt.Purpose, fallback, logger, ct);
         await bus.PublishAsync(new SendWhatsAppTextRequested(evt.To, reply));
     }

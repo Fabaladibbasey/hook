@@ -66,7 +66,10 @@ public sealed class IterationCoordinator(
         await presenter.PresentAsync(clientPhone, batch, request.ServiceSlug, ct);
     }
 
-    private async Task HandleExhaustionAsync(PhoneNumber clientPhone, RequestAggregate.ServiceRequest request, CancellationToken ct)
+    private async Task HandleExhaustionAsync(
+        PhoneNumber clientPhone,
+        RequestAggregate.ServiceRequest request,
+        CancellationToken ct)
     {
         var opts = options.Value;
         if (request.CurrentRadiusKm >= opts.MaxRadiusKm)
@@ -93,8 +96,9 @@ public sealed class IterationCoordinator(
         }
 
         var followingRadius = Math.Min(request.CurrentRadiusKm * opts.RadiusExpansionFactor, opts.MaxRadiusKm);
-        await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone,
-            $"No more in {request.CurrentRadiusKm:F0}km. Reply INCREASE for {followingRadius:F0}km, or NEW for different service."));
+        var exhausted = $"No more in {request.CurrentRadiusKm:F0}km. "
+            + $"Reply INCREASE for {followingRadius:F0}km, or NEW for different service.";
+        await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone, exhausted));
         logger.LogDebug("Iteration exhausted for {Phone} at {Radius}km", clientPhone.Mask(), request.CurrentRadiusKm);
     }
 }

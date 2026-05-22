@@ -22,10 +22,15 @@ public sealed class ChatRepository(HookDbContext db) : IChatRepository
         db.ChatParticipants.FirstOrDefaultAsync(
             p => p.ChatId == chatId && p.Id != exceptParticipantId, ct);
 
-    public async Task<IReadOnlyList<ChatParticipant>> GetParticipantsAsync(Guid chatId, CancellationToken ct = default) =>
+    public async Task<IReadOnlyList<ChatParticipant>> GetParticipantsAsync(
+        Guid chatId,
+        CancellationToken ct = default) =>
         await db.ChatParticipants.Where(p => p.ChatId == chatId).ToListAsync(ct);
 
-    public async Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(Guid chatId, int take, CancellationToken ct = default)
+    public async Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(
+        Guid chatId,
+        int take,
+        CancellationToken ct = default)
     {
         var clamped = Math.Clamp(take, 1, 500);
         var rows = await db.ChatMessages

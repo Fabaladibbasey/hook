@@ -133,7 +133,10 @@ public class ChatHubExceptionFilterTests
         capture.Count.ShouldBe(0);
     }
 
-    private static (ChatHubExceptionFilter filter, Mock<HubCallerContext> callerCtx, HubInvocationContext invocation) Build(bool connectionAborted = false)
+    private static (
+        ChatHubExceptionFilter filter,
+        Mock<HubCallerContext> callerCtx,
+        HubInvocationContext invocation) Build(bool connectionAborted = false)
     {
         var filter = new ChatHubExceptionFilter(NullLogger<ChatHubExceptionFilter>.Instance);
         var callerCtx = new Mock<HubCallerContext>();

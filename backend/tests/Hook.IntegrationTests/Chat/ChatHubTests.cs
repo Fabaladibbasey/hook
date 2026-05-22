@@ -19,7 +19,12 @@ public sealed class ChatHubTests : PipelineTestBase
 
     private sealed record OpenResponse(Guid ChatId, Guid ParticipantId, string Role, Guid SessionId, string Status);
 
-    private sealed record ChatHandle(Guid ChatId, OpenResponse Client, OpenResponse Provider, string ClientToken, string ProviderToken);
+    private sealed record ChatHandle(
+        Guid ChatId,
+        OpenResponse Client,
+        OpenResponse Provider,
+        string ClientToken,
+        string ProviderToken);
 
     private async Task<ChatHandle> SeedChatAsync()
     {
@@ -53,8 +58,11 @@ public sealed class ChatHubTests : PipelineTestBase
 
     private HubConnection BuildHub(string token, Guid sessionId)
     {
+        var hubUri = new Uri(
+            _fx.Factory.Server.BaseAddress,
+            $"hubs/chat?token={Uri.EscapeDataString(token)}&sessionId={sessionId}");
         var conn = new HubConnectionBuilder()
-            .WithUrl(new Uri(_fx.Factory.Server.BaseAddress, $"hubs/chat?token={Uri.EscapeDataString(token)}&sessionId={sessionId}"), opts =>
+            .WithUrl(hubUri, opts =>
             {
                 opts.HttpMessageHandlerFactory = _ => _fx.Factory.Server.CreateHandler();
                 opts.Transports = HttpTransportType.LongPolling;
@@ -265,5 +273,11 @@ public sealed class ChatHubTests : PipelineTestBase
 
     private sealed record PeerKeyDto(Guid PeerParticipantId, string PeerPublicKeyB64);
 
-    private sealed record WireMessage(Guid Id, Guid ParticipantId, string CiphertextB64, string NonceB64, long Sequence, DateTimeOffset CreatedAt);
+    private sealed record WireMessage(
+        Guid Id,
+        Guid ParticipantId,
+        string CiphertextB64,
+        string NonceB64,
+        long Sequence,
+        DateTimeOffset CreatedAt);
 }

@@ -38,7 +38,11 @@ public sealed class ApplyGeocodeResultProviderHandler(
         }
 
         var now = clock.GetUtcNow();
-        draft.CaptureLocation(evt.Result.Location.Latitude, evt.Result.Location.Longitude, evt.Result.FormattedAddress, now);
+        draft.CaptureLocation(
+            evt.Result.Location.Latitude,
+            evt.Result.Location.Longitude,
+            evt.Result.FormattedAddress,
+            now);
         draft.StepTo(RegistrationStep.ConfirmLocation, now);
         await drafts.UpsertAsync(draft, ct);
         await bus.PublishAsync(new SendWhatsAppTextRequested(phone,

@@ -70,7 +70,8 @@ public sealed class PresentMatchesHandler(
         // (PICK / NEXT / NEW) matches the InboundRouter's intent detectors.
         var pickHint = capped.Count == 1
             ? "Reply PICK 1 to connect with this provider. NEXT for more, NEW for a different service."
-            : "Reply PICK 1 (or e.g. PICK 1,2 or PICK ALL) to connect with one or more providers. NEXT for more, NEW for a different service.";
+            : "Reply PICK 1 (or e.g. PICK 1,2 or PICK ALL) to connect with one or more providers. "
+                + "NEXT for more, NEW for a different service.";
         var fallback = $"Top matches for {evt.ServiceSlug}:\n{string.Join("\n", fallbackLines)}";
 
         var reply = await AiReplyHelper.TryGenerateOrFallbackAsync(ai, ctx, "match_presenter", fallback, logger, ct);

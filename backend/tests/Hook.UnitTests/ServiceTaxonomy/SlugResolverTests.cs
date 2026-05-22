@@ -61,7 +61,12 @@ public class SlugResolverTests
             AutoMergeThreshold = autoMerge,
             AiJudgeThreshold = aiJudge
         });
-        return new SlugResolver(_repoMock.Object, _aiMock.Object, _busMock.Object, options, NullLogger<SlugResolver>.Instance);
+        return new SlugResolver(
+            _repoMock.Object,
+            _aiMock.Object,
+            _busMock.Object,
+            options,
+            NullLogger<SlugResolver>.Instance);
     }
 
     private void Seed(string slug) => _store[slug] = Service.Create(slug);

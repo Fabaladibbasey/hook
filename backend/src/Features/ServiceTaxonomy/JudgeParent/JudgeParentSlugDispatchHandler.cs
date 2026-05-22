@@ -35,7 +35,10 @@ public sealed class JudgeParentSlugDispatchHandler(
         // validates against `candidates`; both must use StringComparer.Ordinal.
         if (!RootSectorSeeder.RootSlugSet.Contains(parent))
         {
-            logger.LogWarning("[Taxonomy] AI returned out-of-list parent {Parent} for {Slug}; dropping.", parent, evt.Slug);
+            logger.LogWarning(
+                "[Taxonomy] AI returned out-of-list parent {Parent} for {Slug}; dropping.",
+                parent,
+                evt.Slug);
             return;
         }
         if (string.Equals(parent, evt.Slug, StringComparison.Ordinal)) return;

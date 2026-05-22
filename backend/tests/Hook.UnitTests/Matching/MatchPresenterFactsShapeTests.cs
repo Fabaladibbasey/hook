@@ -194,7 +194,10 @@ public class MatchPresenterFactsShapeTests
             Options.Create(new MatchingOptions { TopMatchesPerBatch = cap }),
             NullLogger<PresentMatchesHandler>.Instance);
 
-    private static PresentMatchesRequested BuildRequest(int count, string slug = "plumbing", MatchKind kind = MatchKind.Exact)
+    private static PresentMatchesRequested BuildRequest(
+        int count,
+        string slug = "plumbing",
+        MatchKind kind = MatchKind.Exact)
     {
         var dtos = Enumerable.Range(0, count)
             .Select(i => new MatchPresentationDto(

@@ -8,7 +8,10 @@ public sealed class ServiceRepository(HookDbContext db) : IServiceRepository
     public Task<Service?> GetBySlugAsync(string slug, CancellationToken ct = default) =>
         db.Services.FirstOrDefaultAsync(s => s.Slug == slug, ct);
 
-    public async Task<IReadOnlyList<SlugSimilarity>> FindSimilarAsync(string slug, int take, CancellationToken ct = default)
+    public async Task<IReadOnlyList<SlugSimilarity>> FindSimilarAsync(
+        string slug,
+        int take,
+        CancellationToken ct = default)
     {
         // `%` predicate engages ix_services_slug_trgm. Bounded by the
         // session-level pg_trgm.similarity_threshold (default 0.3) — well below

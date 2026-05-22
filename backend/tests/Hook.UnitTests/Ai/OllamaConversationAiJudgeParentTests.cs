@@ -125,7 +125,9 @@ public class OllamaConversationAiJudgeParentTests
         public int Calls { get; private set; }
         public string? LastRequestBody { get; private set; }
 
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
         {
             Calls++;
             LastRequestBody = request.Content is null

@@ -9,7 +9,13 @@ using Wolverine;
 
 namespace Hook.Features.ChatSession;
 
-public sealed class ChatHub(IChatRepository chats, HookDbContext db, ChatScheduler scheduler, IMessageBus bus, ILogger<ChatHub> logger, TimeProvider clock) : Hub
+public sealed class ChatHub(
+    IChatRepository chats,
+    HookDbContext db,
+    ChatScheduler scheduler,
+    IMessageBus bus,
+    ILogger<ChatHub> logger,
+    TimeProvider clock) : Hub
 {
     public override async Task OnConnectedAsync()
     {
@@ -119,8 +125,16 @@ public sealed class ChatHub(IChatRepository chats, HookDbContext db, ChatSchedul
             return;
         }
 
-        if (!TryDecodeBytes(dto.CiphertextB64, minLen: 17, maxLen: ChatHubConstants.MaxCiphertextBytes, out var ciphertext)
-            || !TryDecodeBytes(dto.NonceB64, minLen: ChatHubConstants.NonceBytes, maxLen: ChatHubConstants.NonceBytes, out var nonce))
+        if (!TryDecodeBytes(
+                dto.CiphertextB64,
+                minLen: 17,
+                maxLen: ChatHubConstants.MaxCiphertextBytes,
+                out var ciphertext)
+            || !TryDecodeBytes(
+                dto.NonceB64,
+                minLen: ChatHubConstants.NonceBytes,
+                maxLen: ChatHubConstants.NonceBytes,
+                out var nonce))
         {
             await RejectAsync(dto.MessageId, MessageRejectReason.DecodeFailed);
             return;
@@ -176,7 +190,9 @@ public sealed class ChatHub(IChatRepository chats, HookDbContext db, ChatSchedul
 
         var outcome = await bus.InvokeAsync<EndChatOutcome>(new EndChatCommand(chatId, EndChatReason.User, role));
         if (outcome.Result == EndChatResult.AlreadyEnded)
-            await Clients.Caller.SendAsync(ChatHubConstants.Events.ChatEnded, new ChatEndedPayload(EndChatReason.AlreadyEnded.ToWire()));
+            await Clients.Caller.SendAsync(
+                ChatHubConstants.Events.ChatEnded,
+                new ChatEndedPayload(EndChatReason.AlreadyEnded.ToWire()));
         else if (outcome.Result == EndChatResult.Ended)
             logger.LogInformation("Chat {ChatId} ended by {Role} ({ParticipantId})", chatId, role, participant.Id);
     }
@@ -195,7 +211,9 @@ public sealed class ChatHub(IChatRepository chats, HookDbContext db, ChatSchedul
     }
 
     private Task RejectAsync(Guid messageId, MessageRejectReason reason) =>
-        Clients.Caller.SendAsync(ChatHubConstants.Events.MessageSendRejected, new MessageSendRejectedDto(messageId, reason));
+        Clients.Caller.SendAsync(
+            ChatHubConstants.Events.MessageSendRejected,
+            new MessageSendRejectedDto(messageId, reason));
 
     // Pre-check bounds the buffer allocation against length-attacks before
     // allocating ((b64.Length + 3) / 4) * 3 bytes.

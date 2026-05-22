@@ -283,7 +283,10 @@ public class GlobalExceptionHandlerTests
         body.GetProperty("title").GetString().ShouldNotBeNull().ShouldNotContain("<script>");
     }
 
-    private static (GlobalExceptionHandler handler, HttpContext ctx, RecordingLogger<GlobalExceptionHandler> log) Build(string environmentName)
+    private static (
+        GlobalExceptionHandler handler,
+        HttpContext ctx,
+        RecordingLogger<GlobalExceptionHandler> log) Build(string environmentName)
     {
         var env = new HostingEnvironment { EnvironmentName = environmentName };
         var log = new RecordingLogger<GlobalExceptionHandler>();

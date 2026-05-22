@@ -164,7 +164,9 @@ public class OllamaConversationAiValidationTests
     // expected `message.content` shape.
     private sealed class ScriptedHandler(string rawContent, Action<string>? captureBody) : HttpMessageHandler
     {
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
         {
             if (captureBody is not null && request.Content is not null)
             {

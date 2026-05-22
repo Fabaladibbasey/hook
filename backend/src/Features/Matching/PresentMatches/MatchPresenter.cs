@@ -11,7 +11,11 @@ public sealed class MatchPresenter(IMessageBus bus)
     // Routes presentation through the durable outbox so the AI presenter inside
     // PresentMatchesHandler runs off the user-visible critical path. Empty batches
     // ack inline (no AI needed).
-    public ValueTask PresentAsync(PhoneNumber clientPhone, MatchBatch batch, string serviceSlug, CancellationToken ct = default)
+    public ValueTask PresentAsync(
+        PhoneNumber clientPhone,
+        MatchBatch batch,
+        string serviceSlug,
+        CancellationToken ct = default)
     {
         if (batch.Scored.Count == 0)
         {

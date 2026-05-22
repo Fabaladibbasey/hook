@@ -14,6 +14,11 @@ public sealed class RecordingLogger<T> : ILogger<T>
 
     IDisposable? ILogger.BeginScope<TState>(TState state) => null;
     public bool IsEnabled(LogLevel logLevel) => true;
-    public void Log<TState>(LogLevel level, EventId id, TState state, Exception? ex, Func<TState, Exception?, string> formatter)
+    public void Log<TState>(
+        LogLevel level,
+        EventId id,
+        TState state,
+        Exception? ex,
+        Func<TState, Exception?, string> formatter)
         => _entries.Enqueue(new LogEntry(level, formatter(state, ex), ex));
 }

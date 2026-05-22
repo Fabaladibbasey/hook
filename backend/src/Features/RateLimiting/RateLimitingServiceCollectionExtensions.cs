@@ -14,7 +14,9 @@ public static class RateLimitingServiceCollectionExtensions
         return services;
     }
 
-    public static IServiceCollection AddGlobalRateLimiter(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddGlobalRateLimiter(
+        this IServiceCollection services,
+        IConfiguration configuration)
     {
         var rateLimitOpts = configuration.GetSection(RateLimitOptions.SectionName).Get<RateLimitOptions>()
             ?? new RateLimitOptions();

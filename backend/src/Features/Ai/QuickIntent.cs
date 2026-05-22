@@ -5,7 +5,8 @@ namespace Hook.Features.Ai;
 
 public static class QuickIntent
 {
-    private static readonly RegexOptions RxOpts = RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant;
+    private static readonly RegexOptions RxOpts =
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant;
 
     // ServiceRequest hints — the user is reporting a problem they have.
 
@@ -122,7 +123,8 @@ public static class QuickIntent
         "proceed", "continue", "details", "detail", "connect"
     ];
     private static readonly string[] RejectTokens = ["n", "no", "nope", "nah", "stop", "wrong", "incorrect"];
-    private static readonly string[] CancelTokens = ["cancel", "end", "bye", "goodbye", "exit", "quit", "leave", "done"];
+    private static readonly string[] CancelTokens =
+        ["cancel", "end", "bye", "goodbye", "exit", "quit", "leave", "done"];
 
     private static readonly (string Phrase, IntentKind Intent)[] Phrases =
     [
@@ -189,7 +191,8 @@ public static class QuickIntent
         var literal = s switch
         {
             "y" or "yes" or "yeah" or "yep" or "yup" or "ok" or "okay" or "sure" or "confirm" or "correct" or "exactly"
-                or "proceed" or "continue" or "go" or "details" or "detail" or "info" or "share" or "connect" => IntentKind.Confirmation,
+                or "proceed" or "continue" or "go" or "details" or "detail" or "info" or "share" or "connect"
+                => IntentKind.Confirmation,
             "n" or "no" or "nope" or "nah" or "stop" or "wrong" or "incorrect" => IntentKind.Rejection,
             "cancel" or "end" or "bye" or "goodbye" or "exit" or "quit" or "leave" or "done" => IntentKind.Cancel,
             "edit" => IntentKind.Edit,

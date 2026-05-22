@@ -46,7 +46,10 @@ internal sealed class ChatHubExceptionFilter(
         }
     }
 
-    public async Task OnDisconnectedAsync(HubLifetimeContext ctx, Exception? exception, Func<HubLifetimeContext, Exception?, Task> next)
+    public async Task OnDisconnectedAsync(
+        HubLifetimeContext ctx,
+        Exception? exception,
+        Func<HubLifetimeContext, Exception?, Task> next)
     {
         try { await next(ctx, exception); }
         // Client-driven hard-disconnect with an in-flight cleanup OCE is not a fault —

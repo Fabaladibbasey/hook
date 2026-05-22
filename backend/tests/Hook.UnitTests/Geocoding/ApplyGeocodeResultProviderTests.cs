@@ -33,7 +33,9 @@ public sealed class ApplyGeocodeResultProviderTests
     private ApplyGeocodeResultProviderHandler Build() =>
         new(_drafts.Object, _clock, NullLogger<ApplyGeocodeResultProviderHandler>.Instance);
 
-    private static RegistrationDraft DraftAt(DateTimeOffset stamp, RegistrationStep step = RegistrationStep.AwaitingLocation)
+    private static RegistrationDraft DraftAt(
+        DateTimeOffset stamp,
+        RegistrationStep step = RegistrationStep.AwaitingLocation)
     {
         var d = RegistrationDraft.Start(Phone, stamp);
         if (step != RegistrationStep.AwaitingServices)
