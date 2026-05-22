@@ -96,9 +96,9 @@ jobs:
             -p:ContainerRepository=${{ steps.meta.outputs.repo }} \
             "-p:ContainerImageTags=\"${{ steps.meta.outputs.tag }};latest\""
 
-      # Self-contained linux-x64 binary that applies migrations against a
-      # connection string. Skips frontend (Node is set up but the bundle does
-      # not need wwwroot) — env var matches BuildFrontend target condition.
+      # Framework-dependent apphost for the host RID (linux-x64 on CI =
+      # linux-x64 on Hetzner). ~5-10MB binary, executed via dotnet/runtime:10.0
+      # on the deploy host. Skip frontend — bundle doesn't need wwwroot.
       - name: Generate EF migration bundle
         env:
           SkipFrontendBuild: "true"
@@ -107,8 +107,6 @@ jobs:
           dotnet ef migrations bundle \
             --project src/Hook.csproj \
             --output efbundle \
-            --runtime linux-x64 \
-            --self-contained \
             --force
 
       - name: Upload EF bundle
@@ -193,12 +191,14 @@ jobs:
               "${POSTGRES_DB}" "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" > "$ENV_FILE"
             trap 'rm -f "$ENV_FILE"' EXIT
 
-            # runtime-deps provides the OS libs the self-contained bundle needs.
+            # Framework-dependent bundle — needs the .NET runtime image to
+            # execute. runtime:10.0 shares layers with aspnet:10.0 (app base),
+            # so the host already has these layers cached.
             docker run --rm \
               --network "$HOOK_NET" \
               --env-file "$ENV_FILE" \
               -v "$PWD/efbundle:/efbundle:ro" \
-              mcr.microsoft.com/dotnet/runtime-deps:10.0 \
+              mcr.microsoft.com/dotnet/runtime:10.0 \
               /efbundle
 
   deploy:
