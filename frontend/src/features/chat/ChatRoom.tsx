@@ -76,7 +76,7 @@ export default function ChatRoom() {
         style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
       >
         <div className="flex items-center gap-2">
-          <img src="/hook-logo.png" alt="Hook" className="h-8 w-auto rounded" />
+          <img src="/hook-logo.svg" alt="Hook" width={32} height={32} className="h-8 w-auto brightness-0 invert" />
           <div>
             <div className="text-sm opacity-75">Hook secure chat</div>
             <div className="text-xs opacity-50">{open.role}</div>

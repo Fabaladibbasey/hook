@@ -8,6 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx",
+    "lint:dead-code": "knip --no-progress",
+    "lint:assets": "node scripts/check-public-refs.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -23,6 +25,9 @@
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.20",
     "eslint": "^9.0.0",
+    "globals": "^17.6.0",
+    "globby": "^16.2.0",
+    "knip": "^6.14.2",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.6.3",

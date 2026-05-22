@@ -70,4 +70,6 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
+      - run: npm run lint:dead-code
+      - run: npm run lint:assets
       - run: npm run build

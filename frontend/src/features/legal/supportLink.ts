@@ -3,7 +3,7 @@ if (raw.length === 0) {
   throw new Error("VITE_SUPPORT_WHATSAPP must be set (digits-only E.164, e.g. 220XXXXXXX)");
 }
 
-export const SUPPORT_WHATSAPP = raw;
+const SUPPORT_WHATSAPP = raw;
 export const supportWhatsappLink = `https://wa.me/${SUPPORT_WHATSAPP}`;
 
 const buildLink = (text: string) =>
@@ -12,7 +12,7 @@ const buildLink = (text: string) =>
 export const clientWhatsappLink = buildLink("Hi! I'm looking for help finding ");
 export const providerWhatsappLink = buildLink("Hi! I'd like to register as a service provider.");
 
-export function formatSupportWhatsapp(digits: string = SUPPORT_WHATSAPP): string {
+function formatSupportWhatsapp(digits: string = SUPPORT_WHATSAPP): string {
   if (!(digits.startsWith("220") && digits.length === 10)) {
     return `+${digits}`;
   }
