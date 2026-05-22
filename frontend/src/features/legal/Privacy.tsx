@@ -1,11 +1,10 @@
-import LegalPage from "./LegalPage";
-import { WhatsAppContact } from "../legal/SupportContact";
-import { RETENTION_DAYS_LABEL } from "../legal/RetentionDays";
-import { LEGAL_EFFECTIVE_DATE } from "../legal/EffectiveDate";
+import LegalLayout from "./LegalLayout";
+import { WhatsAppContact } from "./SupportContact";
+import { RETENTION_DAYS_LABEL, LEGAL_EFFECTIVE_DATE } from "./constants";
 
 export default function Privacy() {
   return (
-    <LegalPage title="Privacy Policy" effective={LEGAL_EFFECTIVE_DATE}>
+    <LegalLayout title="Privacy Policy" effective={LEGAL_EFFECTIVE_DATE}>
       <p>
         This policy describes what information Hook (“Hook”, “we”, “us”) collects, how we use it,
         and the choices you have. Contact us on WhatsApp: <WhatsAppContact />.
@@ -234,6 +233,6 @@ export default function Privacy() {
       <p>
         Questions or requests — message us on WhatsApp: <WhatsAppContact />.
       </p>
-    </LegalPage>
+    </LegalLayout>
   );
 }

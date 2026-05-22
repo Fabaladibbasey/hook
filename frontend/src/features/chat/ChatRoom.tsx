@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { useChatHub } from "../signalr/useChatHub";
-import MessageList from "../components/MessageList";
-import MessageInput from "../components/MessageInput";
-import RevokedToast from "../components/RevokedToast";
-import WaitingForPeer from "../components/WaitingForPeer";
-import LegalFooter from "../components/LegalFooter";
-import { fetchJson } from "../api/fetchJson";
+import { useChatHub } from "./useChatHub";
+import MessageList from "./MessageList";
+import MessageInput from "./MessageInput";
+import RevokedToast from "./RevokedToast";
+import WaitingForPeer from "./WaitingForPeer";
+import LegalFooter from "@/components/LegalFooter";
+import { fetchJson } from "@/api/fetchJson";
 
 type OpenResponse = {
   chatId: string;

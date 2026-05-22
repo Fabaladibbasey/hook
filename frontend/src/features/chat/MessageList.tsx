@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { ChatMessage } from "../signalr/useChatHub";
+import type { ChatMessage } from "./useChatHub";
 
 export default function MessageList({
   messages,

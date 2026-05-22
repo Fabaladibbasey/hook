@@ -67,10 +67,18 @@ backend/
 
 frontend/
   src/
-    api/        signalr/       crypto/        # transport + E2E primitives
-    components/ routes/        App.tsx main.tsx
+    features/
+      chat/     # ChatRoom, sub-components, useChatHub, chatCrypto (flat — high-touch path, no sub-folders)
+      dev/      # DevConsole
+      legal/    # LegalLayout, Terms, Privacy, SupportContact, constants
+    components/ # LegalFooter (shared — ChatRoom + LandingPage consume)
+    api/        # fetchJson (shared HTTP transport)
+    LandingPage.tsx  # root route (no folder — single file)
+    main.tsx
   vite.config.ts tsconfig.json package.json
 ```
+
+Path alias `@/*` → `frontend/src/*` (see `tsconfig.json` + `vite.config.ts`). Cross-slice imports use `@/` (`@/components/LegalFooter`, `@/api/fetchJson`). Intra-slice imports stay relative (`./useChatHub`).
 
 Key feature slices live under `backend/src/Features/`:
 `Ai`, `ChatLifecycle`, `ChatPrivacyRouting`, `ChatSession`, `ContactSharing`, `Feedback`, `Geocoding`, `Matching`, `MetaTemplates`, `Observability`, `ProviderAvailability`, `RateLimiting`, `ServiceRequest`, `ServiceTaxonomy`, `Whatsapp`.
@@ -108,14 +116,14 @@ Wolverine messaging runs in-process. `Wolverine.DefaultExecutionTimeout` (defaul
 - `/` — landing page (post-WhatsApp link target).
 - `/c/:chatId/:token` — ephemeral E2E chat room.
 - `/dev` — dev console (WhatsApp simulation).
-- `/terms`, `/privacy` — legal pages, lazy-loaded; `RETENTION_DAYS` literal lives in `frontend/src/legal/RetentionDays.ts` and `SUPPORT_WHATSAPP` (digits-only E.164) is driven by `VITE_SUPPORT_WHATSAPP` — contact links render as `https://wa.me/<digits>`.
+- `/terms`, `/privacy` — legal pages, lazy-loaded; `RETENTION_DAYS` + `LEGAL_EFFECTIVE_DATE` live in `frontend/src/features/legal/constants.ts` and `SUPPORT_WHATSAPP` (digits-only E.164) is driven by `VITE_SUPPORT_WHATSAPP` — contact links render as `https://wa.me/<digits>`.
 
 ## Style Principles
 
 - **`string.Empty` over `""`**: prefer `string.Empty` for runtime values. Literal `""` only where C# requires a compile-time constant — default parameter values, positional record defaults, attribute arguments, and `const` declarations.
 - **Guard clauses, return early**: invert positive `if (success) { body }` into `if (!success) return; body;` to flatten the happy path. Exception: both branches do real work, or unconditional code follows that needs the value.
 - **Avoid nullable primitives and collections; avoid `null` as much as possible**: prefer `string.Empty`, `[]` (empty collection), or `FrozenDictionary<,>.Empty` over `string?` / `List<>?` / `IReadOnlyDictionary<,>?`. Nullable reference types are enabled — let the compiler enforce non-null where the domain allows it. Use `Option`-style return discriminators (e.g. the `ExchangeOutcome` enum) rather than `T?` for "absent vs present" business outcomes.
-- **Gambianize**: tests, fixtures, dev-console scenarios, and docs MUST use Gambian phones (`+220…`) and Banjul coordinates (~`13.45, -16.6`). Never `+1…` US numbers or other locales — the product is Gambia-only. Pre-existing `+1…` numbers in integration tests are legacy; do not add new ones.
+- **Gambianize fixtures**: The Gambia is the default seed market — tests, fixtures, dev-console scenarios, and internal docs MUST use Gambian phones (`+220…`) and Banjul coordinates (~`13.45, -16.6`). Never `+1…` US numbers or other locales in fixtures. Pre-existing `+1…` numbers in integration tests are legacy; do not add new ones. **Product is global** — user-facing copy (landing page, marketing surfaces) must stay locale-neutral; do not bake Gambia into UI strings.
 - **Keep things simple**: less code, less to maintain. Self-explanatory names beat comments. Three similar lines beat a premature abstraction. No half-finished implementations, no error handling for cases that can't happen, no feature flags / backwards-compat shims when you can just change the code.
 
 ## Naming Conventions
@@ -132,7 +140,7 @@ Wolverine messaging runs in-process. `Wolverine.DefaultExecutionTimeout` (defaul
 - **Platform**: Windows 11 dev box. Shell is bash (Git Bash); PowerShell 7+ also available. Use forward slashes and `/dev/null` (not `NUL`). CI runs Ubuntu.
 - **Runtime versions**: .NET 10 SDK (`10.0.x`), Node 20, Postgres 16 + PostGIS 3.4 (CI uses `postgis/postgis:16-3.4`).
 - **Dev runtime**: backend at `:5212`, vite at `:5173`/`:5174`, Postgres at `:5432`.
-- **CI config**: `.github/workflows/ci.yml` — restores, builds Release, runs tests, smoke-publishes a container. `working-directory` defaults to `backend/`.
+- **Build & Test workflow**: `.github/workflows/build-and-test.yml` — restores, builds Release, runs tests, smoke-publishes a container. `working-directory` defaults to `backend/`.
 - **Deploy**: `.github/workflows/deploy.yml`.
 - **Secrets**: never commit `.env*`, `appsettings.Development.json`, `*.pem`, `*.key`, user secrets. `.gitignore` already covers these.
 - **Connection string**: `Host=localhost;Port=5432;Database=hook;Username=hook;Password=hook`.

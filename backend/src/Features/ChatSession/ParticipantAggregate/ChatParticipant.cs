@@ -29,7 +29,7 @@ public class ChatParticipant : IAggregateRoot
     /// <summary>
     /// Rotates the SignalR session marker. Discards the prior session's encryption key
     /// and replay window so the next device must publish a fresh public key before peer
-    /// can decrypt. Browser-side keypair caching (chatCrypto.ts) is unaffected.
+    /// can decrypt. Browser-side keypair caching (frontend/src/features/chat/chatCrypto.ts) is unaffected.
     /// </summary>
     public Guid RotateSession()
     {

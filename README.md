@@ -39,8 +39,14 @@ backend/
 
 frontend/
   src/
-    api/  signalr/  crypto/      # transport + E2E primitives
-    components/  routes/  App.tsx  main.tsx
+    features/
+      chat/     # ChatRoom, sub-components, useChatHub, chatCrypto
+      dev/      # DevConsole
+      legal/    # LegalLayout, Terms, Privacy, SupportContact, constants
+    components/ # LegalFooter (shared — ChatRoom + LandingPage consume)
+    api/        # fetchJson (shared HTTP transport)
+    LandingPage.tsx  # root route
+    main.tsx
 
 docs/                            # operations, meta-templates, E2E scenarios
 prd.md                           # product requirements
@@ -132,7 +138,7 @@ dotnet build -p:BaseOutputPath=bin/altbuild/bin/ -p:BaseIntermediateOutputPath=o
 
 ## CI / Deploy
 
-- `.github/workflows/ci.yml` — restore, Release build, tests, smoke container publish. `working-directory` = `backend/`. Runner: Ubuntu. Postgres provided by Testcontainers (image `postgis/postgis:16-3.4`); CI runner needs Docker.
+- `.github/workflows/build-and-test.yml` — restore, Release build, tests, smoke container publish. `working-directory` = `backend/`. Runner: Ubuntu. Postgres provided by Testcontainers (image `postgis/postgis:16-3.4`); CI runner needs Docker.
 - `.github/workflows/deploy.yml` — deploy pipeline.
 
 ## More Docs

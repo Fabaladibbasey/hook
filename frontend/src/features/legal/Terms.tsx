@@ -1,11 +1,10 @@
-import LegalPage from "./LegalPage";
-import { WhatsAppContact } from "../legal/SupportContact";
-import { RETENTION_DAYS_LABEL } from "../legal/RetentionDays";
-import { LEGAL_EFFECTIVE_DATE } from "../legal/EffectiveDate";
+import LegalLayout from "./LegalLayout";
+import { WhatsAppContact } from "./SupportContact";
+import { RETENTION_DAYS_LABEL, LEGAL_EFFECTIVE_DATE } from "./constants";
 
 export default function Terms() {
   return (
-    <LegalPage title="Terms of Service" effective={LEGAL_EFFECTIVE_DATE}>
+    <LegalLayout title="Terms of Service" effective={LEGAL_EFFECTIVE_DATE}>
       <p>
         These Terms govern your use of Hook (“Hook”, “we”, “us”), a WhatsApp-based platform that
         connects clients with nearby service providers. By using Hook you agree to these Terms. If
@@ -161,6 +160,6 @@ export default function Terms() {
       <p>
         Questions about these Terms — message us on WhatsApp: <WhatsAppContact />.
       </p>
-    </LegalPage>
+    </LegalLayout>
   );
 }

@@ -6,6 +6,12 @@ if (raw.length === 0) {
 export const SUPPORT_WHATSAPP = raw;
 export const supportWhatsappLink = `https://wa.me/${SUPPORT_WHATSAPP}`;
 
+const buildLink = (text: string) =>
+  `https://wa.me/${SUPPORT_WHATSAPP}?text=${encodeURIComponent(text)}`;
+
+export const clientWhatsappLink = buildLink("Hi! I'm looking for help finding ");
+export const providerWhatsappLink = buildLink("Hi! I'd like to register as a service provider.");
+
 export function formatSupportWhatsapp(digits: string = SUPPORT_WHATSAPP): string {
   if (!(digits.startsWith("220") && digits.length === 10)) {
     return `+${digits}`;
@@ -14,11 +20,3 @@ export function formatSupportWhatsapp(digits: string = SUPPORT_WHATSAPP): string
 }
 
 export const SUPPORT_WHATSAPP_DISPLAY = formatSupportWhatsapp();
-
-export function WhatsAppContact() {
-  return (
-    <a href={supportWhatsappLink}>
-      <code>{SUPPORT_WHATSAPP_DISPLAY}</code>
-    </a>
-  );
-}
