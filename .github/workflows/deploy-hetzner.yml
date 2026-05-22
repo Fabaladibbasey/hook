@@ -128,7 +128,19 @@ jobs:
             # Program.cs now fails fast if migrations are pending — running them here
             # keeps the schema apply on the deploy host (where Postgres is reachable)
             # rather than the GH Actions runner.
-            set -a; . ./.env.prod; set +a
+            while IFS= read -r _ln || [[ -n "$_ln" ]]; do
+              [[ "$_ln" =~ ^[[:space:]]*# ]] && continue
+              [[ "$_ln" != *=* ]] && continue
+              _k="${_ln%%=*}"
+              _v="${_ln#*=}"
+              _v="${_v#[\"\']}"
+              _v="${_v%[\"\']}"
+              case "$_k" in
+                POSTGRES_DB)       POSTGRES_DB="$_v"       ;;
+                POSTGRES_USER)     POSTGRES_USER="$_v"     ;;
+                POSTGRES_PASSWORD) POSTGRES_PASSWORD="$_v" ;;
+              esac
+            done < .env.prod
             docker compose -f docker-compose.prod.yml --env-file .env.prod up -d postgres
             HOOK_NET="$(docker network ls --filter name=hook-net --format '{{.Name}}' | head -n1)"
             [ -n "$HOOK_NET" ] || { echo "hook-net docker network not found" >&2; exit 1; }
