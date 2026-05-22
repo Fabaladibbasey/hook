@@ -123,7 +123,7 @@ Wolverine messaging runs in-process. `Wolverine.DefaultExecutionTimeout` (defaul
 - **`string.Empty` over `""`**: prefer `string.Empty` for runtime values. Literal `""` only where C# requires a compile-time constant — default parameter values, positional record defaults, attribute arguments, and `const` declarations.
 - **Guard clauses, return early**: invert positive `if (success) { body }` into `if (!success) return; body;` to flatten the happy path. Exception: both branches do real work, or unconditional code follows that needs the value.
 - **Avoid nullable primitives and collections; avoid `null` as much as possible**: prefer `string.Empty`, `[]` (empty collection), or `FrozenDictionary<,>.Empty` over `string?` / `List<>?` / `IReadOnlyDictionary<,>?`. Nullable reference types are enabled — let the compiler enforce non-null where the domain allows it. Use `Option`-style return discriminators (e.g. the `ExchangeOutcome` enum) rather than `T?` for "absent vs present" business outcomes.
-- **Gambianize**: tests, fixtures, dev-console scenarios, and docs MUST use Gambian phones (`+220…`) and Banjul coordinates (~`13.45, -16.6`). Never `+1…` US numbers or other locales — the product is Gambia-only. Pre-existing `+1…` numbers in integration tests are legacy; do not add new ones.
+- **Gambianize fixtures**: The Gambia is the default seed market — tests, fixtures, dev-console scenarios, and internal docs MUST use Gambian phones (`+220…`) and Banjul coordinates (~`13.45, -16.6`). Never `+1…` US numbers or other locales in fixtures. Pre-existing `+1…` numbers in integration tests are legacy; do not add new ones. **Product is global** — user-facing copy (landing page, marketing surfaces) must stay locale-neutral; do not bake Gambia into UI strings.
 - **Keep things simple**: less code, less to maintain. Self-explanatory names beat comments. Three similar lines beat a premature abstraction. No half-finished implementations, no error handling for cases that can't happen, no feature flags / backwards-compat shims when you can just change the code.
 
 ## Naming Conventions
@@ -140,7 +140,7 @@ Wolverine messaging runs in-process. `Wolverine.DefaultExecutionTimeout` (defaul
 - **Platform**: Windows 11 dev box. Shell is bash (Git Bash); PowerShell 7+ also available. Use forward slashes and `/dev/null` (not `NUL`). CI runs Ubuntu.
 - **Runtime versions**: .NET 10 SDK (`10.0.x`), Node 20, Postgres 16 + PostGIS 3.4 (CI uses `postgis/postgis:16-3.4`).
 - **Dev runtime**: backend at `:5212`, vite at `:5173`/`:5174`, Postgres at `:5432`.
-- **CI config**: `.github/workflows/ci.yml` — restores, builds Release, runs tests, smoke-publishes a container. `working-directory` defaults to `backend/`.
+- **Build & Test workflow**: `.github/workflows/build-and-test.yml` — restores, builds Release, runs tests, smoke-publishes a container. `working-directory` defaults to `backend/`.
 - **Deploy**: `.github/workflows/deploy.yml`.
 - **Secrets**: never commit `.env*`, `appsettings.Development.json`, `*.pem`, `*.key`, user secrets. `.gitignore` already covers these.
 - **Connection string**: `Host=localhost;Port=5432;Database=hook;Username=hook;Password=hook`.

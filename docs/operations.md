@@ -111,7 +111,7 @@ For schema rollback, restore from the latest pre-deploy `pg_dump` (see Backups a
 
 ## CI / CD
 
-- **CI** (`.github/workflows/ci.yml`): build + test on every push/PR. Postgres service container is provisioned for integration tests.
+- **Build & Test** (`.github/workflows/build-and-test.yml`): build + test on every push/PR. Postgres service container is provisioned for integration tests.
 - **Deploy** (`.github/workflows/deploy-hetzner.yml`): on push to `main` or tag `v*`:
   1. Build multi-stage image, push to GHCR with tags `:<sha>` and `:latest`.
   2. SSH into VPS, `docker compose pull api`, `up -d`, prune.

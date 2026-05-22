@@ -138,7 +138,7 @@ dotnet build -p:BaseOutputPath=bin/altbuild/bin/ -p:BaseIntermediateOutputPath=o
 
 ## CI / Deploy
 
-- `.github/workflows/ci.yml` — restore, Release build, tests, smoke container publish. `working-directory` = `backend/`. Runner: Ubuntu. Postgres provided by Testcontainers (image `postgis/postgis:16-3.4`); CI runner needs Docker.
+- `.github/workflows/build-and-test.yml` — restore, Release build, tests, smoke container publish. `working-directory` = `backend/`. Runner: Ubuntu. Postgres provided by Testcontainers (image `postgis/postgis:16-3.4`); CI runner needs Docker.
 - `.github/workflows/deploy.yml` — deploy pipeline.
 
 ## More Docs
