@@ -196,14 +196,15 @@ jobs:
               "${POSTGRES_DB}" "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" > "$ENV_FILE"
             trap 'rm -f "$ENV_FILE"' EXIT
 
-            # Framework-dependent bundle — needs the .NET runtime image to
-            # execute. runtime:10.0 shares layers with aspnet:10.0 (app base),
-            # so the host already has these layers cached.
+            # Framework-dependent bundle — Hook is ASP.NET Core, so the
+            # bundle requires Microsoft.AspNetCore.App (not just NETCore.App).
+            # aspnet:10.0 is the app container's base image, so layers are
+            # already cached on the host.
             docker run --rm \
               --network "$HOOK_NET" \
               --env-file "$ENV_FILE" \
               -v "$PWD/efbundle:/efbundle:ro" \
-              mcr.microsoft.com/dotnet/runtime:10.0 \
+              mcr.microsoft.com/dotnet/aspnet:10.0 \
               /efbundle
 
   deploy:
