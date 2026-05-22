@@ -62,7 +62,7 @@ public class MatchingServiceTests
     {
         var req = ServiceRequestEntity.Create(
             clientPhone, "plumbing",
-            new Hook.Features.Geocoding.Models.Location(13.4549, -16.5790),
+            new Features.Geocoding.Models.Location(13.4549, -16.5790),
             "Banjul", string.Empty, initialRadiusKm, DateTimeOffset.UtcNow, sharePhoneNumber: false);
         _requestsMock.Setup(x => x.GetAsync(req.Id, It.IsAny<CancellationToken>())).ReturnsAsync(req);
         return req;

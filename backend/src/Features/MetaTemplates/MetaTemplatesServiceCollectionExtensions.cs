@@ -10,7 +10,7 @@ public static class MetaTemplatesServiceCollectionExtensions
 
         services.AddHttpClient<OutboundDispatcher>(OutboundDispatcher.HttpClientName, (sp, http) =>
         {
-            var opts = sp.GetRequiredService<IOptions<Hook.Features.Whatsapp.WhatsappOptions>>().Value;
+            var opts = sp.GetRequiredService<IOptions<Whatsapp.WhatsappOptions>>().Value;
             http.BaseAddress = new Uri(opts.GraphApiBaseUrl);
             http.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", opts.AccessToken);

@@ -117,12 +117,18 @@ public static class DevWhatsappEndpoints
         http.Response.Headers.CacheControl = "no-cache";
         http.Response.Headers["X-Accel-Buffering"] = "no";
 
-        await foreach (var msg in outbox.Subscribe(ct))
+        // Client disconnect surfaces as OperationCanceledException; swallow so it
+        // reports the on-wire 499 instead of an unhandled-exception 500 in logs.
+        try
         {
-            var json = JsonSerializer.Serialize(msg, SseJsonOptions);
-            await http.Response.WriteAsync($"data: {json}\n\n", ct);
-            await http.Response.Body.FlushAsync(ct);
+            await foreach (var msg in outbox.Subscribe(ct))
+            {
+                var json = JsonSerializer.Serialize(msg, SseJsonOptions);
+                await http.Response.WriteAsync($"data: {json}\n\n", ct);
+                await http.Response.Body.FlushAsync(ct);
+            }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
     }
 
     public sealed class DevWhatsappLog;

@@ -143,7 +143,7 @@ public sealed class FakeConversationAi : IConversationAi
         CancellationToken ct = default)
     {
         if (!ParentMap.TryGetValue(proposedSlug, out var parent)) return Task.FromResult<string?>(null);
-        return Task.FromResult<string?>(rootCandidates.Contains(parent, StringComparer.Ordinal) ? parent : null);
+        return Task.FromResult(rootCandidates.Contains(parent, StringComparer.Ordinal) ? parent : null);
     }
 
     public Task<string> GenerateReplyAsync(ReplyContext context, CancellationToken ct = default)

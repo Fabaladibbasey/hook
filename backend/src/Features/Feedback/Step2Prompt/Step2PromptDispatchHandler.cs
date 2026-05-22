@@ -26,7 +26,8 @@ public sealed class Step2PromptDispatchHandler(
             }
         };
 
-        var reply = await AiReplyHelper.TryGenerateAsync(ai, ctx, "step2_feedback", logger, ct);
+        var reply = await AiReplyHelper.TryGenerateAsync(
+            ai, ctx, "step2_feedback", logger, ct, AiReplyHelper.NonCriticalReplyTimeout);
         if (reply is null)
         {
             await feedback.DeletePendingAsync(evt.FeedbackId, ct);

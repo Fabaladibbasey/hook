@@ -18,4 +18,16 @@ public class OllamaOptionsDefaultsTests
     {
         new OllamaOptions().TimeoutSeconds.ShouldBe(120);
     }
+
+    [Fact]
+    public void Defaults_MaxOutputTokens_MatchAppsettings()
+    {
+        var budgets = new OllamaOptions().MaxOutputTokens;
+        budgets.Intent.ShouldBe(60);
+        budgets.Extract.ShouldBe(120);
+        budgets.Judge.ShouldBe(60);
+        budgets.Eta.ShouldBe(60);
+        budgets.Reply.ShouldBe(200);
+        budgets.Language.ShouldBe(30);
+    }
 }

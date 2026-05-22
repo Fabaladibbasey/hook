@@ -22,7 +22,7 @@ public class SecurityHeadersPipelineTests
                 webBuilder.ConfigureServices(s =>
                 {
                     s.AddProblemDetails();
-                    s.AddExceptionHandler<Hook.Shared.Core.GlobalExceptionHandler>();
+                    s.AddExceptionHandler<Shared.Core.GlobalExceptionHandler>();
                 });
                 webBuilder.Configure((context, app) =>
                 {

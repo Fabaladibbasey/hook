@@ -10,8 +10,7 @@ public sealed class AiReadinessProbe(
     IOptions<OllamaOptions> options,
     ILogger<AiReadinessProbe> logger)
 {
-    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(10);
-
+    private readonly TimeSpan _cacheTtl = TimeSpan.FromSeconds(Math.Max(1, options.Value.ReadinessCacheSeconds));
     private readonly TimeSpan _probeTimeout = TimeSpan.FromSeconds(Math.Max(1, options.Value.ReadinessProbeTimeoutSeconds));
     private readonly SemaphoreSlim _gate = new(1, 1);
     private CachedResult? _cached;
@@ -19,14 +18,14 @@ public sealed class AiReadinessProbe(
     public async Task<ProbeResult> ProbeAsync(CancellationToken ct = default)
     {
         var now = clock.GetUtcNow();
-        if (_cached is { } hit && now - hit.CheckedAt < CacheTtl)
+        if (_cached is { } hit && now - hit.CheckedAt < _cacheTtl)
             return new ProbeResult(hit.Healthy, hit.CheckedAt, hit.Error);
 
         await _gate.WaitAsync(ct);
         try
         {
             now = clock.GetUtcNow();
-            if (_cached is { } recheck && now - recheck.CheckedAt < CacheTtl)
+            if (_cached is { } recheck && now - recheck.CheckedAt < _cacheTtl)
                 return new ProbeResult(recheck.Healthy, recheck.CheckedAt, recheck.Error);
 
             using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);

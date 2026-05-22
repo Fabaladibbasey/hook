@@ -245,6 +245,31 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
     }
 
     [Fact]
+    public async Task GetLatestPendingForClient_OtherClientPending_DoesNotLeak()
+    {
+        var clientA = UniquePhone();
+        var clientB = UniquePhone();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+
+        var (_, matchA) = await SeedMatchAsync(db, clientA);
+        var (_, matchB) = await SeedMatchAsync(db, clientB);
+        db.MatchFeedback.AddRange(
+            MatchFeedback.CreatePending(matchA.Id, matchA.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow),
+            MatchFeedback.CreatePending(matchB.Id, matchB.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow));
+        await db.SaveChangesAsync();
+
+        var forA = await repo.GetLatestPendingForClientAsync(clientA);
+        Assert.NotNull(forA);
+        Assert.Equal(matchA.Id, forA!.MatchId);
+
+        var forB = await repo.GetLatestPendingForClientAsync(clientB);
+        Assert.NotNull(forB);
+        Assert.Equal(matchB.Id, forB!.MatchId);
+    }
+
+    [Fact]
     public async Task GetLatestPendingForClient_MultiplePending_ReturnsLatestPromptedAt()
     {
         var clientPhone = UniquePhone();

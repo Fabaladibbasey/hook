@@ -214,6 +214,11 @@ namespace Hook.Shared.Persistence.Data.Migrations
                     b.HasIndex("PromptedAt")
                         .HasDatabaseName("ix_match_feedback_prompted_at");
 
+                    b.HasIndex("Answer", "PromptedAt")
+                        .IsDescending(false, true)
+                        .HasDatabaseName("ix_match_feedback_pending_prompted_at")
+                        .HasFilter("\"Answer\" = 'Pending'");
+
                     b.HasIndex("MatchId", "Step")
                         .IsUnique()
                         .HasDatabaseName("ux_match_feedback_pending")
@@ -573,21 +578,36 @@ namespace Hook.Shared.Persistence.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ClientPhone")
-                        .HasDatabaseName("ix_service_requests_client_phone");
-
                     b.HasIndex("CreatedAt")
-                        .HasDatabaseName("ix_service_requests_created_at");
+                        .HasDatabaseName("ix_service_requests_closed_created_at")
+                        .HasFilter("\"Status\" = 'Closed'");
 
                     b.HasIndex("Location")
                         .HasDatabaseName("ix_service_requests_location");
 
                     NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Location"), "gist");
 
-                    b.HasIndex("Status")
-                        .HasDatabaseName("ix_service_requests_status");
+                    b.HasIndex("ClientPhone", "Status")
+                        .HasDatabaseName("ix_service_requests_client_phone_status");
 
                     b.ToTable("service_requests", (string)null);
+                });
+
+            modelBuilder.Entity("Hook.Features.ServiceTaxonomy.JudgeParent.JudgeParentDedup", b =>
+                {
+                    b.Property<string>("Slug")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTimeOffset>("JudgedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Slug");
+
+                    b.HasIndex("JudgedAt")
+                        .HasDatabaseName("ix_judge_parent_dedup_judged_at");
+
+                    b.ToTable("judge_parent_dedup", (string)null);
                 });
 
             modelBuilder.Entity("Hook.Features.ServiceTaxonomy.ServiceAggregate.Service", b =>

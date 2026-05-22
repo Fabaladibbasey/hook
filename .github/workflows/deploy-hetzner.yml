@@ -123,6 +123,30 @@ jobs:
             cd "$REPO_DIR/backend"
             export HOOK_IMAGE="${{ needs.build-push.outputs.image }}"
             docker compose -f docker-compose.prod.yml --env-file .env.prod pull api
+
+            # Apply EF migrations against the live DB before swapping the api container.
+            # Program.cs now fails fast if migrations are pending — running them here
+            # keeps the schema apply on the deploy host (where Postgres is reachable)
+            # rather than the GH Actions runner.
+            set -a; . ./.env.prod; set +a
+            docker compose -f docker-compose.prod.yml --env-file .env.prod up -d postgres
+            HOOK_NET="$(docker network ls --filter name=hook-net --format '{{.Name}}' | head -n1)"
+            [ -n "$HOOK_NET" ] || { echo "hook-net docker network not found" >&2; exit 1; }
+            # Build a tmp env file with 0600 perms so the DB password never enters
+            # the migration container's argv (docker inspect would otherwise leak it
+            # to anyone in the docker group — CWE-526).
+            ENV_FILE="$(mktemp)"
+            chmod 600 "$ENV_FILE"
+            printf 'ConnectionStrings__HookDb=Host=postgres;Port=5432;Database=%s;Username=%s;Password=%s\n' \
+              "${POSTGRES_DB}" "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" > "$ENV_FILE"
+            trap 'rm -f "$ENV_FILE"' EXIT
+            docker run --rm \
+              --network "$HOOK_NET" \
+              --env-file "$ENV_FILE" \
+              -v "$REPO_DIR/backend:/src" -w /src \
+              mcr.microsoft.com/dotnet/sdk:10.0 \
+              sh -c "dotnet tool restore >/dev/null && dotnet ef database update --project src/Hook.csproj -p:SkipFrontendBuild=true -- --environment Production"
+
             docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
             # Bind-mounted config files (Caddyfile, etc.) don't trigger a
             # compose recreate when they change on the host; restart caddy

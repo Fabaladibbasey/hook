@@ -9,7 +9,7 @@ public sealed class OutboundDispatcher(
     HttpClient httpClient,
     IWhatsappClient freeForm,
     IWhatsappContactRepository contacts,
-    IOptions<Hook.Features.Whatsapp.WhatsappOptions> whatsappOptions,
+    IOptions<WhatsappOptions> whatsappOptions,
     TimeProvider clock,
     ILogger<OutboundDispatcher> logger)
 {

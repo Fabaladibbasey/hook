@@ -39,8 +39,9 @@ public sealed class DevPipelineFixture : IAsyncLifetime
 
     // Host startup hits Serilog's static Log.Logger via UseSerilog. With parallel shard
     // fixtures, concurrent host builds race on the global ReloadableLogger and throw
-    // "logger is already frozen". Serialize that one-time host build per fixture.
-    private static readonly SemaphoreSlim HostInitLock = new(1, 1);
+    // "logger is already frozen". Serialize that one-time host build per fixture —
+    // shared with HookAppFixture (SmokeTests) which also boots its own host.
+    internal static readonly SemaphoreSlim HostInitLock = new(1, 1);
 
     private string _shardDbName = string.Empty;
     private string? _truncateSql;
@@ -57,7 +58,7 @@ public sealed class DevPipelineFixture : IAsyncLifetime
         };
     }
 
-    public WebApplicationFactory<global::Hook.Program> Factory { get; private set; } = default!;
+    public WebApplicationFactory<Program> Factory { get; private set; } = default!;
 
     public async Task InitializeAsync()
     {
@@ -123,7 +124,7 @@ public sealed class DevPipelineFixture : IAsyncLifetime
             MaxPoolSize = 20
         }.ConnectionString;
 
-        Factory = new WebApplicationFactory<global::Hook.Program>()
+        Factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(b =>
             {
                 b.UseEnvironment("Test");

@@ -1,7 +1,6 @@
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
 using Hook.Features.ContactSharing.ExchangePhones;
-using Hook.Features.Feedback;
 using Hook.Features.Feedback.AggregateStats;
 using Hook.Features.MetaTemplates;
 using Hook.Features.ProviderAvailability.AvailabilityAggregate;
@@ -24,10 +23,9 @@ public sealed class InboundRouterHandler(
     IClientRequestDraftRepository clientDrafts,
     IRegistrationDraftRepository registrationDrafts,
     IAmbiguousIntentDraftRepository ambiguousDrafts,
-    IServiceRequestRepository requests,
-    IFeedbackRepository feedback,
     IMatchRepository matches,
     IProviderAvailabilityRepository providers,
+    InboundPrefetchRepository prefetch,
     IMessageBus bus,
     ClientRequestOrchestrator clientOrchestrator,
     RegistrationOrchestrator registrationOrchestrator,
@@ -95,7 +93,9 @@ public sealed class InboundRouterHandler(
         // detection happens only on the no-active-draft path below.
         var hint = QuickIntent.DetectIntentHint(text);
 
-        if (await registrationDrafts.GetAsync(phone, ct) is not null)
+        // Lazy lookups in the order the router consumes them — first hit short-circuits
+        // and avoids the remaining RTTs. Happy-path "active registration draft" is one RTT.
+        if (await prefetch.GetRegistrationDraftAsync(phone, ct) is not null)
         {
             // Cross-flow switch: provider mid-registration sends a strong service-request
             // hint ("I need …", "my X is broken", "no power"). Discard the reg draft and
@@ -114,7 +114,7 @@ public sealed class InboundRouterHandler(
             return;
         }
 
-        if (await clientDrafts.GetAsync(phone, ct) is not null)
+        if (await prefetch.GetClientDraftAsync(phone, ct) is not null)
         {
             // Cross-flow switch: client mid-request sends a strong provider-registration
             // hint ("I'm a plumber", "I offer carpentry"). Discard client draft and route
@@ -132,16 +132,17 @@ public sealed class InboundRouterHandler(
             return;
         }
 
-        if (await TryResolveAmbiguousAsync(msg, text, masked, ct)) return;
+        var ambiguousDraft = await prefetch.GetAmbiguousDraftAsync(phone, ct);
+        if (await TryResolveAmbiguousAsync(msg, ambiguousDraft, text, masked, ct)) return;
 
-        if (await feedback.GetLatestPendingForClientAsync(phone, ct) is { } pendingFeedback)
+        if (await prefetch.GetPendingFeedbackAsync(phone, ct) is { } pendingFeedback)
         {
             logger.LogDebug("Route → FeedbackResponseService (pending feedback) for {Phone}", masked);
             await feedbackService.HandleAsync(msg, pendingFeedback, ct);
             return;
         }
 
-        var activeRequest = await requests.GetActiveByClientAsync(phone, ct);
+        var activeRequest = await prefetch.GetActiveRequestAsync(phone, ct);
 
         if (activeRequest is not null && PickProviderResolver.IsPickIntent(text))
         {
@@ -294,9 +295,8 @@ public sealed class InboundRouterHandler(
     /// Returns true if the message was consumed (caller must stop processing).
     /// </summary>
     private async Task<bool> TryResolveAmbiguousAsync(
-        InboundMessage msg, string text, string masked, CancellationToken ct)
+        InboundMessage msg, AmbiguousIntentDraft? draft, string text, string masked, CancellationToken ct)
     {
-        var draft = await ambiguousDrafts.GetAsync(msg.From.Value, ct);
         if (draft is null) return false;
 
         if (clock.GetUtcNow() - draft.CreatedAt > AmbiguousDraftTtl)
@@ -393,7 +393,7 @@ public sealed class InboundRouterHandler(
                             nameof(outcome), outcome, "Unhandled ExchangeOutcome — extend the switch.");
                 }
             }
-            catch (Npgsql.PostgresException ex) when (IsTransientPostgres(ex.SqlState))
+            catch (PostgresException ex) when (IsTransientPostgres(ex.SqlState))
             {
                 logger.LogWarning(ex, "Transient Postgres failure during PhoneExchanger for match {MatchId}", p.Match.Id);
                 transientFail++;

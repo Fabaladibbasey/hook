@@ -16,7 +16,11 @@ public class MatchConfiguration : IEntityTypeConfiguration<Match>
         builder.Property(m => m.ServiceSlug).HasMaxLength(80).IsRequired();
         // Schema-only safety net: code default (Match.Kind = Exact) drives every
         // insert. Kept so a raw SQL insert / future patch path can't store NULL.
-        builder.PropertyAsStringEnum(m => m.Kind, 12).HasDefaultValueSql("'Exact'");
+        // Sentinel tells EF the CLR default (Exact) is "set" — without it EF treats
+        // Exact as "unset" and lets the DB default fill it, producing a startup warning.
+        builder.PropertyAsStringEnum(m => m.Kind, 12)
+               .HasDefaultValueSql("'Exact'")
+               .HasSentinel(MatchKind.Exact);
         builder.HasIndex(m => m.RequestId).HasDatabaseName("ix_matches_request_id");
         builder.HasIndex(m => m.ProviderPhone).HasDatabaseName("ix_matches_provider_phone");
         builder.HasIndex(m => new { m.RequestId, m.PickedAt }).HasDatabaseName("ix_matches_request_picked_at");

@@ -11,6 +11,7 @@ public static class RetentionServiceCollectionExtensions
         services.AddValidatedOptions<RetentionOptions>(configuration);
         services.AddScoped<IRetentionSweeper, RetentionSweeper>();
         services.AddHostedService<RetentionHostedService>();
+        services.AddHostedService<WolverineDlqIndexBootstrap>();
         services.TryAddSingleton(TimeProvider.System);
         return services;
     }
