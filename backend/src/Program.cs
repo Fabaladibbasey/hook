@@ -210,9 +210,10 @@ try
         // Wolverine error policies — intentionally narrow:
         // (1) OCE during graceful shutdown is the documented drain path; discard so the
         //     next host start does not retry user-facing sends. Handler-local OCEs fall
-        //     through to default (DLQ) so the bug is visible. Uses
-        //     IHostApplicationLifetime.ApplicationStopping rather than the process-global
-        //     Environment.HasShutdownStarted so WebApplicationFactory tests behave.
+        //     through to default (DLQ) so the bug is visible. IsStopping is armed by
+        //     the IHostApplicationLifetime.ApplicationStopping subscription registered
+        //     after app.Build() below; Environment.HasShutdownStarted is a belt-and-
+        //     suspenders fallback for late finalizer paths.
         // (2) Transient PG split into fast (deadlock/serialization, <1s cooldown) + slow
         //     (connection storm, multi-second cooldown). Both walk InnerException so EF's
         //     DbUpdateException(PostgresException) wrap also retries. Non-transient PG
@@ -237,6 +238,12 @@ try
     });
 
     var app = builder.Build();
+
+    // Arm WolverineShutdownGate at the start of graceful drain so the OCE-Discard
+    // policy above sees IsStopping == true before Wolverine.StopAsync cancels
+    // in-flight handlers. Environment.HasShutdownStarted alone is too late — it
+    // only flips during AppDomain teardown, after the drain has finished.
+    app.Lifetime.ApplicationStopping.Register(WolverineShutdownGate.Trip);
 
     {
         // Migrations are applied out-of-band (CI deploy step, or `dotnet ef database
