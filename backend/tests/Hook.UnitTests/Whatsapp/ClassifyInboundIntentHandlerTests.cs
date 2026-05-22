@@ -2,9 +2,7 @@ using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
 using Hook.Features.Whatsapp.Models;
 using Hook.Features.Whatsapp.Phone;
-using Hook.Features.Whatsapp.ReceiveWebhook;
 using Hook.Features.Whatsapp.ReceiveWebhook.ClassifyInboundIntent;
-using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Shouldly;
 using Wolverine;
@@ -24,8 +22,7 @@ public class ClassifyInboundIntentHandlerTests
             .Returns(Task.CompletedTask);
     }
 
-    private ClassifyInboundIntentHandler Build() =>
-        new(_aiMock.Object, NullLogger<ClassifyInboundIntentHandler>.Instance);
+    private ClassifyInboundIntentHandler Build() => new(_aiMock.Object);
 
     private static InboundMessage Inbound(string text) =>
         new("m-" + Guid.NewGuid(), PhoneNumber.Parse("+220300001"),
@@ -48,10 +45,13 @@ public class ClassifyInboundIntentHandlerTests
     }
 
     [Fact]
-    public async Task Handle_AiThrows_FallsBackToUnknownIntent()
+    public async Task Handle_AdapterReturnsNeutralFallback_RoutesUnknown()
     {
+        // OllamaConversationAi.TryCallAsync absorbs transport failures and returns
+        // this neutral value; the handler must pass it through without inspection.
+        var fallback = new IntentDetectionResult(IntentKind.Unknown, 0, "en", "exception");
         _aiMock.Setup(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new HttpRequestException("ollama down"));
+            .ReturnsAsync(fallback);
 
         await Build().Handle(new ClassifyInboundIntentRequested(Inbound("hi")), _busMock.Object, CancellationToken.None);
 
@@ -61,8 +61,10 @@ public class ClassifyInboundIntentHandlerTests
     }
 
     [Fact]
-    public async Task Handle_CancellationRequested_RethrowsAndDoesNotRoute()
+    public async Task Handle_OuterCancellation_RethrowsAndDoesNotRoute()
     {
+        // Adapter rethrows OCE when the outer token signalled — handler has no
+        // catch, so the exception propagates to Wolverine's shutdown policy.
         using var cts = new CancellationTokenSource();
         cts.Cancel();
         _aiMock.Setup(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))

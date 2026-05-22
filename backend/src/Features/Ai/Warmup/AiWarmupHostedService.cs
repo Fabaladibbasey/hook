@@ -38,7 +38,7 @@ public sealed class AiWarmupHostedService(
         {
             await using var scope = _services.CreateAsyncScope();
             var ai = scope.ServiceProvider.GetRequiredService<IConversationAi>();
-            _ = await ai.DetectIntentAsync("ping", budgetCts.Token);
+            await ai.PingAsync(budgetCts.Token);
             _logger.LogInformation(
                 "AI warm-up complete after {ElapsedMs} ms", sw.ElapsedMilliseconds);
             _warmupCompletion.TrySetResult();

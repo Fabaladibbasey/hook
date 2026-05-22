@@ -1,5 +1,4 @@
 using Hook.Features.Feedback;
-using Hook.Features.Feedback.AggregateStats;
 using Hook.Features.Feedback.Eta;
 using Hook.Features.Feedback.Models;
 using Hook.Features.Whatsapp.Phone;

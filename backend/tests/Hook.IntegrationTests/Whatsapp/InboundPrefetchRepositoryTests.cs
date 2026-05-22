@@ -1,4 +1,3 @@
-using Hook.Features.Feedback;
 using Hook.Features.Feedback.Models;
 using Hook.Features.Geocoding.Models;
 using Hook.Features.Matching.MatchAggregate;

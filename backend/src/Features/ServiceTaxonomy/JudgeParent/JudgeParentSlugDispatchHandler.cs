@@ -29,18 +29,10 @@ public sealed class JudgeParentSlugDispatchHandler(
             return;
         }
 
-        string? parent;
-        try
-        {
-            parent = await ai.JudgeParentSlugAsync(evt.Slug, RootSectorSeeder.RootSlugs, svc.RawExamples, ct);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, "[Taxonomy] Parent inference failed for {Slug}; staying root.", evt.Slug);
-            return;
-        }
-
+        var parent = await ai.JudgeParentSlugAsync(evt.Slug, RootSectorSeeder.RootSlugs, svc.RawExamples, ct);
         if (parent is null) return;
+        // Defense-in-depth: the adapter at OllamaConversationAi.cs:197 also
+        // validates against `candidates`; both must use StringComparer.Ordinal.
         if (!RootSectorSeeder.RootSlugSet.Contains(parent))
         {
             logger.LogWarning("[Taxonomy] AI returned out-of-list parent {Parent} for {Slug}; dropping.", parent, evt.Slug);

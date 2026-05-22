@@ -24,7 +24,18 @@ public sealed class OllamaConversationAi(
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
-    public async Task<IntentDetectionResult> DetectIntentAsync(string userMessage, CancellationToken ct = default)
+    public Task PingAsync(CancellationToken ct = default) =>
+        DetectIntentCoreAsync("ping", ct);
+
+    public Task<IntentDetectionResult> DetectIntentAsync(string userMessage, CancellationToken ct = default) =>
+        TryCallAsync(AiStage.Classify, IntentFallback,
+            () => DetectIntentCoreAsync(userMessage, ct), ct);
+
+    private static readonly IntentDetectionResult IntentFallback =
+        new(IntentKind.Unknown, 0, "en", "exception");
+    private static readonly ServiceExtractionResult ExtractFallback = new([]);
+
+    private async Task<IntentDetectionResult> DetectIntentCoreAsync(string userMessage, CancellationToken ct)
     {
         var schema = new
         {
@@ -65,7 +76,11 @@ public sealed class OllamaConversationAi(
         return new IntentDetectionResult(intent, confidence, language, notes);
     }
 
-    public async Task<ServiceExtractionResult> ExtractServicesAsync(string userMessage, CancellationToken ct = default)
+    public Task<ServiceExtractionResult> ExtractServicesAsync(string userMessage, CancellationToken ct = default) =>
+        TryCallAsync(AiStage.ExtractServices, ExtractFallback,
+            () => ExtractServicesCoreAsync(userMessage, ct), ct);
+
+    private async Task<ServiceExtractionResult> ExtractServicesCoreAsync(string userMessage, CancellationToken ct)
     {
         var schema = new
         {
@@ -92,10 +107,18 @@ public sealed class OllamaConversationAi(
         return new ServiceExtractionResult(slugs);
     }
 
-    public async Task<ServiceJudgeResult> JudgeServiceMatchAsync(
+    public Task<ServiceJudgeResult> JudgeServiceMatchAsync(
         string proposedSlug,
         IReadOnlyList<string> candidateSlugs,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        TryCallAsync(AiStage.JudgeMatch,
+            new ServiceJudgeResult(string.Empty, IsNew: true, ProposedSlug: proposedSlug),
+            () => JudgeServiceMatchCoreAsync(proposedSlug, candidateSlugs, ct), ct);
+
+    private async Task<ServiceJudgeResult> JudgeServiceMatchCoreAsync(
+        string proposedSlug,
+        IReadOnlyList<string> candidateSlugs,
+        CancellationToken ct)
     {
         var schema = new
         {
@@ -133,11 +156,19 @@ public sealed class OllamaConversationAi(
         return new ServiceJudgeResult(matched, isNew, ProposedSlug: proposedSlug);
     }
 
-    public async Task<string?> JudgeParentSlugAsync(
+    public Task<string?> JudgeParentSlugAsync(
         string proposedSlug,
         IReadOnlyList<string> rootCandidates,
         IReadOnlyList<string> rawExamples,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        TryCallAsync<string?>(AiStage.JudgeParent, null,
+            () => JudgeParentSlugCoreAsync(proposedSlug, rootCandidates, rawExamples, ct), ct);
+
+    private async Task<string?> JudgeParentSlugCoreAsync(
+        string proposedSlug,
+        IReadOnlyList<string> rootCandidates,
+        IReadOnlyList<string> rawExamples,
+        CancellationToken ct)
     {
         if (rootCandidates.Count == 0) return null;
 
@@ -219,7 +250,11 @@ public sealed class OllamaConversationAi(
         return reply;
     }
 
-    public async Task<DateTimeOffset?> ExtractEtaAsync(string userMessage, DateTimeOffset now, CancellationToken ct = default)
+    public Task<DateTimeOffset?> ExtractEtaAsync(string userMessage, DateTimeOffset now, CancellationToken ct = default) =>
+        TryCallAsync<DateTimeOffset?>(AiStage.ExtractEta, null,
+            () => ExtractEtaCoreAsync(userMessage, now, ct), ct);
+
+    private async Task<DateTimeOffset?> ExtractEtaCoreAsync(string userMessage, DateTimeOffset now, CancellationToken ct)
     {
         var schema = new
         {
@@ -281,6 +316,48 @@ public sealed class OllamaConversationAi(
         return new LanguageDetectionResult(lang, conf);
     }
 
+    private enum AiStage { Classify, ExtractServices, JudgeMatch, JudgeParent, ExtractEta }
+
+    private static string TagOf(AiStage stage) => stage switch
+    {
+        AiStage.Classify => "classify",
+        AiStage.ExtractServices => "extract-services",
+        AiStage.JudgeMatch => "judge-match",
+        AiStage.JudgeParent => "judge-parent",
+        AiStage.ExtractEta => "extract-eta",
+        _ => throw new ArgumentOutOfRangeException(nameof(stage), stage, null)
+    };
+
+    // Outer-token cancellation rethrows so Wolverine's shutdown OCE policy can
+    // discard cleanly. Everything else increments AiOutboundDropped(stage=…) and
+    // returns the neutral fallback. Classify also increments the dedicated
+    // AiClassifyFailures counter that pre-existed this consolidation — the
+    // double-count between AiClassifyFailures (legacy single-metric) and
+    // AiOutboundDropped(stage=classify) (new tag-set) is intentional so
+    // pre-existing dashboards keep working.
+    private async Task<T> TryCallAsync<T>(AiStage stage, T fallback, Func<Task<T>> work, CancellationToken ct)
+    {
+        try
+        {
+            return await work();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var tag = TagOf(stage);
+            logger.LogWarning(ex, "AI {Stage} failed; returning neutral fallback", tag);
+            HookMetrics.AiOutboundDropped.Add(1,
+                new KeyValuePair<string, object?>("stage", tag),
+                new KeyValuePair<string, object?>("reason", "exception"));
+            if (stage == AiStage.Classify)
+                HookMetrics.AiClassifyFailures.Add(1);
+            return fallback;
+        }
+    }
+
     private async Task<JsonDocument> CallJsonAsync(string systemInstruction, string userText, object responseSchema, int numPredict, CancellationToken ct)
     {
         var raw = await CallAsync(systemInstruction, userText, responseSchema, numPredict, ct);
@@ -321,7 +398,9 @@ public sealed class OllamaConversationAi(
         };
 
         var sw = Stopwatch.StartNew();
-        var outcome = "ok";
+        // 4xx/5xx now tag "http_error"; pre-consolidation always tagged
+        // "exception". Dashboard panels may need a backfill alias.
+        var outcome = "exception";
         try
         {
             using var response = await httpClient.SendAsync(request, ct);
@@ -338,12 +417,8 @@ public sealed class OllamaConversationAi(
             if (logger.IsEnabled(LogLevel.Debug))
                 logger.LogDebug("Ollama response (truncated): {Output}", Truncate(output, 200));
 
+            outcome = "ok";
             return output;
-        }
-        catch
-        {
-            if (outcome == "ok") outcome = "exception";
-            throw;
         }
         finally
         {

@@ -84,7 +84,10 @@ public sealed class ChatHub(IChatRepository chats, HookDbContext db, ChatSchedul
         await Clients.OthersInGroup(ChatGroup(chatId)).SendAsync(ChatHubConstants.Events.PeerKeyAvailable, new
         {
             peerParticipantId = participantId,
-            peerPublicKeyB64 = publicKeyB64
+            // Re-encode from the decoded SPKI rather than echoing the client's
+            // b64 string. Kills cross-browser whitespace drift + matches the
+            // peer?.PublicKey path above that always re-encodes.
+            peerPublicKeyB64 = Convert.ToBase64String(spki)
         });
 
         logger.LogDebug("Public key published chat={ChatId} participant={ParticipantId}", chatId, participantId);
@@ -194,14 +197,18 @@ public sealed class ChatHub(IChatRepository chats, HookDbContext db, ChatSchedul
     private Task RejectAsync(Guid messageId, MessageRejectReason reason) =>
         Clients.Caller.SendAsync(ChatHubConstants.Events.MessageSendRejected, new MessageSendRejectedDto(messageId, reason));
 
-    private static bool TryDecodeBytes(string? b64, int minLen, int maxLen, out byte[] bytes)
+    // Pre-check bounds the buffer allocation against length-attacks before
+    // allocating ((b64.Length + 3) / 4) * 3 bytes.
+    internal static bool TryDecodeBytes(string? b64, int minLen, int maxLen, out byte[] bytes)
     {
         bytes = [];
         if (string.IsNullOrEmpty(b64)) return false;
         if (b64.Length > (maxLen / 3 + 1) * 4 + 4) return false;
-        try { bytes = Convert.FromBase64String(b64); }
-        catch (FormatException) { return false; }
-        return bytes.Length >= minLen && bytes.Length <= maxLen;
+        var buffer = new byte[((b64.Length + 3) / 4) * 3];
+        if (!Convert.TryFromBase64String(b64, buffer, out var written)) return false;
+        if (written < minLen || written > maxLen) return false;
+        bytes = written == buffer.Length ? buffer : buffer[..written];
+        return true;
     }
 
     private static object ToWire(ChatMessage msg) => new

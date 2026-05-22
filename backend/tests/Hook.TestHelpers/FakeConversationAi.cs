@@ -24,6 +24,8 @@ public sealed class FakeConversationAi : IConversationAi
         ExtractEtaCalls = 0;
     }
 
+    public Task PingAsync(CancellationToken ct = default) => Task.CompletedTask;
+
     public Task<IntentDetectionResult> DetectIntentAsync(string userMessage, CancellationToken ct = default)
     {
         DetectIntentCalls++;

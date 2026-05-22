@@ -26,6 +26,9 @@ public static class HookMetrics
     public static readonly Counter<long> AiClassifyFailures =
         Meter.CreateCounter<long>("hook.ai.classify_failures");
 
+    public static readonly Counter<long> ChatHubFaults =
+        Meter.CreateCounter<long>("hook.chat_hub.faults");
+
     public static readonly Counter<long> GeocodeCacheHits =
         Meter.CreateCounter<long>("hook.geocode.cache_hits");
 
@@ -46,4 +49,7 @@ public static class HookMetrics
 
     public static readonly Counter<long> RetentionSweepErrors =
         Meter.CreateCounter<long>("hook.retention.sweep.errors");
+
+    public static readonly Counter<long> DlqIndexBootstrapMissedRetries =
+        Meter.CreateCounter<long>("hook.dlq_index_bootstrap.missed_retries");
 }

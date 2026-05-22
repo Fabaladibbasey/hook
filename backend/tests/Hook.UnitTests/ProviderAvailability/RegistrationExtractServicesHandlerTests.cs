@@ -49,7 +49,7 @@ public class RegistrationExtractServicesHandlerTests
     }
 
     private RegistrationExtractServicesHandler Build() =>
-        new(_aiMock.Object, _slugResolverMock.Object, NullLogger<RegistrationExtractServicesHandler>.Instance);
+        new(_aiMock.Object, _slugResolverMock.Object);
 
     [Fact]
     public async Task Handle_NoSlugs_InvokesAdvanceWithEmptyList()
@@ -85,10 +85,12 @@ public class RegistrationExtractServicesHandlerTests
     }
 
     [Fact]
-    public async Task Handle_AiThrows_InvokesAdvanceWithEmptyList()
+    public async Task Handle_AdapterReturnsEmpty_InvokesAdvanceWithEmptyList()
     {
+        // OllamaConversationAi.TryCallAsync absorbs transport failures and returns
+        // an empty ServiceExtractionResult; handler must pass through with no slugs.
         _aiMock.Setup(x => x.ExtractServicesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new HttpRequestException("ollama down"));
+            .ReturnsAsync(new ServiceExtractionResult([]));
 
         await Build().Handle(
             new RegistrationExtractServicesRequested("+220300001", "I offer plumbing", RegistrationExtractMode.AddToExisting),
@@ -100,28 +102,30 @@ public class RegistrationExtractServicesHandlerTests
     }
 
     [Fact]
-    public async Task Handle_SlugResolverThrows_PoisonsWholeBatch_InvokesEmpty()
+    public async Task Handle_SlugResolverThrows_Propagates()
     {
-        // Catch-all guarantees that one bad slug doesn't half-fill the canonical list and
-        // lead to half-published "Updated: …" reply lines. Falls back to empty so the
-        // orchestrator goes through the no-slug branch.
+        // After the AI-catch consolidation the handler no longer absorbs
+        // SlugResolver failures. Errors propagate to Wolverine, which retries on
+        // transient pg states (Shared/Messaging.TransientPgStates) and DLQs after
+        // MaxAttempts. The exception aborts before bus.InvokeAsync so no
+        // half-resolved batch ever reaches the orchestrator. Mock the method
+        // production actually calls (ResolveBatchAsync), overriding the
+        // delegating ctor setup so the throw isn't muted.
         _aiMock.Setup(x => x.ExtractServicesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ServiceExtractionResult(["plumber", "carpentry"]));
-        _slugResolverMock.Setup(x => x.ResolveAsync("plumber", It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ResolveSlugResult("plumbing", SlugResolution.AutoMerged, 0.9));
-        _slugResolverMock.Setup(x => x.ResolveAsync("carpentry", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _slugResolverMock.Setup(x => x.ResolveBatchAsync(
+                It.IsAny<IReadOnlyList<string>>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("slug resolver blew up"));
 
-        await Build().Handle(
+        await Should.ThrowAsync<InvalidOperationException>(() => Build().Handle(
             new RegistrationExtractServicesRequested("+220300001", "plumber and carpentry", RegistrationExtractMode.NewRegistration),
-            _busMock.Object, CancellationToken.None);
+            _busMock.Object, CancellationToken.None));
 
-        _invoked.ShouldHaveSingleItem();
-        _invoked[0].CanonicalSlugs.ShouldBeEmpty();
+        _invoked.ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task Handle_CancellationRequested_RethrowsAndDoesNotInvoke()
+    public async Task Handle_OuterCancellation_RethrowsAndDoesNotInvoke()
     {
         using var cts = new CancellationTokenSource();
         cts.Cancel();

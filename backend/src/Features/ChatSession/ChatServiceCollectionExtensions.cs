@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.SignalR;
+
 namespace Hook.Features.ChatSession;
 
 public static class ChatServiceCollectionExtensions
@@ -9,10 +11,13 @@ public static class ChatServiceCollectionExtensions
         services.AddScoped<IChatRepository, ChatRepository>();
         services.AddScoped<ChatSessionFactory>();
 
+        services.AddSingleton<ChatHubExceptionFilter>();
+
         services.AddSignalR(options =>
         {
             options.EnableDetailedErrors = false;
             options.MaximumReceiveMessageSize = 32 * 1024;
+            options.AddFilter<ChatHubExceptionFilter>();
         });
 
         return services;

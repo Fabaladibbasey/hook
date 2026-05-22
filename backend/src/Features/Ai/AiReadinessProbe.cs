@@ -33,7 +33,7 @@ public sealed class AiReadinessProbe(
 
             try
             {
-                _ = await ai.DetectIntentAsync("ping", probeCts.Token);
+                await ai.PingAsync(probeCts.Token);
                 _cached = new CachedResult(true, now, string.Empty);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)

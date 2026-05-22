@@ -35,8 +35,7 @@ public class ExtractServicesHandlerTests
             .Returns(Task.CompletedTask);
     }
 
-    private ExtractServicesHandler Build() =>
-        new(_aiMock.Object, _slugResolverMock.Object, NullLogger<ExtractServicesHandler>.Instance);
+    private ExtractServicesHandler Build() => new(_aiMock.Object, _slugResolverMock.Object);
 
     [Fact]
     public async Task Handle_AiReturnsNoSlugs_InvokesAdvanceWithEmptyCanonical()
@@ -56,10 +55,13 @@ public class ExtractServicesHandlerTests
     }
 
     [Fact]
-    public async Task Handle_AiThrows_InvokesAdvanceWithEmptyCanonical()
+    public async Task Handle_AdapterReturnsEmpty_InvokesAdvanceWithEmptyCanonical()
     {
+        // OllamaConversationAi.TryCallAsync absorbs transport failures and returns
+        // an empty ServiceExtractionResult; handler must short-circuit slug
+        // resolution and advance with an empty canonical slug.
         _aiMock.Setup(x => x.ExtractServicesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new HttpRequestException("ollama down"));
+            .ReturnsAsync(new ServiceExtractionResult([]));
 
         await Build().Handle(
             new ExtractServicesRequested("+220300001", "I need a plumber", IsSwitch: true),
@@ -68,6 +70,8 @@ public class ExtractServicesHandlerTests
         _invoked.ShouldHaveSingleItem();
         _invoked[0].CanonicalSlug.ShouldBe(string.Empty);
         _invoked[0].IsSwitch.ShouldBeTrue();
+        _slugResolverMock.Verify(x => x.ResolveAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -88,7 +92,7 @@ public class ExtractServicesHandlerTests
     }
 
     [Fact]
-    public async Task Handle_CancellationRequested_RethrowsAndDoesNotInvoke()
+    public async Task Handle_OuterCancellation_RethrowsAndDoesNotInvoke()
     {
         using var cts = new CancellationTokenSource();
         cts.Cancel();

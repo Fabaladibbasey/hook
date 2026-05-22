@@ -85,23 +85,21 @@ public class JudgeParentSlugDispatchHandlerTests
     }
 
     [Fact]
-    public async Task Handle_NoOp_WhenAiThrows()
+    public async Task Handle_AiThrows_Propagates()
     {
+        // AI failure absorption lives in OllamaConversationAi.TryCallAsync — the
+        // production adapter returns null on transport failure, so this path
+        // doesn't fire. A mock that throws bubbles past the handler unchanged
+        // (no try-catch); Wolverine handles transient retry + DLQ.
         SetupSlug(Service.Create("astrology"));
         _ai.Setup(a => a.JudgeParentSlugAsync(It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(),
                 It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("ollama down"));
 
-        await Build().Handle(new JudgeParentSlugRequested("astrology"), CancellationToken.None);
+        await Should.ThrowAsync<HttpRequestException>(() =>
+            Build().Handle(new JudgeParentSlugRequested("astrology"), CancellationToken.None));
 
         _invoked.ShouldBeEmpty();
-        _logger.Verify(l => l.Log(
-            LogLevel.Warning,
-            It.IsAny<EventId>(),
-            It.Is<It.IsAnyType>((_, _) => true),
-            It.IsAny<HttpRequestException>(),
-            It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.AtLeastOnce);
     }
 
     [Fact]

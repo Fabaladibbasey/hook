@@ -3,7 +3,6 @@ using Hook.Features.Ai.Models;
 using Hook.Features.Geocoding.Models;
 using Hook.Features.ProviderAvailability.AvailabilityAggregate;
 using Hook.Features.ProviderAvailability.Refresh;
-using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Pipeline.PostCommitSends;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;

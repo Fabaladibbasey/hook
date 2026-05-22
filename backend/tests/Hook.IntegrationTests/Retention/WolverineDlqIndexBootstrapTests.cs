@@ -1,4 +1,5 @@
 using Hook.Shared.Retention;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
@@ -46,5 +47,56 @@ public sealed class WolverineDlqIndexBootstrapTests : PipelineTestBase
         await bootstrap.StartAsync(default);
 
         (await IndexExistsAsync(ds)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Bootstrap_TolerantOf_MissingWolverineSchema()
+    {
+        // Regression: prior diff removed the soft-fail catch, so any failure
+        // (including UndefinedTable) would kill host startup. Re-added 42P01
+        // catch lets a brand-new schema where Wolverine's own bootstrap hasn't
+        // run yet boot anyway; the next host start re-tries idempotently.
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        // NpgsqlDataSource.ConnectionString redacts the password, so we re-source
+        // from configuration where the fixture wrote the live connection string
+        // including credentials.
+        var configConn = scope.ServiceProvider.GetRequiredService<IConfiguration>()
+            .GetConnectionString("HookDb") ?? throw new InvalidOperationException("HookDb conn string missing");
+
+        var connBuilder = new NpgsqlConnectionStringBuilder(configConn)
+        {
+            Database = "postgres"
+        };
+        var adminConn = connBuilder.ConnectionString;
+        var tempDb = $"hook_dlq_bootstrap_{Guid.NewGuid():N}"[..28];
+
+        await using (var admin = new NpgsqlConnection(adminConn))
+        {
+            await admin.OpenAsync();
+            await using var create = admin.CreateCommand();
+            create.CommandText = $"CREATE DATABASE \"{tempDb}\";";
+            await create.ExecuteNonQueryAsync();
+        }
+
+        try
+        {
+            var tempBuilder = new NpgsqlConnectionStringBuilder(configConn)
+            {
+                Database = tempDb
+            };
+            await using var tempDs = NpgsqlDataSource.Create(tempBuilder.ConnectionString);
+            var bootstrap = new WolverineDlqIndexBootstrap(
+                tempDs, NullLogger<WolverineDlqIndexBootstrap>.Instance);
+
+            await Should.NotThrowAsync(() => bootstrap.StartAsync(default));
+        }
+        finally
+        {
+            await using var admin = new NpgsqlConnection(adminConn);
+            await admin.OpenAsync();
+            await using var drop = admin.CreateCommand();
+            drop.CommandText = $"DROP DATABASE IF EXISTS \"{tempDb}\" WITH (FORCE);";
+            await drop.ExecuteNonQueryAsync();
+        }
     }
 }
