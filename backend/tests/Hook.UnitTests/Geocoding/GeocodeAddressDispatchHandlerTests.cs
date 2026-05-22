@@ -2,7 +2,6 @@ using Hook.Features.Geocoding;
 using Hook.Features.Geocoding.Geocode;
 using Hook.Features.Geocoding.GeocodeCache;
 using Hook.Features.Geocoding.Models;
-using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Pipeline.PostCommitSends;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;

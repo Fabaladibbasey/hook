@@ -22,6 +22,7 @@ using Hook.Features.Whatsapp.Dev;
 using Hook.Features.Whatsapp.ReceiveWebhook;
 using Hook.Shared.Core;
 using Hook.Shared.Domain;
+using Hook.Shared.Messaging;
 using Hook.Shared.Persistence;
 using Hook.Shared.Persistence.Data;
 using Hook.Shared.Retention;
@@ -32,6 +33,7 @@ using Npgsql;
 using Serilog;
 using Wolverine;
 using Wolverine.EntityFrameworkCore;
+using Wolverine.ErrorHandling;
 using Wolverine.Postgresql;
 
 // Bootstrap logger captured at process start; UseSerilog freezes it on first host build.
@@ -204,9 +206,44 @@ try
         // handler own the aggregate mutation.
         opts.PublishDomainEventsFromEntityFrameworkCore();
         opts.Policies.AutoApplyTransactions();
+
+        // Wolverine error policies — intentionally narrow:
+        // (1) OCE during graceful shutdown is the documented drain path; discard so the
+        //     next host start does not retry user-facing sends. Handler-local OCEs fall
+        //     through to default (DLQ) so the bug is visible. IsStopping is armed by
+        //     the IHostApplicationLifetime.ApplicationStopping subscription registered
+        //     after app.Build() below; Environment.HasShutdownStarted is a belt-and-
+        //     suspenders fallback for late finalizer paths.
+        // (2) Transient PG split into fast (deadlock/serialization, <1s cooldown) + slow
+        //     (connection storm, multi-second cooldown). Both walk InnerException so EF's
+        //     DbUpdateException(PostgresException) wrap also retries. Non-transient PG
+        //     bubbles to default (no retry, DLQ).
+        // HttpRequestException is NOT policied here: HTTP callers (WhatsApp, Geocoding)
+        // install AddStandardResilienceHandler (Polly retries + circuit breaker) at the
+        // HttpClient layer — stacking another retry would double-up + risk duplicate POSTs.
+        // OCE-Discard semantics covered by WolverineErrorPolicyTests.HandlerLocalOperation
+        // CanceledFallsThroughToDeadLetterNotDiscarded + ShutdownOceDiscardedNoDeadLetter.
+        opts.Policies.OnException<OperationCanceledException>(_ => WolverineShutdownGate.IsStopping)
+            .Discard();
+        // Fast tier: deadlock victims + serialization-failures clear in <100ms.
+        opts.Policies.OnException<PostgresException>(ex => TransientPgStates.IsTransientFast(ex.SqlState))
+            .RetryWithCooldown(TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(2));
+        opts.Policies.OnException<DbUpdateException>(ex => TransientPgStates.IsTransientFast(ex))
+            .RetryWithCooldown(TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(2));
+        // Slow tier: connection storms + too-many-connections need real wait.
+        opts.Policies.OnException<PostgresException>(ex => TransientPgStates.IsTransientSlow(ex.SqlState))
+            .RetryWithCooldown(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15));
+        opts.Policies.OnException<DbUpdateException>(ex => TransientPgStates.IsTransientSlow(ex))
+            .RetryWithCooldown(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(15));
     });
 
     var app = builder.Build();
+
+    // Arm WolverineShutdownGate at the start of graceful drain so the OCE-Discard
+    // policy above sees IsStopping == true before Wolverine.StopAsync cancels
+    // in-flight handlers. Environment.HasShutdownStarted alone is too late — it
+    // only flips during AppDomain teardown, after the drain has finished.
+    app.Lifetime.ApplicationStopping.Register(WolverineShutdownGate.Trip);
 
     {
         // Migrations are applied out-of-band (CI deploy step, or `dotnet ef database

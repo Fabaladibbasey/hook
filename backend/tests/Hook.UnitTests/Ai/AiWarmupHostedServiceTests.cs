@@ -35,8 +35,7 @@ public sealed class AiWarmupHostedServiceTests
     public async Task StartAsync_ProbeSucceeds_CompletesWarmupTask()
     {
         var ai = new Mock<IConversationAi>();
-        ai.Setup(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Features.Ai.Models.IntentDetectionResult(Hook.Features.Ai.Models.IntentKind.ServiceRequest, 1.0, "en", "ok"));
+        ai.Setup(x => x.PingAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
         var svc = new AiWarmupHostedService(BuildProvider(ai), new FakeLifetime(),
             Options.Create(new OllamaOptions()),
             NullLogger<AiWarmupHostedService>.Instance);
@@ -54,7 +53,7 @@ public sealed class AiWarmupHostedServiceTests
         // wins and the cold-start warning fires. Resolving on failure would let
         // Kestrel claim "warm" against a cold model.
         var ai = new Mock<IConversationAi>();
-        ai.Setup(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        ai.Setup(x => x.PingAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("simulated ollama down"));
         var svc = new AiWarmupHostedService(BuildProvider(ai), new FakeLifetime(),
             Options.Create(new OllamaOptions()),
@@ -74,11 +73,10 @@ public sealed class AiWarmupHostedServiceTests
         // Probe blocks past the budget. The budget OCE branch must leave the TCS
         // unresolved so the 15s outer gate wins (same invariant as the throw path).
         var ai = new Mock<IConversationAi>();
-        ai.Setup(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(async (string _, CancellationToken token) =>
+        ai.Setup(x => x.PingAsync(It.IsAny<CancellationToken>()))
+            .Returns(async (CancellationToken token) =>
             {
                 await Task.Delay(Timeout.Infinite, token);
-                return default(Features.Ai.Models.IntentDetectionResult)!;
             });
         var svc = new AiWarmupHostedService(BuildProvider(ai), new FakeLifetime(),
             Options.Create(new OllamaOptions { TimeoutSeconds = 1 }),
@@ -97,11 +95,10 @@ public sealed class AiWarmupHostedServiceTests
         // Shutdown OCE branch resolves the TCS so any pending awaiter unblocks
         // and the shutdown path is not held back.
         var ai = new Mock<IConversationAi>();
-        ai.Setup(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(async (string _, CancellationToken token) =>
+        ai.Setup(x => x.PingAsync(It.IsAny<CancellationToken>()))
+            .Returns(async (CancellationToken token) =>
             {
                 await Task.Delay(Timeout.Infinite, token);
-                return default(Features.Ai.Models.IntentDetectionResult)!;
             });
         var svc = new AiWarmupHostedService(BuildProvider(ai), new FakeLifetime(),
             Options.Create(new OllamaOptions { TimeoutSeconds = 120 }),
@@ -119,11 +116,10 @@ public sealed class AiWarmupHostedServiceTests
         // Probe blocks forever; StopAsync must cancel and return within the 5s
         // grace + small slack so a host shutdown is not held back by Ollama.
         var ai = new Mock<IConversationAi>();
-        ai.Setup(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(async (string _, CancellationToken token) =>
+        ai.Setup(x => x.PingAsync(It.IsAny<CancellationToken>()))
+            .Returns(async (CancellationToken token) =>
             {
                 await Task.Delay(Timeout.Infinite, token);
-                return default(Features.Ai.Models.IntentDetectionResult)!;
             });
         var svc = new AiWarmupHostedService(BuildProvider(ai), new FakeLifetime(),
             Options.Create(new OllamaOptions()),

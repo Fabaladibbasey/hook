@@ -1,3 +1,4 @@
+using Hook.Features.Observability;
 using Hook.Shared.Persistence;
 using Npgsql;
 
@@ -7,10 +8,14 @@ namespace Hook.Shared.Retention;
 // but does not index `sent_at` — the RetentionSweeper's daily DELETE would
 // otherwise seqscan the table. This bootstrap issues a one-shot
 // CREATE INDEX CONCURRENTLY IF NOT EXISTS on every boot; idempotent, runs outside
-// a transaction (concurrent indexes cannot live in one), and tolerates the table
-// being temporarily absent on a brand-new schema (it will be picked up next boot).
-// `received_at` is a varchar holding the listener address URI, NOT a timestamp —
-// `sent_at` is the timestamptz of envelope send time and the right axis for retention.
+// a transaction (concurrent indexes cannot live in one). `received_at` is a varchar
+// holding the listener address URI, NOT a timestamp — `sent_at` is the timestamptz
+// of envelope send time and the right axis for retention.
+//
+// Tolerates the table being temporarily absent (UndefinedTable / 42P01) — e.g. a
+// brand-new schema where Wolverine's own bootstrap hasn't run yet, or a registration
+// ordering quirk under xUnit cold start. Logs + increments a metric and lets host
+// startup continue; the next boot re-tries idempotently.
 public sealed class WolverineDlqIndexBootstrap(
     NpgsqlDataSource dataSource,
     ILogger<WolverineDlqIndexBootstrap> logger) : IHostedService
@@ -29,11 +34,13 @@ public sealed class WolverineDlqIndexBootstrap(
             await cmd.ExecuteNonQueryAsync(cancellationToken);
             logger.LogInformation("Wolverine DLQ index ensured ({IndexName})", IndexName);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (PostgresException ex) when (
+            ex.SqlState == PostgresErrorCodes.UndefinedTable ||
+            ex.SqlState == PostgresErrorCodes.InvalidSchemaName)
         {
+            HookMetrics.DlqIndexBootstrapMissedRetries.Add(1);
             logger.LogWarning(ex,
-                "Failed to ensure Wolverine DLQ index {IndexName}; retention DELETE will fall back to seqscan",
-                IndexName);
+                "Wolverine DLQ table/schema not yet present; index bootstrap will retry next boot");
         }
     }
 

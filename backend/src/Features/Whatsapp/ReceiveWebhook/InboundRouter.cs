@@ -12,6 +12,7 @@ using Hook.Features.Whatsapp.Models;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Features.Whatsapp.ReceiveWebhook.ClassifyInboundIntent;
 using Hook.Features.Whatsapp.ReceiveWebhook.ColdReply;
+using Hook.Shared.Messaging;
 using Hook.Shared.Pipeline.PostCommitSends;
 using Npgsql;
 using Wolverine;
@@ -393,7 +394,7 @@ public sealed class InboundRouterHandler(
                             nameof(outcome), outcome, "Unhandled ExchangeOutcome — extend the switch.");
                 }
             }
-            catch (PostgresException ex) when (IsTransientPostgres(ex.SqlState))
+            catch (PostgresException ex) when (TransientPgStates.IsTransient(ex.SqlState))
             {
                 logger.LogWarning(ex, "Transient Postgres failure during PhoneExchanger for match {MatchId}", p.Match.Id);
                 transientFail++;
@@ -425,16 +426,6 @@ public sealed class InboundRouterHandler(
         }
         await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone, reply));
     }
-
-    private static bool IsTransientPostgres(string sqlState) => sqlState switch
-    {
-        PostgresErrorCodes.SerializationFailure => true,
-        PostgresErrorCodes.DeadlockDetected => true,
-        PostgresErrorCodes.TooManyConnections => true,
-        PostgresErrorCodes.ConnectionException => true,
-        PostgresErrorCodes.ConnectionFailure => true,
-        _ => false
-    };
 
     private async Task ShareTopOrAskAsync(
         ServiceRequest.RequestAggregate.ServiceRequest request,

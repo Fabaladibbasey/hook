@@ -1,7 +1,6 @@
 using Hook.Features.Ai;
 using Hook.Features.Feedback.Eta;
 using Hook.Features.Whatsapp.Phone;
-using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Shouldly;
@@ -23,8 +22,7 @@ public class ExtractEtaHandlerTests
             .Returns(Task.CompletedTask);
     }
 
-    private ExtractEtaHandler Build() =>
-        new(_aiMock.Object, _clock, NullLogger<ExtractEtaHandler>.Instance);
+    private ExtractEtaHandler Build() => new(_aiMock.Object, _clock);
 
     private static PhoneNumber From() => PhoneNumber.Parse("+220300001");
 
@@ -48,10 +46,13 @@ public class ExtractEtaHandlerTests
     }
 
     [Fact]
-    public async Task Handle_AiThrows_InvokesApplyOutcomeWithNullEta()
+    public async Task Handle_AdapterReturnsNull_InvokesApplyOutcomeWithNullEta()
     {
+        // OllamaConversationAi.TryCallAsync absorbs transport failures and returns
+        // null; the handler passes it through so ApplyEtaOutcomeHandler can fall
+        // back to the fixed Step2InProgressRecheckDelay.
         _aiMock.Setup(x => x.ExtractEtaAsync(It.IsAny<string>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new HttpRequestException("ollama down"));
+            .ReturnsAsync((DateTimeOffset?)null);
 
         await Build().Handle(
             new ExtractEtaRequested(Guid.NewGuid(), Guid.NewGuid(), From(), "in 3 hours"),
@@ -62,7 +63,7 @@ public class ExtractEtaHandlerTests
     }
 
     [Fact]
-    public async Task Handle_CancellationRequested_RethrowsAndDoesNotInvoke()
+    public async Task Handle_OuterCancellation_RethrowsAndDoesNotInvoke()
     {
         using var cts = new CancellationTokenSource();
         cts.Cancel();
