@@ -28,6 +28,7 @@ using Hook.Shared.Retention;
 using Hook.Shared.Security;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Serilog;
 using Wolverine;
 using Wolverine.EntityFrameworkCore;
@@ -52,13 +53,47 @@ try
     var connectionString = builder.Configuration.GetConnectionString("HookDb")
         ?? throw new InvalidOperationException("Connection string 'HookDb' is not configured.");
 
+    // Single NpgsqlDataSource shared by EF (scoped + factory) and Wolverine so
+    // pool bounds + NetTopologySuite mapping apply uniformly. Default pool min=0
+    // makes cold-start pay connection-establishment for the first concurrent
+    // burst — pin min=5 / max=50 (matches RateLimit:WebhookConcurrencyLimit) so
+    // the pool is sized for steady-state and a saturated webhook limiter does
+    // not queue on connection establishment. Defaults are only applied when the
+    // caller has not pinned them explicitly in the connection string, so test
+    // shards that scope down (MaxPoolSize=20 per DevPipelineFixture) retain
+    // their override.
+    var dataSourceBuilder = new NpgsqlDataSourceBuilder(connectionString);
+    if (!dataSourceBuilder.ConnectionStringBuilder.ContainsKey("Minimum Pool Size"))
+        dataSourceBuilder.ConnectionStringBuilder.MinPoolSize = 5;
+    if (!dataSourceBuilder.ConnectionStringBuilder.ContainsKey("Maximum Pool Size"))
+        // RateLimit:WebhookConcurrencyLimit (50) + 14 headroom for Wolverine outbox
+        // pollers + ambient EF factory reads. See Features/RateLimiting/README.md.
+        dataSourceBuilder.ConnectionStringBuilder.MaxPoolSize = 64;
+    dataSourceBuilder.UseNetTopologySuite();
+    var dataSource = dataSourceBuilder.Build();
+    builder.Services.AddSingleton(dataSource);
+
     // AddDbContextWithWolverineIntegration installs a model customizer that
     // requires Wolverine.RDBMS.DatabaseSettings in DI — paired with
     // PersistMessagesWithPostgresql in the UseWolverine block so every
     // environment (including tests) gets the EF transactional outbox.
     // Per-test isolation relies on each fixture using its own Postgres database.
+    // The EF-side npgsql.UseNetTopologySuite() registers the EF model
+    // mapping for Point -> geography(Point,4326); the data-source-side
+    // UseNetTopologySuite registers the underlying Npgsql type info resolver.
     builder.Services.AddDbContextWithWolverineIntegration<HookDbContext>(options =>
-        options.UseNpgsql(connectionString, npgsql =>
+        options.UseNpgsql(dataSource, npgsql =>
+        {
+            npgsql.UseNetTopologySuite();
+            npgsql.MigrationsAssembly(typeof(HookDbContext).Assembly.GetName().Name);
+        }));
+
+    // Factory for read-only parallel reads (PostgresProviderQueryService branch
+    // fan-in, SlugResolver.ResolveBatchAsync isolated paths) — the scoped
+    // HookDbContext is reserved for tracked entities + the Wolverine handler tx
+    // and can't run concurrent operations.
+    builder.Services.AddDbContextFactory<HookDbContext>(options =>
+        options.UseNpgsql(dataSource, npgsql =>
         {
             npgsql.UseNetTopologySuite();
             npgsql.MigrationsAssembly(typeof(HookDbContext).Assembly.GetName().Name);
@@ -88,7 +123,8 @@ try
     builder.Services.AddMetaTemplates();
     builder.Services.AddObservability();
 
-    builder.Services.AddHostedService<AiWarmupHostedService>();
+    builder.Services.AddSingleton<AiWarmupHostedService>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<AiWarmupHostedService>());
     if (builder.Environment.IsDevelopment() || builder.Environment.IsStaging())
     {
         builder.Services.AddHostedService<DevProviderSeederHostedService>();
@@ -154,7 +190,9 @@ try
 
         // Durable outbox in every environment so scheduled messages survive
         // restarts and handler commits stay atomic with outgoing envelopes.
-        opts.PersistMessagesWithPostgresql(connectionString, schemaName: WolverineConfig.Schema);
+        // Share the EF data source so Wolverine pulls connections from the
+        // same pinned pool (no parallel pool with default min=0 / max=100).
+        opts.PersistMessagesWithPostgresql(dataSource, schemaName: WolverineConfig.Schema);
         // Promote in-process local queues to durable so [NonTransactional] handlers
         // (Ollama AI stages) survive a crash between bus.PublishAsync and the inner
         // commit. Without this, locally-routed envelopes live only in memory.
@@ -171,12 +209,19 @@ try
     var app = builder.Build();
 
     {
-        // Migration + root taxonomy seed are data-integrity preconditions — keep
-        // these awaited. Dev provider seeding + AI warm-up moved to hosted services
-        // so they don't block Kestrel bind.
+        // Migrations are applied out-of-band (CI deploy step, or `dotnet ef database
+        // update` locally). At boot we only verify the schema head — running the full
+        // MigrateAsync scan/apply on every cold start blocked Kestrel bind for hundreds
+        // of ms with 50+ migrations. Fail fast so a missed deploy step is loud.
         await using var scope = app.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-        await db.Database.MigrateAsync();
+        var pending = (await db.Database.GetPendingMigrationsAsync()).ToList();
+        if (pending.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Pending migrations not applied: {string.Join(", ", pending)}. " +
+                "Run `dotnet ef database update` before starting the host.");
+        }
 
         var rootSeeder = scope.ServiceProvider.GetRequiredService<RootSectorSeeder>();
         await rootSeeder.EnsureRootSectorsAsync();
@@ -220,13 +265,19 @@ try
     app.MapPrometheusScrapingEndpoint();
     app.MapWhatsappWebhook();
 
-    if (builder.Configuration.GetValue<bool>($"{DevWhatsappOptions.SectionName}:Enabled"))
+    // Belt-and-suspenders: an accidental DevWhatsapp__Enabled=true in prod would
+    // expose inbound spoofing + AI/WhatsApp sends to any E.164. IsProduction()
+    // makes the prod exposure structurally impossible.
+    if (!builder.Environment.IsProduction())
     {
-        app.MapDevWhatsapp();
-    }
-    if (builder.Configuration.GetValue<bool>($"{DevProviderSeedOptions.SectionName}:Enabled"))
-    {
-        app.MapDevProviders();
+        if (builder.Configuration.GetValue<bool>($"{DevWhatsappOptions.SectionName}:Enabled"))
+        {
+            app.MapDevWhatsapp();
+        }
+        if (builder.Configuration.GetValue<bool>($"{DevProviderSeedOptions.SectionName}:Enabled"))
+        {
+            app.MapDevProviders();
+        }
     }
     app.MapChat();
     app.MapReverseProxy();
@@ -250,7 +301,24 @@ try
     app.MapHub<ChatHub>(ChatHubConstants.HubPath);
     app.MapFallbackToFile("index.html");
 
-    await app.RunAsync();
+    await app.StartAsync();
+
+    {
+        // Kestrel is already bound at this point; this wait only defers
+        // WaitForShutdownAsync so /readyz returning 503 lasts at most ~15s in
+        // happy cases (warmup usually completes faster). WarmupCompletion resolves
+        // ONLY on successful warm-up — budget elapsed and transport failure leave
+        // it unresolved so the Delay wins and the warning below fires. The strict
+        // gate for traffic is /readyz, not this delay.
+        var warmup = app.Services.GetRequiredService<AiWarmupHostedService>();
+        var completed = await Task.WhenAny(warmup.WarmupCompletion, Task.Delay(TimeSpan.FromSeconds(15)));
+        if (completed != warmup.WarmupCompletion)
+        {
+            app.Logger.LogWarning("AI warmup did not complete within 15s — starting anyway, /readyz will gate.");
+        }
+    }
+
+    await app.WaitForShutdownAsync();
 }
 catch (Exception ex) when (ex is not HostAbortedException)
 {

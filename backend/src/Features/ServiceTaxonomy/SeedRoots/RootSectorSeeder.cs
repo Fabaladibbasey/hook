@@ -1,6 +1,6 @@
 using Hook.Features.ServiceTaxonomy.ServiceAggregate;
-using Hook.Shared.Persistence;
 using Hook.Shared.Persistence.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace Hook.Features.ServiceTaxonomy.SeedRoots;
 
@@ -36,15 +36,29 @@ public sealed class RootSectorSeeder(
 
     public async Task EnsureRootSectorsAsync(CancellationToken ct = default)
     {
-        // Per-row TryInsertUniqueAsync absorbs the concurrent-boot 23505 race.
-        var added = 0;
-        foreach (var slug in RootSlugs)
-        {
-            var svc = Service.Create(slug);
-            if (await db.TryInsertUniqueAsync(svc, ct, ServicesPrimaryKey)) added++;
-        }
+        var existing = await db.Services
+            .Where(s => RootSlugs.Contains(s.Slug))
+            .Select(s => s.Slug)
+            .ToListAsync(ct);
 
-        if (added > 0)
-            logger.LogInformation("[Taxonomy] Inserted {Count} root sectors.", added);
+        if (existing.Count == RootSlugs.Count) return;
+
+        var missing = RootSlugs.Except(existing).ToList();
+        foreach (var slug in missing)
+            await db.Services.AddAsync(Service.Create(slug), ct);
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            logger.LogInformation("[Taxonomy] Inserted {Count} root sectors.", missing.Count);
+        }
+        catch (DbUpdateException ex) when (
+            ex.InnerException is Npgsql.PostgresException { SqlState: "23505" } pg
+            && pg.ConstraintName == ServicesPrimaryKey)
+        {
+            foreach (var entry in db.ChangeTracker.Entries<Service>().ToList())
+                if (entry.State == EntityState.Added) entry.State = EntityState.Detached;
+            logger.LogDebug(ex, "Concurrent boot raced root seed; ignoring.");
+        }
     }
 }

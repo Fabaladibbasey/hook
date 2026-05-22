@@ -16,6 +16,11 @@ public class OllamaOptions
     // local CPU dev should override (e.g. 8s) to accommodate qwen2.5:3b warm-up.
     public int ReadinessProbeTimeoutSeconds { get; init; } = 2;
 
+    // /readyz cache TTL. At the prior 10s default, sparse-traffic deployments paid
+    // the cold-load penalty every minute. 60s keeps the model warm for typical idle
+    // windows while still responding to genuine outages within a minute.
+    public int ReadinessCacheSeconds { get; init; } = 60;
+
     // Minimum confidence the LLM must report on a classified intent before the router
     // will act on it; below this we route to the existing disambiguation flow. Matches
     // InboundRouterHandler.AmbiguityConfidenceThreshold.
@@ -31,4 +36,20 @@ public class OllamaOptions
     // "-1" (infinite), "0" (unload immediately). Default "30m" is the memory-aware
     // setting for shared dev / single-box deploys; warm-always hosts can override to "-1".
     public string KeepAlive { get; init; } = "30m";
+
+    // Per-task `num_predict` caps. Ollama aborts generation when the cap is hit, so
+    // structured-output (JSON-schema) calls must have enough headroom to fit the
+    // expected object — truncated JSON will fail to parse. Numbers reflect observed
+    // median + headroom from the existing prompts; raise if a prompt grows.
+    public OllamaTaskBudgets MaxOutputTokens { get; init; } = new();
+}
+
+public sealed class OllamaTaskBudgets
+{
+    [System.ComponentModel.DataAnnotations.Range(1, 4096)] public int Intent { get; init; } = 60;
+    [System.ComponentModel.DataAnnotations.Range(1, 4096)] public int Extract { get; init; } = 120;
+    [System.ComponentModel.DataAnnotations.Range(1, 4096)] public int Judge { get; init; } = 60;
+    [System.ComponentModel.DataAnnotations.Range(1, 4096)] public int Eta { get; init; } = 60;
+    [System.ComponentModel.DataAnnotations.Range(1, 4096)] public int Reply { get; init; } = 200;
+    [System.ComponentModel.DataAnnotations.Range(1, 4096)] public int Language { get; init; } = 30;
 }

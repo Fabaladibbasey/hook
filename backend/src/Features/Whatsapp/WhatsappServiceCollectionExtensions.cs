@@ -13,6 +13,7 @@ public static class WhatsappServiceCollectionExtensions
         services.AddMemoryCache();
         services.AddSingleton<IInboundDedup, MemoryInboundDedup>();
         services.AddScoped<IAmbiguousIntentDraftRepository, AmbiguousIntentDraftRepository>();
+        services.AddScoped<InboundPrefetchRepository>();
         services.AddScoped<InboundRouterHandler>();
 
         var devEnabled = configuration.GetValue<bool>($"{DevWhatsappOptions.SectionName}:Enabled");

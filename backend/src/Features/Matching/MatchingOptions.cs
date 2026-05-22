@@ -40,6 +40,12 @@ public class MatchingOptions
     [Range(1, 10000)]
     public int MaxCandidatePoolSize { get; init; } = 200;
 
+    // Hard cap on the number of slug branches fanned out per FindCandidatesAsync.
+    // A root sector with N children would otherwise issue 1 + N parallel branch
+    // queries; truncation preserves Requested → Parent? → Children priority order.
+    [Range(1, 32)]
+    public int MaxBranchCount { get; init; } = 8;
+
     // Broadened = provider matched a parent of the requested slug ("doctor" for
     // "cardiology"). More abuse-prone (a generalist could blanket every child
     // specialist's requests), so a harsher discount is applied.

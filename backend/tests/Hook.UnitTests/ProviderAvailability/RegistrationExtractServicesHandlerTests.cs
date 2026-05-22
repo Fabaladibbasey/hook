@@ -27,8 +27,22 @@ public class RegistrationExtractServicesHandlerTests
             _aiMock.Object,
             _busMock.Object,
             Options.Create(new ServiceTaxonomyOptions()),
-            NullLogger<SlugResolver>.Instance)
+            NullLogger<SlugResolver>.Instance,
+            null!)
         { CallBase = false };
+        // ResolveBatchAsync stub: delegate to the per-slug ResolveAsync mocks
+        // sequentially. Tests don't re-implement the production gate / parallel
+        // semantics here — that contract is covered by SlugResolverBatchTests
+        // (integration) against the real implementation.
+        _slugResolverMock.Setup(x => x.ResolveBatchAsync(
+                It.IsAny<IReadOnlyList<string>>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (IReadOnlyList<string> slugs, string raw, CancellationToken ct) =>
+            {
+                var results = new List<ResolveSlugResult>(slugs.Count);
+                foreach (var slug in slugs)
+                    results.Add(await _slugResolverMock.Object.ResolveAsync(slug, raw, ct));
+                return (IReadOnlyList<ResolveSlugResult>)results;
+            });
         _busMock.Setup(x => x.InvokeAsync(It.IsAny<AdvanceRegistrationDraft>(), It.IsAny<CancellationToken>(), It.IsAny<TimeSpan?>()))
             .Callback<object, CancellationToken, TimeSpan?>((m, _, _) => _invoked.Add((AdvanceRegistrationDraft)m))
             .Returns(Task.CompletedTask);
@@ -120,4 +134,5 @@ public class RegistrationExtractServicesHandlerTests
 
         _invoked.ShouldBeEmpty();
     }
+
 }

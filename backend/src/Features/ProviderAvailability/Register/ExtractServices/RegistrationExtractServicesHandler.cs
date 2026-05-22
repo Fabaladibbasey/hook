@@ -22,20 +22,8 @@ public sealed class RegistrationExtractServicesHandler(
         try
         {
             var extracted = await ai.ExtractServicesAsync(evt.Text, ct);
-            if (extracted.Slugs.Count == 0)
-            {
-                canonical = [];
-            }
-            else
-            {
-                var resolved = new List<string>(extracted.Slugs.Count);
-                foreach (var slug in extracted.Slugs)
-                {
-                    var r = await slugResolver.ResolveAsync(slug, evt.Text, ct);
-                    resolved.Add(r.CanonicalSlug);
-                }
-                canonical = resolved;
-            }
+            var resolved = await slugResolver.ResolveBatchAsync(extracted.Slugs, evt.Text, ct);
+            canonical = [.. resolved.Select(r => r.CanonicalSlug)];
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

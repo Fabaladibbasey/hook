@@ -3,12 +3,12 @@ using Hook.Shared.Persistence.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using NetTopologySuite.Geometries;
-using ProviderAvailabilityEntity = Hook.Features.ProviderAvailability.AvailabilityAggregate.ProviderAvailability;
 
 namespace Hook.Features.Matching.Match;
 
 public sealed class PostgresProviderQueryService(
     HookDbContext db,
+    IDbContextFactory<HookDbContext> dbFactory,
     IOptions<MatchingOptions> options) : IProviderQueryService
 {
     public async Task<IReadOnlyList<ScoredProviderCandidate>> FindCandidatesAsync(
@@ -19,40 +19,43 @@ public sealed class PostgresProviderQueryService(
         DateTimeOffset now,
         CancellationToken ct = default)
     {
+        if (slugs.All.Count == 0) return [];
+
         var radiusMeters = radiusKm * 1000.0;
         var excludeArray = excludePhones as string[] ?? excludePhones.ToArray();
         var opts = options.Value;
+        // Truncate runaway branch fanout (root sector with many children) while
+        // preserving the Requested → Parent? → Children priority order baked into
+        // ExpandedSlugs.All.
+        var branches = slugs.All.Count <= opts.MaxBranchCount
+            ? slugs.All
+            : slugs.All.Take(opts.MaxBranchCount).ToList();
 
-        // Per-slug `@>` branches union into a bitmap-OR scan over
-        // ix_provider_availabilities_services_gin (jsonb_path_ops). A single
-        // `allSlugs.Any(...)` predicate flattens to `?|` / EXISTS-unnest which
-        // jsonb_path_ops does NOT support — Postgres falls back to seq scan.
-        IQueryable<ProviderAvailabilityEntity>? combined = null;
-        foreach (var slug in slugs.All)
-        {
-            var needle = $"[\"{slug}\"]";
-            var branch = db.ProviderAvailabilities
-                .Where(p => p.ExpiresAt > now)
-                .Where(p => EF.Functions.JsonContains(p.Services, needle))
-                .Where(p => !excludeArray.Contains(p.Phone))
-                .Where(p => p.Location.IsWithinDistance(requestLocation, radiusMeters));
-            combined = combined is null ? branch : combined.Union(branch);
-        }
+        // Per-branch K is sized so the cross-branch merge has enough candidates to
+        // fill MaxCandidatePoolSize without over-fetching N × MaxK rows on a wide
+        // hierarchy expansion. Floor of 25 keeps the GiST KNN useful for tight
+        // single-branch queries where MaxK / 1 would otherwise equal MaxK; at the
+        // MaxBranchCount cap of 8 with MaxK=200 the per-branch falls naturally to 25.
+        var perBranchLimit = Math.Max(25, opts.MaxCandidatePoolSize / branches.Count);
 
-        if (combined is null) return [];
+        // Per-slug branches each push `ORDER BY <-> + LIMIT K` into the plan so the
+        // GiST KNN scan trims to K rows BEFORE transport, then merge top-K
+        // client-side. The previous Union'd query materialised the full union in
+        // sort memory before applying the outer Take. Parallel branches use the
+        // factory ctx — the scoped HookDbContext is reserved for the Wolverine
+        // handler tx and cannot multiplex.
+        var branchTasks = branches.Select(slug => RunBranchAsync(
+            slug, requestLocation, radiusMeters, excludeArray, now, perBranchLimit, ct));
 
-        var rows = await combined
-            .OrderBy(p => p.Location.Distance(requestLocation))
+        var branchResults = await Task.WhenAll(branchTasks);
+
+        var rows = branchResults
+            .SelectMany(b => b)
+            .GroupBy(r => r.Phone, StringComparer.Ordinal)
+            .Select(g => g.OrderBy(r => r.DistanceMeters).ThenBy(r => r.Phone, StringComparer.Ordinal).First())
+            .OrderBy(r => r.DistanceMeters)
             .Take(opts.MaxCandidatePoolSize)
-            .Select(p => new
-            {
-                p.Phone,
-                p.ShareContact,
-                p.LastActiveAt,
-                p.Services,
-                DistanceMeters = p.Location.Distance(requestLocation),
-            })
-            .ToListAsync(ct);
+            .ToList();
 
         // Split the per-row correlated stats subquery out into one hash-join
         // round-trip. Hierarchy expansion widens the candidate pool ~Nx, so the
@@ -80,5 +83,44 @@ public sealed class PostgresProviderQueryService(
                     SuccessRate: stat.SuccessRate),
                 slugs.Classify(r.Services));
         })];
+    }
+
+    private async Task<List<BranchRow>> RunBranchAsync(
+        string slug,
+        Point requestLocation,
+        double radiusMeters,
+        string[] excludeArray,
+        DateTimeOffset now,
+        int perBranchLimit,
+        CancellationToken ct)
+    {
+        var needle = $"[\"{slug}\"]";
+        await using var ctx = await dbFactory.CreateDbContextAsync(ct);
+        return await ctx.ProviderAvailabilities
+            .AsNoTracking()
+            .Where(p => p.ExpiresAt > now)
+            .Where(p => EF.Functions.JsonContains(p.Services, needle))
+            .Where(p => !excludeArray.Contains(p.Phone))
+            .Where(p => p.Location.IsWithinDistance(requestLocation, radiusMeters))
+            .OrderBy(p => p.Location.Distance(requestLocation))
+            .Take(perBranchLimit)
+            .Select(p => new BranchRow
+            {
+                Phone = p.Phone,
+                ShareContact = p.ShareContact,
+                LastActiveAt = p.LastActiveAt,
+                Services = p.Services,
+                DistanceMeters = p.Location.Distance(requestLocation),
+            })
+            .ToListAsync(ct);
+    }
+
+    private sealed class BranchRow
+    {
+        public required string Phone { get; init; }
+        public bool ShareContact { get; init; }
+        public DateTimeOffset LastActiveAt { get; init; }
+        public required List<string> Services { get; init; }
+        public double DistanceMeters { get; init; }
     }
 }

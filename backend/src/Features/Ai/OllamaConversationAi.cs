@@ -42,7 +42,7 @@ public sealed class OllamaConversationAi(
         using var json = await CallJsonAsync(
             AiPrompts.IntentSystem,
             PromptSafety.Fence(userMessage, options.Value.MaxUserInputChars),
-            schema, ct);
+            schema, options.Value.MaxOutputTokens.Intent, ct);
         var root = json.RootElement;
         var intentText = root.GetProperty("intent").GetString() ?? "";
         var confidence = root.TryGetProperty("confidence", out var c) ? Math.Clamp(c.GetDouble(), 0, 1) : 0;
@@ -80,7 +80,7 @@ public sealed class OllamaConversationAi(
         using var json = await CallJsonAsync(
             AiPrompts.ServiceExtractionSystem,
             PromptSafety.Fence(userMessage, options.Value.MaxUserInputChars),
-            schema, ct);
+            schema, options.Value.MaxOutputTokens.Extract, ct);
         var slugs = json.RootElement.GetProperty("slugs")
             .EnumerateArray()
             .Select(s => s.GetString() ?? string.Empty)
@@ -114,7 +114,7 @@ public sealed class OllamaConversationAi(
             Candidate slugs: {{string.Join(", ", candidateSlugs)}}
             """;
 
-        using var json = await CallJsonAsync(AiPrompts.ServiceJudgeSystem, prompt, schema, ct);
+        using var json = await CallJsonAsync(AiPrompts.ServiceJudgeSystem, prompt, schema, options.Value.MaxOutputTokens.Judge, ct);
         var root = json.RootElement;
 
         var matched = root.TryGetProperty("matchedSlug", out var m) ? m.GetString() ?? string.Empty : string.Empty;
@@ -166,7 +166,7 @@ public sealed class OllamaConversationAi(
             {{examples}}
             """;
 
-        using var json = await CallJsonAsync(AiPrompts.ParentSlugJudgeSystem, prompt, schema, ct);
+        using var json = await CallJsonAsync(AiPrompts.ParentSlugJudgeSystem, prompt, schema, options.Value.MaxOutputTokens.Judge, ct);
         var root = json.RootElement;
         if (!root.TryGetProperty("parentSlug", out var p) || p.ValueKind == JsonValueKind.Null)
             return null;
@@ -213,7 +213,7 @@ public sealed class OllamaConversationAi(
             _ => AiPrompts.ReplySystem
         };
 
-        var reply = await CallTextAsync(systemPrompt, userPrompt, ct);
+        var reply = await CallTextAsync(systemPrompt, userPrompt, options.Value.MaxOutputTokens.Reply, ct);
         if (string.IsNullOrWhiteSpace(reply))
             throw new AiEmptyReplyException(context.Purpose);
         return reply;
@@ -241,7 +241,7 @@ public sealed class OllamaConversationAi(
             {{PromptSafety.Fence(userMessage, options.Value.MaxUserInputChars)}}
             """;
 
-        using var json = await CallJsonAsync(AiPrompts.EtaExtractionSystem, prompt, schema, ct);
+        using var json = await CallJsonAsync(AiPrompts.EtaExtractionSystem, prompt, schema, options.Value.MaxOutputTokens.Eta, ct);
         var root = json.RootElement;
         if (!root.TryGetProperty("etaUtc", out var etaProp) || etaProp.ValueKind == JsonValueKind.Null)
             return null;
@@ -274,26 +274,27 @@ public sealed class OllamaConversationAi(
         using var json = await CallJsonAsync(
             AiPrompts.LanguageDetectionSystem,
             PromptSafety.Fence(userMessage, options.Value.MaxUserInputChars),
-            schema, ct);
+            schema, options.Value.MaxOutputTokens.Language, ct);
         var root = json.RootElement;
         var lang = root.GetProperty("language").GetString() ?? "en";
         var conf = root.GetProperty("confidence").GetDouble();
         return new LanguageDetectionResult(lang, conf);
     }
 
-    private async Task<JsonDocument> CallJsonAsync(string systemInstruction, string userText, object responseSchema, CancellationToken ct)
+    private async Task<JsonDocument> CallJsonAsync(string systemInstruction, string userText, object responseSchema, int numPredict, CancellationToken ct)
     {
-        var raw = await CallAsync(systemInstruction, userText, responseSchema, ct);
+        var raw = await CallAsync(systemInstruction, userText, responseSchema, numPredict, ct);
         return JsonDocument.Parse(raw);
     }
 
-    private Task<string> CallTextAsync(string systemInstruction, string userText, CancellationToken ct) =>
-        CallAsync(systemInstruction, userText, responseSchema: null, ct);
+    private Task<string> CallTextAsync(string systemInstruction, string userText, int numPredict, CancellationToken ct) =>
+        CallAsync(systemInstruction, userText, responseSchema: null, numPredict, ct);
 
     private async Task<string> CallAsync(
         string systemInstruction,
         string userText,
         object? responseSchema,
+        int numPredict,
         CancellationToken ct)
     {
         var opts = options.Value;
@@ -307,7 +308,7 @@ public sealed class OllamaConversationAi(
                 new { role = "system", content = systemInstruction },
                 new { role = "user", content = userText }
             },
-            ["options"] = new { temperature = opts.Temperature },
+            ["options"] = new { temperature = opts.Temperature, num_predict = numPredict },
             ["keep_alive"] = opts.KeepAlive
         };
 

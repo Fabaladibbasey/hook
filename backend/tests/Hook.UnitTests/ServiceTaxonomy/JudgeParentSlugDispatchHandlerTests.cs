@@ -15,6 +15,7 @@ public class JudgeParentSlugDispatchHandlerTests
     private readonly Mock<IConversationAi> _ai = new();
     private readonly Mock<IMessageBus> _bus = new();
     private readonly Mock<ILogger<JudgeParentSlugDispatchHandler>> _logger = new();
+    private readonly StubDedupGate _dedup = new(claim: true);
     private readonly List<AssignServiceParent> _invoked = [];
 
     public JudgeParentSlugDispatchHandlerTests()
@@ -25,7 +26,18 @@ public class JudgeParentSlugDispatchHandlerTests
     }
 
     private JudgeParentSlugDispatchHandler Build() =>
-        new(_repo.Object, _ai.Object, _bus.Object, _logger.Object);
+        new(_repo.Object, _ai.Object, _bus.Object, _dedup, _logger.Object);
+
+    private sealed class StubDedupGate(bool claim) : IJudgeParentDedupGate
+    {
+        public int CallCount { get; private set; }
+        public bool Claim { get; set; } = claim;
+        public Task<bool> TryClaimAsync(string slug, CancellationToken ct)
+        {
+            CallCount++;
+            return Task.FromResult(Claim);
+        }
+    }
 
     private void SetupSlug(Service svc) =>
         _repo.Setup(r => r.GetBySlugAsync(svc.Slug, It.IsAny<CancellationToken>())).ReturnsAsync(svc);
@@ -173,6 +185,20 @@ public class JudgeParentSlugDispatchHandlerTests
         await Build().Handle(new JudgeParentSlugRequested("cardiology"), CancellationToken.None);
 
         first.ParentSlug.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Handle_NoOp_WhenDedupGateRejectsClaim()
+    {
+        SetupSlug(Service.Create("cardiology"));
+        _dedup.Claim = false;
+
+        await Build().Handle(new JudgeParentSlugRequested("cardiology"), CancellationToken.None);
+
+        _invoked.ShouldBeEmpty();
+        _ai.Verify(a => a.JudgeParentSlugAsync(It.IsAny<string>(),
+            It.IsAny<IReadOnlyList<string>>(), It.IsAny<IReadOnlyList<string>>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

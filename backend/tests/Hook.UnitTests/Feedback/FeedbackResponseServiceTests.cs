@@ -22,6 +22,13 @@ public class FeedbackResponseServiceTests
     [InlineData("YES")]
     [InlineData("Y")]
     [InlineData("  yes  ")]
+    [InlineData("yeah")]
+    [InlineData("yep")]
+    [InlineData("yup")]
+    [InlineData("sure")]
+    [InlineData("ok")]
+    [InlineData("of course")]
+    [InlineData("yes please")]
     public void ParseAnswer_YesVariants_ReturnsYes(string input) =>
         Assert.Equal(FeedbackAnswer.Yes, FeedbackResponseService.ParseAnswer(input));
 
@@ -29,6 +36,11 @@ public class FeedbackResponseServiceTests
     [InlineData("no")]
     [InlineData("N")]
     [InlineData("NO")]
+    [InlineData("nope")]
+    [InlineData("nah")]
+    [InlineData("no thanks")]
+    [InlineData("never mind")]
+    [InlineData("no way")]
     public void ParseAnswer_NoVariants_ReturnsNo(string input) =>
         Assert.Equal(FeedbackAnswer.No, FeedbackResponseService.ParseAnswer(input));
 
@@ -51,6 +63,11 @@ public class FeedbackResponseServiceTests
     [InlineData("")]
     [InlineData("maybe")]
     [InlineData("idk")]
+    [InlineData("done")]
+    [InlineData("cancel")]
+    [InlineData("bye")]
+    [InlineData("hi")]
+    [InlineData("edit")]
     public void ParseAnswer_Unrecognised_ReturnsNull(string input) =>
         Assert.Null(FeedbackResponseService.ParseAnswer(input));
 

@@ -55,10 +55,15 @@ public sealed class RetentionSweeper(
                 () => db.MatchFeedback.Where(f => f.PromptedAt < cutoff).ExecuteDeleteAsync(ct)),
             // Wolverine DLQ rows persist indefinitely after MaxAttempts failure;
             // their JSON body may include user text + unmasked phone for AI-stage envelopes.
-            (RetentionTableKeys.WolverineDeadLetterQueue,
-                () => db.Database.ExecuteSqlInterpolatedAsync(
-                    $"DELETE FROM {WolverineConfig.Schema}.wolverine_dead_letter_queue WHERE received_at < {dlqCutoff}",
-                    ct)),
+            // Schema is a code const, not user input — must be concatenated, not parameterized,
+            // since Postgres rejects parameters in identifier position (42601).
+            // NOTE: Wolverine's `received_at` is the listener address URI (varchar) — not a
+            // timestamp. `sent_at` (timestamptz) is the actual envelope send time and the
+            // right axis for retention.
+            (RetentionTableKeys.WolverineDeadLetters,
+                () => db.Database.ExecuteSqlRawAsync(
+                    $"DELETE FROM {WolverineConfig.Schema}.{RetentionTableKeys.WolverineDeadLetters} WHERE sent_at < {{0}}",
+                    [dlqCutoff], ct)),
         };
 
         var counts = new Dictionary<string, int>(sweeps.Length);

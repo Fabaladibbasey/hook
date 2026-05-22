@@ -43,7 +43,8 @@ public sealed class ProviderRefreshCheckHandler(
             }
         };
 
-        var reply = await AiReplyHelper.TryGenerateAsync(ai, ctx, "provider_refresh", logger, ct);
+        var reply = await AiReplyHelper.TryGenerateAsync(
+            ai, ctx, "provider_refresh", logger, ct, AiReplyHelper.NonCriticalReplyTimeout);
         if (reply is null) return;
 
         await bus.PublishAsync(new SendWhatsAppTextRequested(phone, reply));

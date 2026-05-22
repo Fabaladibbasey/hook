@@ -1,3 +1,4 @@
+using Hook.Shared.Hosting;
 using Microsoft.Extensions.Options;
 
 namespace Hook.Features.ProviderAvailability.Dev;
@@ -5,57 +6,35 @@ namespace Hook.Features.ProviderAvailability.Dev;
 // Runs DevProviderSeeder in the background at startup so dev / staging boot
 // doesn't block on it. Production opts out by leaving DevProviderSeedOptions
 // disabled; the check is re-applied here as a belt-and-braces safety so the
-// service can be unconditionally registered. StopAsync grants the inner task
-// a short grace period to cancel cleanly so the scope is not disposed mid-await.
+// service can be unconditionally registered.
 public sealed class DevProviderSeederHostedService(
     IServiceProvider services,
     IHostApplicationLifetime appLifetime,
     IOptions<DevProviderSeedOptions> options,
-    ILogger<DevProviderSeederHostedService> logger) : IHostedService
+    ILogger<DevProviderSeederHostedService> logger) : BackgroundOnceHostedService(services, appLifetime)
 {
-    private static readonly TimeSpan StopGrace = TimeSpan.FromSeconds(5);
-    private CancellationTokenSource? _linkedCts;
-    private Task? _runner;
+    private readonly IServiceProvider _services = services;
+    private readonly IOptions<DevProviderSeedOptions> _options = options;
+    private readonly ILogger<DevProviderSeederHostedService> _logger = logger;
 
-    public Task StartAsync(CancellationToken cancellationToken)
+    protected override bool ShouldRun()
     {
-        var opts = options.Value;
-        if (!opts.Enabled || !opts.AutoSeed)
-        {
-            return Task.CompletedTask;
-        }
-
-        _linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
-            cancellationToken, appLifetime.ApplicationStopping);
-        var ct = _linkedCts.Token;
-
-        _runner = Task.Run(async () =>
-        {
-            try
-            {
-                await using var scope = services.CreateAsyncScope();
-                var seeder = scope.ServiceProvider.GetRequiredService<DevProviderSeeder>();
-                await seeder.SeedAsync(ct);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Dev provider seeding failed");
-            }
-        }, ct);
-
-        return Task.CompletedTask;
+        var opts = _options.Value;
+        return opts.Enabled && opts.AutoSeed;
     }
 
-    public async Task StopAsync(CancellationToken cancellationToken)
+    protected override async Task RunAsync(IServiceProvider services, CancellationToken ct)
     {
-        // IHost.Dispose calls StopAsync a second time after the initial host
-        // shutdown; claim the CTS atomically so the second pass is a no-op
-        // instead of throwing ObjectDisposedException on the disposed source.
-        var cts = Interlocked.Exchange(ref _linkedCts, null);
-        if (cts is null || _runner is null) return;
-        cts.Cancel();
-        await Task.WhenAny(_runner, Task.Delay(StopGrace, cancellationToken));
-        cts.Dispose();
+        try
+        {
+            await using var scope = _services.CreateAsyncScope();
+            var seeder = scope.ServiceProvider.GetRequiredService<DevProviderSeeder>();
+            await seeder.SeedAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Dev provider seeding failed");
+        }
     }
 }

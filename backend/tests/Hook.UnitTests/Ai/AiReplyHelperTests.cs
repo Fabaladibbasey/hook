@@ -1,5 +1,7 @@
+using System.Diagnostics.Metrics;
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
+using Hook.Features.Observability;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Shouldly;
@@ -56,6 +58,65 @@ public class AiReplyHelperTests
 
         await Should.ThrowAsync<OperationCanceledException>(() =>
             AiReplyHelper.TryGenerateAsync(_aiMock.Object, Ctx, "test", NullLogger.Instance, cts.Token));
+    }
+
+    [Fact]
+    public async Task TryGenerateAsync_PerCallTimeoutElapses_ReturnsNull_AndTagsMetric()
+    {
+        // A 500ms timeout against a never-completing AI: lets the per-call
+        // CancelAfter fire deterministically. We capture hook.ai.outbound_dropped
+        // tags via a MeterListener so the timeout-reason branch is asserted, not
+        // just the null return.
+        _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
+            .Returns(async (ReplyContext _, CancellationToken token) =>
+            {
+                await Task.Delay(Timeout.Infinite, token);
+                return "never";
+            });
+
+        using var listener = new MeterListener();
+        var lastReason = string.Empty;
+        listener.InstrumentPublished = (inst, l) =>
+        {
+            if (inst.Meter.Name == HookMetrics.MeterName && inst.Name == "hook.ai.outbound_dropped")
+                l.EnableMeasurementEvents(inst);
+        };
+        listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+        {
+            foreach (var t in tags)
+                if (t.Key == "reason" && t.Value is string s) lastReason = s;
+        });
+        listener.Start();
+
+        var result = await AiReplyHelper.TryGenerateAsync(
+            _aiMock.Object, Ctx, "feedback_step1", NullLogger.Instance, CancellationToken.None,
+            perCallTimeout: TimeSpan.FromMilliseconds(500));
+
+        result.ShouldBeNull();
+        lastReason.ShouldBe("timeout");
+    }
+
+    [Fact]
+    public async Task TryGenerateAsync_OuterCtCancelled_PropagatesOperationCanceled_NotTimeout()
+    {
+        // Distinct from the existing pre-cancelled-token test: this proves that
+        // cancellation of the OUTER token (mid-call) bubbles out as OCE rather
+        // than being swallowed by the timeout-catch branch.
+        using var outer = new CancellationTokenSource();
+        _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
+            .Returns(async (ReplyContext _, CancellationToken token) =>
+            {
+                await Task.Delay(Timeout.Infinite, token);
+                return "never";
+            });
+
+        var task = AiReplyHelper.TryGenerateAsync(
+            _aiMock.Object, Ctx, "feedback_step1", NullLogger.Instance, outer.Token,
+            perCallTimeout: TimeSpan.FromSeconds(30));
+
+        outer.Cancel();
+
+        await Should.ThrowAsync<OperationCanceledException>(task);
     }
 
     [Theory]

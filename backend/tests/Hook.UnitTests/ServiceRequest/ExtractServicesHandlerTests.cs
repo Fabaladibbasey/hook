@@ -27,7 +27,8 @@ public class ExtractServicesHandlerTests
             _aiMock.Object,
             _busMock.Object,
             Options.Create(new ServiceTaxonomyOptions()),
-            NullLogger<SlugResolver>.Instance)
+            NullLogger<SlugResolver>.Instance,
+            null!)
         { CallBase = false };
         _busMock.Setup(x => x.InvokeAsync(It.IsAny<AdvanceClientRequestDraft>(), It.IsAny<CancellationToken>(), It.IsAny<TimeSpan?>()))
             .Callback<object, CancellationToken, TimeSpan?>((m, _, _) => _invoked.Add((AdvanceClientRequestDraft)m))

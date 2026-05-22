@@ -21,6 +21,10 @@ public class MatchFeedbackConfiguration : IEntityTypeConfiguration<MatchFeedback
                .HasDatabaseName(FeedbackConstants.PendingUniqueIndexName)
                .IsUnique()
                .HasFilter($"\"Answer\" = '{nameof(FeedbackAnswer.Pending)}'");
+        builder.HasIndex(f => new { f.Answer, f.PromptedAt })
+               .HasDatabaseName(FeedbackConstants.PendingPromptedAtIndexName)
+               .IsDescending(false, true)
+               .HasFilter($"\"Answer\" = '{nameof(FeedbackAnswer.Pending)}'");
 
         // Per-request dedupe for Step1: multi-PICK fans out N concurrent Step1
         // handlers; this partial unique forces all but one to fail at insert time.

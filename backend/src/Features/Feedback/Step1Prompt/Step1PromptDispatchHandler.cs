@@ -37,7 +37,8 @@ public sealed class Step1PromptDispatchHandler(
             Facts = facts
         };
 
-        var reply = await AiReplyHelper.TryGenerateAsync(ai, ctx, "step1_feedback", logger, ct);
+        var reply = await AiReplyHelper.TryGenerateAsync(
+            ai, ctx, "step1_feedback", logger, ct, AiReplyHelper.NonCriticalReplyTimeout);
         if (reply is null)
         {
             // AI-null is permanent (model declined); drop the Pending row so a future

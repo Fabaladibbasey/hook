@@ -66,7 +66,7 @@ public sealed class IterationCoordinator(
         await presenter.PresentAsync(clientPhone, batch, request.ServiceSlug, ct);
     }
 
-    private async Task HandleExhaustionAsync(PhoneNumber clientPhone, ServiceRequest.RequestAggregate.ServiceRequest request, CancellationToken ct)
+    private async Task HandleExhaustionAsync(PhoneNumber clientPhone, RequestAggregate.ServiceRequest request, CancellationToken ct)
     {
         var opts = options.Value;
         if (request.CurrentRadiusKm >= opts.MaxRadiusKm)

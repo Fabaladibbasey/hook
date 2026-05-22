@@ -27,7 +27,7 @@ public static class RateLimitingServiceCollectionExtensions
         {
             opts.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
-            opts.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(
+            opts.GlobalLimiter = PartitionedRateLimiter.Create(
                 GlobalRateLimitPartitioner.Build(rateLimitOpts, bypassHosts));
 
             opts.AddPolicy(WebhookConcurrencyPolicy, _ =>

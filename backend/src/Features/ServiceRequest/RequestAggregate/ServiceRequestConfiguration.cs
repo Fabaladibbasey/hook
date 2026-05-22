@@ -19,9 +19,12 @@ public class ServiceRequestConfiguration : IEntityTypeConfiguration<ServiceReque
         builder.HasJsonbArray(r => r.ShownProviderPhones);
         builder.Property(r => r.SharePhoneNumber).HasDefaultValue(false);
 
-        builder.HasIndex(r => r.ClientPhone).HasDatabaseName("ix_service_requests_client_phone");
-        builder.HasIndex(r => r.Status).HasDatabaseName("ix_service_requests_status");
+        builder.HasIndex(r => new { r.ClientPhone, r.Status })
+               .HasDatabaseName("ix_service_requests_client_phone_status");
         builder.HasIndex(r => r.Location).HasDatabaseName("ix_service_requests_location").HasMethod("gist");
         builder.HasIndex(r => r.CreatedAt).HasDatabaseName("ix_service_requests_created_at");
+        builder.HasIndex(r => r.CreatedAt)
+               .HasDatabaseName("ix_service_requests_closed_created_at")
+               .HasFilter($"\"Status\" = '{nameof(ServiceRequestStatus.Closed)}'");
     }
 }

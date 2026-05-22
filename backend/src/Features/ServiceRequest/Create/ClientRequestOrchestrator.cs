@@ -19,7 +19,6 @@ public sealed class ClientRequestOrchestrator(
     IClientRequestDraftRepository drafts,
     IServiceRequestRepository requests,
     IProviderAvailabilityRepository availability,
-    GeocodingService geocoding,
     IMessageBus bus,
     IOptions<MatchingOptions> matchingOptions,
     TimeProvider clock,
@@ -184,17 +183,12 @@ public sealed class ClientRequestOrchestrator(
 
         if (message.Kind == InboundMessageKind.Text && !string.IsNullOrWhiteSpace(message.Text))
         {
-            var geocoded = await geocoding.GeocodeAsync(message.Text!, ct);
-            if (geocoded is null)
-            {
-                await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "I couldn't find that address. Try typing it differently, or send a GPS pin (📎 → Location)."));
-                await drafts.UpsertAsync(draft, ct);
-                return;
-            }
-            draft.CaptureLocation(geocoded.Location.Latitude, geocoded.Location.Longitude, geocoded.FormattedAddress, now);
-            draft.StepTo(ClientRequestStep.ConfirmLocation, now);
+            // Defer geocoding HTTP off the inbound critical path (~10s Google timeout).
             await drafts.UpsertAsync(draft, ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, $"Found: '{geocoded.FormattedAddress}'. Reply YES to confirm or send your GPS pin."));
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+                "Looking up that address — one sec…"));
+            await bus.PublishAsync(new GeocodeAddressRequested(
+                phone.Value, message.Text!, GeocodeFlow.Client, DraftStampedAt: draft.UpdatedAt));
             return;
         }
 
