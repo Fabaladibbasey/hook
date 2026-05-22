@@ -11,7 +11,7 @@ public class InboundRouterRoutingTests : PipelineTestBase
     public async Task Provider_CanAlsoCreateClientRequest_NotBlockedByAvailability()
     {
         using var client = _fx.Factory.CreateClient();
-        const string phone = "+14155552001";
+        const string phone = "+22070002001";
 
         await _fx.InjectTextAndAwaitAsync(phone, "I offer carpentry");
         await _fx.InjectTextAndAwaitAsync(phone, "yes");
@@ -36,7 +36,7 @@ public class InboundRouterRoutingTests : PipelineTestBase
     public async Task BareWord_Request_RoutesToClientFunnel()
     {
         using var client = _fx.Factory.CreateClient();
-        const string phone = "+14155552003";
+        const string phone = "+22070002003";
 
         await _fx.InjectTextAndAwaitAsync(phone, "request");
         var reply = await client.ExpectOutboundAsync(
@@ -49,7 +49,7 @@ public class InboundRouterRoutingTests : PipelineTestBase
     public async Task BareWord_Register_RoutesToProviderFunnel()
     {
         using var client = _fx.Factory.CreateClient();
-        const string phone = "+14155552004";
+        const string phone = "+22070002004";
 
         await _fx.InjectTextAndAwaitAsync(phone, "register");
         var reply = await client.ExpectOutboundAsync(
@@ -62,7 +62,7 @@ public class InboundRouterRoutingTests : PipelineTestBase
     public async Task PickRegex_BypassesFunnel_WhenActiveRequestPresent()
     {
         using var client = _fx.Factory.CreateClient();
-        const string phone = "+14155552002";
+        const string phone = "+22070002002";
 
         await _fx.InjectTextAndAwaitAsync(phone, "I need a plumber");
         await _fx.InjectTextAndAwaitAsync(phone, "yes");

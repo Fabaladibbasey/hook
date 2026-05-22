@@ -13,7 +13,7 @@ public class WhatsappInboundDedupPipelineTests : PipelineTestBase
     public async Task SameMessageId_TwiceInbound_SecondReturns409()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155554001";
+        var phone = "+22070004001";
         var messageId = $"wamid.dev.test.dedup.{Guid.NewGuid():N}";
 
         await _fx.InjectTextAndAwaitAsync(phone, "I need a plumber", messageId);
@@ -30,7 +30,7 @@ public class WhatsappInboundDedupPipelineTests : PipelineTestBase
     public async Task SameMessageId_TwiceInbound_OnlyOneOutboundReply()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155554002";
+        var phone = "+22070004002";
         var messageId = $"wamid.dev.test.dedup.{Guid.NewGuid():N}";
 
         await _fx.InjectTextAndAwaitAsync(phone, "I need a plumber", messageId);

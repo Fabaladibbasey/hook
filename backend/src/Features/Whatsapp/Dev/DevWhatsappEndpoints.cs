@@ -44,7 +44,7 @@ public static class DevWhatsappEndpoints
         CancellationToken ct)
     {
         if (!PhoneNumber.TryParse(req.From, out var phone))
-            return Results.BadRequest(new { error = "from must be E.164 (e.g. +14155550123)" });
+            return Results.BadRequest(new { error = "from must be E.164 (e.g. +22070000001)" });
 
         var kind = (req.Type ?? "text").ToLowerInvariant() switch
         {

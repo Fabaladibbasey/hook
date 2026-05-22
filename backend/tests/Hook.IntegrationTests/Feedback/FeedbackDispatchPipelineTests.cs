@@ -19,7 +19,7 @@ public sealed class FeedbackDispatchPipelineTests : PipelineTestBase
         // Fixture pins Feedback:Step1InitialDelay=00:00:00 so the Wolverine scheduler
         // dispatches the prompt synchronously. Step2 publishes immediately on Step1=Yes
         // (no separate delay knob).
-        const string clientPhone = "+14155557001";
+        const string clientPhone = "+22070007001";
         const string consentingProvider = "+2203000001";
 
         using var http = _fx.Factory.CreateClient();
@@ -70,7 +70,7 @@ public sealed class FeedbackDispatchPipelineTests : PipelineTestBase
         // only sees ONE "did any work out?" prompt instead of three. The reply path
         // then asks "which provider?" and routes Step2 to the chosen match — so
         // ProviderStats credit lands on the actual completing provider.
-        const string clientPhone = "+14155557003";
+        const string clientPhone = "+22070007003";
         using var http = _fx.Factory.CreateClient();
 
         var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(
@@ -142,7 +142,7 @@ public sealed class FeedbackDispatchPipelineTests : PipelineTestBase
         // Pillar B: when the client says "in progress" to Step2, bot follows up
         // with an ETA prompt (a new AwaitingEta MatchFeedback row) instead of the
         // older blind 48h reschedule.
-        const string clientPhone = "+14155557004";
+        const string clientPhone = "+22070007004";
         using var http = _fx.Factory.CreateClient();
 
         var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(
@@ -202,7 +202,7 @@ public sealed class FeedbackDispatchPipelineTests : PipelineTestBase
         // Provider #2 (+2203000002) seeds with ShareContact=false, so PICK 2 here
         // routes to chat (publishes ChatRoutingRequested instead of ContactExchanged).
         // ChatRoutingFeedbackScheduler in the Feedback slice must still schedule Step1.
-        const string clientPhone = "+14155557002";
+        const string clientPhone = "+22070007002";
         const string nonConsentingProvider = "+2203000002";
 
         using var http = _fx.Factory.CreateClient();

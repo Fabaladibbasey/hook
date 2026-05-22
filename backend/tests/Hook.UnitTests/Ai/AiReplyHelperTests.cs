@@ -138,7 +138,7 @@ public class AiReplyHelperTests
     }
 
     [Theory]
-    [InlineData("Sorry for the wait — here are your matches: 1) +1234")]   // "sorry" mid-sentence is fine
+    [InlineData("Sorry for the wait — here are your matches: 1) +22070001001")]   // "sorry" mid-sentence is fine
     [InlineData("I can fix that for you.")]
     [InlineData("Hi there! Let's get you sorted.")]
     public async Task TryGenerateAsync_ShouldPassThrough_WhenReplyContainsBenignSorry(string reply)

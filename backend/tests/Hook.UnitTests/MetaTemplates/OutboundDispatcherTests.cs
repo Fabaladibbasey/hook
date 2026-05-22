@@ -13,7 +13,7 @@ namespace Hook.UnitTests.MetaTemplates;
 public class OutboundDispatcherTests
 {
     private static readonly DateTimeOffset Now = new(2026, 5, 1, 12, 0, 0, TimeSpan.Zero);
-    private static readonly PhoneNumber Phone = PhoneNumber.Parse("+12025551234");
+    private static readonly PhoneNumber Phone = PhoneNumber.Parse("+22070001234");
 
     [Fact]
     public async Task SendAsync_LastInbound23h_UsesFreeForm()
@@ -51,13 +51,13 @@ public class OutboundDispatcherTests
         capture.Calls[0].Path.ShouldBe("/v22.0/PN-1/messages");
         capture.Calls[0].Body.ShouldContain("\"name\":\"provider_check_in\"");
         capture.Calls[0].Body.ShouldContain("\"text\":\"plumbing,carpentry\"");
-        capture.Calls[0].Body.ShouldContain("\"to\":\"12025551234\"");
+        capture.Calls[0].Body.ShouldContain("\"to\":\"22070001234\"");
     }
 
     [Fact]
     public async Task SendAsync_LastInboundExactly24h_PostsTemplate()
     {
-        // Production rule is strict-less-than (line 21 of OutboundDispatcher): exactly
+        // Production rule is strict-less-than (insideWindow in OutboundDispatcher): exactly
         // 24h elapsed is OUTSIDE the free-form window, so the template path fires.
         var clock = new FakeTimeProvider(Now);
         var freeFormMock = new Mock<IWhatsappClient>();
