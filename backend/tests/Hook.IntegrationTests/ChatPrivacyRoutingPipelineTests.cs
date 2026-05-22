@@ -22,7 +22,7 @@ public class ChatPrivacyRoutingPipelineTests : PipelineTestBase
     public async Task Pick_ProviderWithoutConsent_EmitsChatLinksToBothSides()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155553001";
+        var phone = "+22070003001";
 
         // Default sharePhoneConsent: false — both parties hid consent in this scenario.
         var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(_fx, phone);
@@ -59,7 +59,7 @@ public class ChatPrivacyRoutingPipelineTests : PipelineTestBase
     public async Task ChatLinks_TokensAreUniqueBase64Url43Chars_ChatIdIsShared()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155553002";
+        var phone = "+22070003002";
 
         var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(_fx, phone);
         await _fx.InjectTextAndAwaitAsync(phone, "PICK 2");
@@ -105,7 +105,7 @@ public class ChatPrivacyRoutingPipelineTests : PipelineTestBase
     public async Task ChatLinks_PersistChatSessionAndTwoParticipants()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155553003";
+        var phone = "+22070003003";
 
         var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(_fx, phone);
         await _fx.InjectTextAndAwaitAsync(phone, "PICK 2");

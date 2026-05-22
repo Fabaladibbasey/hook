@@ -13,7 +13,7 @@ public class ServiceRequestTests
         var now = DateTimeOffset.Parse("2026-05-01T10:00:00Z");
 
         var request = Features.ServiceRequest.RequestAggregate.ServiceRequest.Create(
-            "+12025550123",
+            "+22070000123",
             "plumbing",
             new Location(13.4549, -16.5790),
             "Banjul",
@@ -33,7 +33,7 @@ public class ServiceRequestTests
     public void Create_WithSharePhoneTrue_ShouldPersistFlag()
     {
         var request = Features.ServiceRequest.RequestAggregate.ServiceRequest.Create(
-            "+12025550123", "plumbing", new Location(0, 0), "x", string.Empty, 5, DateTimeOffset.UtcNow,
+            "+22070000123", "plumbing", new Location(13.4549, -16.5790), "x", string.Empty, 5, DateTimeOffset.UtcNow,
             sharePhoneNumber: true);
 
         request.SharePhoneNumber.ShouldBeTrue();
@@ -43,7 +43,7 @@ public class ServiceRequestTests
     public void Create_RaisesServiceRequestCreated()
     {
         var request = Features.ServiceRequest.RequestAggregate.ServiceRequest.Create(
-            "+12025550123", "plumbing", new Location(0, 0), "x", string.Empty, 5, DateTimeOffset.UtcNow,
+            "+22070000123", "plumbing", new Location(13.4549, -16.5790), "x", string.Empty, 5, DateTimeOffset.UtcNow,
             sharePhoneNumber: false);
 
         var events = request.DequeueEvents();
@@ -58,13 +58,13 @@ public class ServiceRequestTests
     public void RecordShown_ShouldDeduplicate()
     {
         var request = Features.ServiceRequest.RequestAggregate.ServiceRequest.Create(
-            "+12025550123", "plumbing", new Location(0, 0), "x", string.Empty, 5, DateTimeOffset.UtcNow,
+            "+22070000123", "plumbing", new Location(13.4549, -16.5790), "x", string.Empty, 5, DateTimeOffset.UtcNow,
             sharePhoneNumber: false);
 
-        request.RecordShown(["+12025551111", "+12025552222"]);
-        request.RecordShown(["+12025551111", "+12025553333"]);
+        request.RecordShown(["+22070001111", "+22070002222"]);
+        request.RecordShown(["+22070001111", "+22070003333"]);
 
         request.ShownProviderPhones.Count.ShouldBe(3);
-        request.ShownProviderPhones.ShouldContain("+12025553333");
+        request.ShownProviderPhones.ShouldContain("+22070003333");
     }
 }

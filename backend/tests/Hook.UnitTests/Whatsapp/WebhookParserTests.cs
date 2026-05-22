@@ -18,7 +18,7 @@ public class WebhookParserTests
               "value": {
                 "messages": [{
                   "id": "wamid.abc",
-                  "from": "12025550123",
+                  "from": "22070000000",
                   "timestamp": "1700000000",
                   "type": "text",
                   "text": { "body": "I need a plumber" }
@@ -35,7 +35,7 @@ public class WebhookParserTests
         result[0].MessageId.ShouldBe("wamid.abc");
         result[0].Kind.ShouldBe(InboundMessageKind.Text);
         result[0].Text.ShouldBe("I need a plumber");
-        result[0].From.Value.ShouldBe("+12025550123");
+        result[0].From.Value.ShouldBe("+22070000000");
     }
 
     [Fact]

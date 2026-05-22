@@ -28,7 +28,7 @@ public class AmbiguousIntentTests : PipelineTestBase
     public async Task LowConfidenceIntent_SendsDisambiguationPrompt()
     {
         const string text = "ambig-prompt-only";
-        const string phone = "+14155553001";
+        const string phone = "+22070003001";
         var ai = GetFakeAi();
         ai.OverrideIntent(text,
             new IntentDetectionResult(IntentKind.ServiceRequest, 0.4, "en", "test-low-conf"));
@@ -54,7 +54,7 @@ public class AmbiguousIntentTests : PipelineTestBase
     public async Task DisambiguateWith1_ReplaysIntoClientRequestOrchestrator()
     {
         const string text = "ambig-route-1";
-        const string phone = "+14155553002";
+        const string phone = "+22070003002";
         var ai = GetFakeAi();
         // Original message gets a fake low-confidence ServiceRequest classification.
         ai.OverrideIntent(text,
@@ -89,7 +89,7 @@ public class AmbiguousIntentTests : PipelineTestBase
     public async Task DisambiguateWith2_ReplaysIntoRegistrationOrchestrator()
     {
         const string text = "ambig-route-2";
-        const string phone = "+14155553003";
+        const string phone = "+22070003003";
         var ai = GetFakeAi();
         ai.OverrideIntent(text,
             new IntentDetectionResult(IntentKind.ProviderRegistration, 0.3, "en", "test-low-conf"));
@@ -123,7 +123,7 @@ public class AmbiguousIntentTests : PipelineTestBase
     public async Task UnrecognisedDisambigReply_RePromptsAndKeepsDraft()
     {
         const string text = "ambig-bad-reply";
-        const string phone = "+14155553004";
+        const string phone = "+22070003004";
         var ai = GetFakeAi();
         ai.OverrideIntent(text,
             new IntentDetectionResult(IntentKind.ServiceRequest, 0.4, "en", "test-low-conf"));

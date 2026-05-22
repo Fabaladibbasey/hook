@@ -16,7 +16,7 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
 {
     public FeedbackRepositoryTests(DevPipelineFixture fx) : base(fx) { }
 
-    private static string UniquePhone() => $"+220{Guid.NewGuid().ToString("N")[..8]}";
+    private static string UniquePhone() => $"+220{Random.Shared.Next(0, 10_000_000):D7}";
 
     [Fact]
     public async Task UpsertStatsAsync_Detached_NewRow_Inserts()
@@ -301,7 +301,7 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
             new Location(13.45, -16.6), "Banjul",
             $"req-{Guid.NewGuid()}", 5.0, DateTimeOffset.UtcNow, false);
         var match = Match.Create(
-            request.Id, $"+220{Guid.NewGuid().ToString("N")[..8]}", "plumbing", 0, 0, DateTimeOffset.UtcNow);
+            request.Id, $"+220{Random.Shared.Next(0, 10_000_000):D7}", "plumbing", 0, 0, DateTimeOffset.UtcNow);
         db.ServiceRequests.Add(request);
         db.Matches.Add(match);
         await db.SaveChangesAsync();
@@ -312,7 +312,7 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         HookDbContext db, Guid requestId)
     {
         var match = Match.Create(
-            requestId, $"+220{Guid.NewGuid().ToString("N")[..8]}", "plumbing", 0, 0, DateTimeOffset.UtcNow);
+            requestId, $"+220{Random.Shared.Next(0, 10_000_000):D7}", "plumbing", 0, 0, DateTimeOffset.UtcNow);
         db.Matches.Add(match);
         await db.SaveChangesAsync();
         return match;

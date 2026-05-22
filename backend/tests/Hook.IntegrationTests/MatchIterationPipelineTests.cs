@@ -11,7 +11,7 @@ public class MatchIterationPipelineTests : PipelineTestBase
     public async Task Next_AfterPresent_AutoExpandsAndPromptsIncrease()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155552001";
+        var phone = "+22070002001";
 
         var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(_fx, phone);
 
@@ -31,7 +31,7 @@ public class MatchIterationPipelineTests : PipelineTestBase
     public async Task Increase_RepeatedlyToMaxRadius_RepliesHardCap()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155552002";
+        var phone = "+22070002002";
 
         var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(_fx, phone);
         var lastSeen = presented.At;
@@ -60,7 +60,7 @@ public class MatchIterationPipelineTests : PipelineTestBase
     public async Task Pick_OutOfRange_NoContactShareOrChatRoutingEmitted()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155552003";
+        var phone = "+22070002003";
 
         var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(_fx, phone);
 

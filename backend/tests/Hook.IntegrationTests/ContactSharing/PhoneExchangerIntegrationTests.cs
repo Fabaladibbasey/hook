@@ -91,8 +91,8 @@ public sealed class PhoneExchangerIntegrationTests : PipelineTestBase
     private static async Task<(ServiceRequest Request, Match Match, ProviderAvailability Provider)> SeedAsync(
         HookDbContext db, bool providerConsent, double ttlHours)
     {
-        var clientPhone = $"+220{Guid.NewGuid().ToString("N")[..8]}";
-        var providerPhone = $"+220{Guid.NewGuid().ToString("N")[..8]}";
+        var clientPhone = $"+220{Random.Shared.Next(0, 10_000_000):D7}";
+        var providerPhone = $"+220{Random.Shared.Next(0, 10_000_000):D7}";
         var now = DateTimeOffset.UtcNow;
 
         var request = ServiceRequest.Create(

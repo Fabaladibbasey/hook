@@ -22,7 +22,7 @@ public class MultiPickPipelineTests : PipelineTestBase
     public async Task PickAll_WithConsent_PhonesRevealedForOptInProvidersChatRoutedForOthers()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155556001";
+        var phone = "+22070006001";
 
         var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(
             _fx, phone, sharePhoneConsent: true);
@@ -58,7 +58,7 @@ public class MultiPickPipelineTests : PipelineTestBase
     public async Task PickAll_WithoutConsent_AllRouteToChat_NoPhoneRevealAnywhere()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155556002";
+        var phone = "+22070006002";
 
         var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(
             _fx, phone, sharePhoneConsent: false);
@@ -122,7 +122,7 @@ public class MultiPickPipelineTests : PipelineTestBase
         // unaware of the request. No proactive broadcast at present time, no
         // notification at pick time — nothing.
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155556003";
+        var phone = "+22070006003";
 
         var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(
             _fx, phone, sharePhoneConsent: true);

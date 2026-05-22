@@ -21,7 +21,7 @@ export default function LandingPage() {
             />
           </div>
           <h1 className="text-3xl font-semibold text-ink leading-tight mt-4">
-            Find trusted help, fast.
+            Find nearby providers on WhatsApp.
           </h1>
           <p className="text-slate-600 mt-2">
             Tell us what you need. We connect you on WhatsApp.

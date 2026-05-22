@@ -18,7 +18,7 @@ public sealed class InboundPrefetchRepositoryTests : PipelineTestBase
 {
     public InboundPrefetchRepositoryTests(DevPipelineFixture fx) : base(fx) { }
 
-    private static string UniquePhone() => $"+220{Guid.NewGuid().ToString("N")[..8]}";
+    private static string UniquePhone() => $"+220{Random.Shared.Next(0, 10_000_000):D7}";
 
     [Fact]
     public async Task GetRegistrationDraftAsync_EmptyState_ReturnsNull()

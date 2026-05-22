@@ -13,7 +13,7 @@ public class ClientRequestPipelineTests : PipelineTestBase
     public async Task Greeting_GetsGreetingBack_NotServicePitch()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155551001";
+        var phone = "+22070001001";
 
         await _fx.InjectTextAndAwaitAsync(phone, "hi");
 
@@ -30,7 +30,7 @@ public class ClientRequestPipelineTests : PipelineTestBase
     public async Task OutOfScope_GetsRefusal_NotOpenChat()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155551009";
+        var phone = "+22070001009";
 
         await _fx.InjectTextAndAwaitAsync(phone, "what's the weather today");
 
@@ -45,7 +45,7 @@ public class ClientRequestPipelineTests : PipelineTestBase
     public async Task ServiceRequest_AsksToConfirmService()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155551002";
+        var phone = "+22070001002";
 
         await _fx.InjectTextAndAwaitAsync(phone, "I need a plumber");
 
@@ -61,7 +61,7 @@ public class ClientRequestPipelineTests : PipelineTestBase
     public async Task ProblemStatement_DoorIsBroken_RoutesToClientRequest_NotProviderRegistration()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155551011";
+        var phone = "+22070001011";
 
         await _fx.InjectTextAndAwaitAsync(phone, "My door is broken");
 
@@ -79,7 +79,7 @@ public class ClientRequestPipelineTests : PipelineTestBase
     public async Task ServiceRequest_FullHappyPath_GpsLocation_ReachesMatching()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155551003";
+        var phone = "+22070001003";
 
         await _fx.InjectTextAndAwaitAsync(phone, "I need a plumber");
         await _fx.InjectTextAndAwaitAsync(phone, "yes");
@@ -99,7 +99,7 @@ public class ClientRequestPipelineTests : PipelineTestBase
     public async Task ServiceRequest_PickProvider_SharesContactBothSides()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155551006";
+        var phone = "+22070001006";
 
         await _fx.InjectTextAndAwaitAsync(phone, "I need a plumber");
         await _fx.InjectTextAndAwaitAsync(phone, "yes");
@@ -138,7 +138,7 @@ public class ClientRequestPipelineTests : PipelineTestBase
     public async Task ServiceRequest_FreeTextShareContact_AfterMatch_AsksWhichMatch_ThenShares()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155551010";
+        var phone = "+22070001010";
 
         // Free-text "give me the contact details" implies the requester is OK with
         // sharing — drive intake with consent=true so the bilateral-consent path
@@ -170,7 +170,7 @@ public class ClientRequestPipelineTests : PipelineTestBase
     public async Task ServiceRequest_AddressText_GetsGeocodedAndConfirmed()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155551004";
+        var phone = "+22070001004";
 
         await _fx.InjectTextAndAwaitAsync(phone, "I need a carpenter");
         await _fx.InjectTextAndAwaitAsync(phone, "yes");
@@ -188,7 +188,7 @@ public class ClientRequestPipelineTests : PipelineTestBase
         // ShareContact-true provider — that leaked the client's number to providers
         // who were never selected.
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155551007";
+        var phone = "+22070001007";
 
         var presented = await MatchPipelineHelpers.ReachInitialPresentAsync(_fx, phone);
 
@@ -206,7 +206,7 @@ public class ClientRequestPipelineTests : PipelineTestBase
     public async Task QuickIntent_LiteralNo_TakesNoAsAnswer_NoLoop()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155551008";
+        var phone = "+22070001008";
 
         await _fx.InjectTextAndAwaitAsync(phone, "I need a plumber");
         var prompt = await client.ExpectOutboundAsync(phone, m => m.Body.Contains("YES or NO"));
@@ -224,7 +224,7 @@ public class ClientRequestPipelineTests : PipelineTestBase
     public async Task SecondMessageMidFunnel_ReprompstYesNo_NotRestartFunnel()
     {
         using var client = _fx.Factory.CreateClient();
-        var phone = "+14155551005";
+        var phone = "+22070001005";
 
         await _fx.InjectTextAndAwaitAsync(phone, "I need a plumber");
         var first = await client.ExpectOutboundAsync(phone, m => m.Body.Contains("YES or NO"));

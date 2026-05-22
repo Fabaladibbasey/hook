@@ -6,7 +6,7 @@ namespace Hook.UnitTests.Chat;
 public class ChatParticipantTests
 {
     private static ChatParticipant New() =>
-        ChatParticipant.Create(Guid.NewGuid(), ChatParticipantRole.Client, "+14155550100");
+        ChatParticipant.Create(Guid.NewGuid(), ChatParticipantRole.Client, "+22070000100");
 
     [Fact]
     public void TryAdvanceSequence_AcceptsStrictlyGreaterValue()

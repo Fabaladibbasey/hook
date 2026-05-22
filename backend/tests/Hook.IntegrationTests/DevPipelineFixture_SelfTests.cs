@@ -23,8 +23,8 @@ public sealed class DevPipelineFixture_SelfTests : PipelineTestBase
             db.GeocodeCache.Add(new GeocodeCacheEntry
             {
                 Key = "self-test-key",
-                Latitude = 1,
-                Longitude = 2,
+                Latitude = 13.4549,
+                Longitude = -16.5790,
                 FormattedAddress = "x",
                 Provider = "test",
                 FetchedAt = DateTimeOffset.UtcNow

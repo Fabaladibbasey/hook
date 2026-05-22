@@ -16,7 +16,7 @@ public class PerPhoneLimiterTests
             SpamPerHour = 1000
         }));
 
-        var phone = "+12025550123";
+        var phone = "+22070000123";
 
         for (var i = 0; i < 3; i++)
         {
@@ -38,8 +38,8 @@ public class PerPhoneLimiterTests
             SpamPerHour = 100
         }));
 
-        limiter.TryAcquire("+1A").IsAllowed.ShouldBeTrue();
-        limiter.TryAcquire("+1A").IsAllowed.ShouldBeFalse();
-        limiter.TryAcquire("+1B").IsAllowed.ShouldBeTrue();
+        limiter.TryAcquire("+22070000001").IsAllowed.ShouldBeTrue();
+        limiter.TryAcquire("+22070000001").IsAllowed.ShouldBeFalse();
+        limiter.TryAcquire("+22070000002").IsAllowed.ShouldBeTrue();
     }
 }
