@@ -50,6 +50,29 @@ public class PickProviderResolverTests
         Assert.Equal([1, 3, 5], picked.Select(p => p.Position));
     }
 
+    [Theory]
+    [InlineData("1 and 2")]
+    [InlineData("1 & 2")]
+    [InlineData("1+2")]
+    [InlineData("1 or 2")]
+    [InlineData("pick 1 and 2")]
+    public void Resolve_ConjunctionSeparated_ReturnsTwoMatchesInOrder_WithPositions(string text)
+    {
+        var matches = Five();
+        var picked = PickProviderResolver.Resolve(text, matches);
+        Assert.Equal([matches[0].Id, matches[1].Id], picked.Select(p => p.Match.Id));
+        Assert.Equal([1, 2], picked.Select(p => p.Position));
+    }
+
+    [Fact]
+    public void Resolve_MixedSeparators_OxfordStyle_ReturnsAllInOrder()
+    {
+        var matches = Five();
+        var picked = PickProviderResolver.Resolve("1, 2, 3 and 4", matches);
+        Assert.Equal([matches[0].Id, matches[1].Id, matches[2].Id, matches[3].Id], picked.Select(p => p.Match.Id));
+        Assert.Equal([1, 2, 3, 4], picked.Select(p => p.Position));
+    }
+
     [Fact]
     public void Resolve_All_ReturnsEveryPresentedMatch_WithIncreasingPositions()
     {

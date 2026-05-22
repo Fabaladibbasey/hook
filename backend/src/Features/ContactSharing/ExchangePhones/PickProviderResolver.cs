@@ -7,20 +7,28 @@ public sealed record PickedMatch(MatchEntity Match, int Position);
 
 public static class PickProviderResolver
 {
+    // Accept comma, plus, ampersand, or the words "and"/"or" between picks so
+    // natural-language replies like "1 and 2", "1 & 2", "1+2" route the same as
+    // "PICK 1,2". Word forms use \b on both sides to keep token isolation.
+    private const string SeparatorPattern = @"\s*(?:,|\+|&|\band\b|\bor\b)\s*";
+
     private static readonly Regex IndexListRegex = new(
-        @"([1-9]\d?(?:\s*,\s*[1-9]\d?)*)",
+        $@"([1-9]\d?(?:{SeparatorPattern}[1-9]\d?)+|[1-9]\d?)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex AllRegex = new(@"\ball\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex PickKeywordRegex = new(@"\bpick\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    // Whole-message pick syntax: "1", "ALL", "1,2", "#1", " 2 ". Mirrors the digit
-    // cap from IndexListRegex ([1-9]\d?) so out-of-range tokens like "100" don't
-    // pass the gate via the bare-index branch — only via the explicit \bpick\b path.
+    // Whole-message pick syntax: "1", "ALL", "1,2", "1 and 2", "#1", " 2 ". Mirrors
+    // the digit cap from IndexListRegex ([1-9]\d?) so out-of-range tokens like "100"
+    // don't pass the gate via the bare-index branch — only via the explicit \bpick\b path.
     private static readonly Regex BareIndexSyntaxRegex = new(
-        @"^\s*(?:all|#?[1-9]\d?(?:\s*,\s*#?[1-9]\d?)*)\s*$",
+        $@"^\s*(?:all|#?[1-9]\d?(?:{SeparatorPattern}#?[1-9]\d?)*)\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex SeparatorSplitRegex = new(
+        SeparatorPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>
     /// Gate for InboundRouter. Returns true when the message looks like a pick command
@@ -71,8 +79,10 @@ public static class PickProviderResolver
 
         var seen = new HashSet<int>();
         var ordered = new List<int>();
-        foreach (var token in match.Groups[1].Value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        foreach (var raw in SeparatorSplitRegex.Split(match.Groups[1].Value))
         {
+            var token = raw.Trim();
+            if (token.Length == 0) continue;
             if (!int.TryParse(token, out var n)) continue;
             if (n < 1 || n > count) continue;
             var zeroBased = n - 1;

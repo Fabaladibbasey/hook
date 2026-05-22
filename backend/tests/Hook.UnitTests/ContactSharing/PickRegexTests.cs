@@ -12,6 +12,9 @@ public class PickRegexTests
     [InlineData("I'll be there in 10")]
     [InlineData("best of all worlds")]
     [InlineData("not at all")]
+    [InlineData("got 1 and 2 quotes already")]
+    [InlineData("1 and done")]
+    [InlineData("call me in 1 or 2 mins")]
     public void IsPickIntent_ConversationalChatter_ReturnsFalse(string text)
     {
         Assert.False(PickProviderResolver.IsPickIntent(text),
@@ -29,6 +32,10 @@ public class PickRegexTests
     [InlineData("PICK -1")]
     [InlineData("#1")]
     [InlineData("PICK 1.")]
+    [InlineData("pick 1 and 2")]
+    [InlineData("PICK 1 & 2")]
+    [InlineData("pick 1+2")]
+    [InlineData("pick 1 or 2")]
     public void IsPickIntent_ExplicitPick_ReturnsTrue(string text)
     {
         Assert.True(PickProviderResolver.IsPickIntent(text),
@@ -41,6 +48,14 @@ public class PickRegexTests
     [InlineData("all")]
     [InlineData("1,2")]
     [InlineData(" 2 ")]
+    [InlineData("1 and 2")]
+    [InlineData("1 & 2")]
+    [InlineData("1+2")]
+    [InlineData("1 or 2")]
+    [InlineData("1, 2 and 3")]
+    [InlineData("1 and 2, 3")]
+    [InlineData("1, 2, 3 and 4")]
+    [InlineData("1 + 2 & 3")]
     public void IsPickIntent_StandalonePickSyntax_ReturnsTrue(string text)
     {
         Assert.True(PickProviderResolver.IsPickIntent(text),
