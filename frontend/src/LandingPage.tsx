@@ -1,6 +1,6 @@
 import LegalFooter from "./components/LegalFooter";
 
-export default function App() {
+export default function LandingPage() {
   return (
     <div className="min-h-screen grid grid-rows-[1fr_auto] p-6">
       <main className="text-center max-w-md justify-self-center self-center">

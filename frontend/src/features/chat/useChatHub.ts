@@ -1,6 +1,6 @@
 import { HubConnection, HubConnectionBuilder, HubConnectionState, LogLevel } from "@microsoft/signalr";
 import { useEffect, useRef, useState } from "react";
-import { decrypt, deriveSharedKey, encrypt, getOrCreateKeypair } from "../crypto/chatCrypto";
+import { decrypt, deriveSharedKey, encrypt, getOrCreateKeypair } from "./chatCrypto";
 
 export type ChatMessage = {
   id: string;

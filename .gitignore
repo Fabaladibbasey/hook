@@ -51,6 +51,7 @@ backend/src/wwwroot/
 ## Local Claude settings
 .claude/
 .claude-test-evidence/
+.worktrees/
 
 ## Local scratch / log dumps
 /logs-*.txt

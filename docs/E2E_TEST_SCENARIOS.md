@@ -683,7 +683,7 @@ Both finalize the request and publish `ServiceRequestCreated`.
 ### CH-004 — Both sides PublishKey → PeerKeyAvailable  [P0] [both]
 
 **Preconditions:** both participants connected.
-**Expected:** each calls `PublishKey(<spki-base64>)`. After both keys present, both receive `PeerKeyAvailable { peerParticipantId, peerPublicKeyB64 }`. Per `frontend/src/crypto/chatCrypto.ts`, frontend derives shared secret via P-256 ECDH + HKDF-SHA-256.
+**Expected:** each calls `PublishKey(<spki-base64>)`. After both keys present, both receive `PeerKeyAvailable { peerParticipantId, peerPublicKeyB64 }`. Per `frontend/src/features/chat/chatCrypto.ts`, frontend derives shared secret via P-256 ECDH + HKDF-SHA-256.
 **Dev exec:** scripted SignalR client publishing fixture keys.
 **Non-dev exec:** open both `/c/...` URLs in two browser tabs; observe `PeerKeyAvailable` in DevTools.
 

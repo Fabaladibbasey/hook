@@ -14,11 +14,3 @@ export function formatSupportWhatsapp(digits: string = SUPPORT_WHATSAPP): string
 }
 
 export const SUPPORT_WHATSAPP_DISPLAY = formatSupportWhatsapp();
-
-export function WhatsAppContact() {
-  return (
-    <a href={supportWhatsappLink}>
-      <code>{SUPPORT_WHATSAPP_DISPLAY}</code>
-    </a>
-  );
-}

@@ -1,2 +1,3 @@
 export const RETENTION_DAYS = 7;
 export const RETENTION_DAYS_LABEL = `${RETENTION_DAYS} days`;
+export const LEGAL_EFFECTIVE_DATE = "2026-05-06";

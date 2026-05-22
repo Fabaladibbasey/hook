@@ -1,8 +1,8 @@
 import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
-import LegalFooter from "../components/LegalFooter";
+import LegalFooter from "@/components/LegalFooter";
 
-export default function LegalPage({
+export default function LegalLayout({
   title,
   effective,
   children

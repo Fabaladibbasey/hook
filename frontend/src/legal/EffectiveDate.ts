@@ -1,1 +1,0 @@
-export const LEGAL_EFFECTIVE_DATE = "2026-05-06";

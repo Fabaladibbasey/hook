@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchJson } from "../api/fetchJson";
+import { fetchJson } from "@/api/fetchJson";
 
 type OutboxMessage = {
   at: string;
@@ -13,12 +13,12 @@ type InboundType = (typeof TYPES)[number];
 
 export default function DevConsole() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
-  const [from, setFrom] = useState("+14155550123");
+  const [from, setFrom] = useState("+2207000000");
   const [type, setType] = useState<InboundType>("text");
   const [text, setText] = useState("hi");
   const [interactiveTitle, setInteractiveTitle] = useState("Yes");
-  const [lat, setLat] = useState("37.7749");
-  const [lng, setLng] = useState("-122.4194");
+  const [lat, setLat] = useState("13.4549");
+  const [lng, setLng] = useState("-16.5790");
   const [outbox, setOutbox] = useState<OutboxMessage[]>([]);
   const [status, setStatus] = useState<string>("");
 

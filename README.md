@@ -39,8 +39,14 @@ backend/
 
 frontend/
   src/
-    api/  signalr/  crypto/      # transport + E2E primitives
-    components/  routes/  App.tsx  main.tsx
+    features/
+      chat/     # ChatRoom, sub-components, useChatHub, chatCrypto
+      dev/      # DevConsole
+      legal/    # LegalLayout, Terms, Privacy, SupportContact, constants
+    components/ # LegalFooter (shared — ChatRoom + LandingPage consume)
+    api/        # fetchJson (shared HTTP transport)
+    LandingPage.tsx  # root route
+    main.tsx
 
 docs/                            # operations, meta-templates, E2E scenarios
 prd.md                           # product requirements
