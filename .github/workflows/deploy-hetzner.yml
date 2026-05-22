@@ -102,6 +102,11 @@ jobs:
       - name: Generate EF migration bundle
         env:
           SkipFrontendBuild: "true"
+          # Placeholder so Program.cs's UseNpgsql/NpgsqlDataSource setup
+          # doesn't choke on a null connection string during DbContext
+          # construction. Real conn string is injected at bundle run time
+          # via the migrate job's env-file.
+          ConnectionStrings__HookDb: "Host=localhost;Database=ci;Username=ci;Password=ci"
         run: |
           dotnet tool restore
           dotnet ef migrations bundle \
