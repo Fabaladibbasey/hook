@@ -155,9 +155,10 @@ jobs:
             docker run --rm \
               --network "$HOOK_NET" \
               --env-file "$ENV_FILE" \
+              -e SkipFrontendBuild=true \
               -v "$REPO_DIR/backend:/src" -w /src \
               mcr.microsoft.com/dotnet/sdk:10.0 \
-              sh -c "dotnet tool restore >/dev/null && dotnet ef database update --project src/Hook.csproj -p:SkipFrontendBuild=true -- --environment Production"
+              sh -c "dotnet tool restore >/dev/null && dotnet ef database update --project src/Hook.csproj -- --environment Production"
 
             docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
             # Bind-mounted config files (Caddyfile, etc.) don't trigger a
