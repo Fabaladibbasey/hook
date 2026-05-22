@@ -95,5 +95,5 @@ public sealed class NonHandlerContextEventLossTests : PipelineTestBase
             .Build();
     }
 
-    private static string UniquePhone() => $"+220{Guid.NewGuid().ToString("N")[..8]}";
+    private static string UniquePhone() => $"+220{Random.Shared.Next(0, 10_000_000):D7}";
 }

@@ -25,10 +25,10 @@ public sealed class MatchRepositoryOrderingTests : PipelineTestBase
         var later = DateTimeOffset.UtcNow;
 
         var laterMatch = MatchEntity.Create(
-            request.Id, $"+220{Guid.NewGuid().ToString("N")[..8]}", "plumbing",
+            request.Id, $"+220{Random.Shared.Next(0, 10_000_000):D7}", "plumbing",
             distanceKm: 1.0, score: 0.9, now: later);
         var earlierMatch = MatchEntity.Create(
-            request.Id, $"+220{Guid.NewGuid().ToString("N")[..8]}", "plumbing",
+            request.Id, $"+220{Random.Shared.Next(0, 10_000_000):D7}", "plumbing",
             distanceKm: 1.0, score: 0.9, now: earlier);
 
         // Insert later first so the natural insertion order is the OPPOSITE of the
@@ -59,7 +59,7 @@ public sealed class MatchRepositoryOrderingTests : PipelineTestBase
         {
             Id = higherId,
             RequestId = request.Id,
-            ProviderPhone = $"+220{Guid.NewGuid().ToString("N")[..8]}",
+            ProviderPhone = $"+220{Random.Shared.Next(0, 10_000_000):D7}",
             ServiceSlug = "plumbing",
             DistanceKm = 1.0,
             Score = 0.9,
@@ -69,7 +69,7 @@ public sealed class MatchRepositoryOrderingTests : PipelineTestBase
         {
             Id = lowerId,
             RequestId = request.Id,
-            ProviderPhone = $"+220{Guid.NewGuid().ToString("N")[..8]}",
+            ProviderPhone = $"+220{Random.Shared.Next(0, 10_000_000):D7}",
             ServiceSlug = "plumbing",
             DistanceKm = 1.0,
             Score = 0.9,
@@ -87,7 +87,7 @@ public sealed class MatchRepositoryOrderingTests : PipelineTestBase
 
     private static async Task<ServiceRequest> SeedRequestAsync(HookDbContext db)
     {
-        var clientPhone = $"+220{Guid.NewGuid().ToString("N")[..8]}";
+        var clientPhone = $"+220{Random.Shared.Next(0, 10_000_000):D7}";
         var request = ServiceRequest.Create(
             clientPhone, "plumbing",
             new Location(13.45, -16.6), "Banjul",

@@ -11,7 +11,7 @@ public sealed class WhatsappContactRepositoryTests : PipelineTestBase
 {
     public WhatsappContactRepositoryTests(DevPipelineFixture fx) : base(fx) { }
 
-    private static string UniquePhone() => $"+220{Guid.NewGuid().ToString("N")[..8]}";
+    private static string UniquePhone() => $"+220{Random.Shared.Next(0, 10_000_000):D7}";
 
     [Fact]
     public async Task UpsertInboundAsync_NewContact_Inserts()

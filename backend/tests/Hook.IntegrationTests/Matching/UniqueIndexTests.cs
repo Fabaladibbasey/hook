@@ -20,13 +20,13 @@ public sealed class UniqueIndexTests : PipelineTestBase
         var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
 
         var request = ServiceRequest.Create(
-            $"+220{Guid.NewGuid().ToString("N")[..8]}", "plumbing",
+            $"+220{Random.Shared.Next(0, 10_000_000):D7}", "plumbing",
             new Location(13.45, -16.6), "Banjul",
             $"req-{Guid.NewGuid()}", 5.0, DateTimeOffset.UtcNow, false);
         db.ServiceRequests.Add(request);
         await db.SaveChangesAsync();
 
-        var providerPhone = $"+220{Guid.NewGuid().ToString("N")[..8]}";
+        var providerPhone = $"+220{Random.Shared.Next(0, 10_000_000):D7}";
         db.Matches.Add(Match.Create(request.Id, providerPhone, "plumbing", 0, 0, DateTimeOffset.UtcNow));
         await db.SaveChangesAsync();
 

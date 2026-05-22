@@ -25,11 +25,11 @@ public sealed class ProviderQueryStatsTests : PipelineTestBase
         var location = new Location(DevPipelineFixture.SeedRefLat, DevPipelineFixture.SeedRefLng);
 
         var withStats = ProviderAvailability.Register(
-            $"+220{Guid.NewGuid().ToString("N")[..8]}",
+            $"+220{Random.Shared.Next(0, 10_000_000):D7}",
             [slug], location, "Banjul", shareContact: true,
             ttl: TimeSpan.FromHours(1), now);
         var coldStart = ProviderAvailability.Register(
-            $"+220{Guid.NewGuid().ToString("N")[..8]}",
+            $"+220{Random.Shared.Next(0, 10_000_000):D7}",
             [slug], location, "Banjul", shareContact: true,
             ttl: TimeSpan.FromHours(1), now);
 
@@ -42,7 +42,7 @@ public sealed class ProviderQueryStatsTests : PipelineTestBase
         // A third provider has a stats row but zero completed jobs — verifies the
         // zero-default path (CompletedCount=0, SuccessRate=0) is preserved.
         var zeroStats = ProviderAvailability.Register(
-            $"+220{Guid.NewGuid().ToString("N")[..8]}",
+            $"+220{Random.Shared.Next(0, 10_000_000):D7}",
             [slug], location, "Banjul", shareContact: true,
             ttl: TimeSpan.FromHours(1), now);
         var zero = ProviderStats.Initial(zeroStats.Phone, now);
@@ -85,11 +85,11 @@ public sealed class ProviderQueryStatsTests : PipelineTestBase
         var location = new Location(DevPipelineFixture.SeedRefLat, DevPipelineFixture.SeedRefLng);
 
         var hot = ProviderAvailability.Register(
-            $"+220{Guid.NewGuid().ToString("N")[..8]}",
+            $"+220{Random.Shared.Next(0, 10_000_000):D7}",
             [slug], location, "Banjul", shareContact: true,
             ttl: TimeSpan.FromHours(48), registeredAt);
         var cold = ProviderAvailability.Register(
-            $"+220{Guid.NewGuid().ToString("N")[..8]}",
+            $"+220{Random.Shared.Next(0, 10_000_000):D7}",
             [slug], location, "Banjul", shareContact: true,
             ttl: TimeSpan.FromHours(48), registeredAt);
 
