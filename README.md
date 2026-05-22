@@ -59,7 +59,7 @@ Each `Features/<Slice>/` owns its handlers, DTOs, persistence calls, and tests (
 ### Prereqs
 
 - .NET 10 SDK (`10.0.x`)
-- Node 20
+- Node 24
 - Postgres 16 with PostGIS 3.4
 - Ollama running locally (mandatory — no dev stub)
 

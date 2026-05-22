@@ -139,7 +139,7 @@ Wolverine messaging runs in-process. `Wolverine.DefaultExecutionTimeout` (defaul
 ## Environment & CI
 
 - **Platform**: Windows 11 dev box. Shell is bash (Git Bash); PowerShell 7+ also available. Use forward slashes and `/dev/null` (not `NUL`). CI runs Ubuntu.
-- **Runtime versions**: .NET 10 SDK (`10.0.x`), Node 20, Postgres 16 + PostGIS 3.4 (CI uses `postgis/postgis:16-3.4`).
+- **Runtime versions**: .NET 10 SDK (`10.0.x`), Node 24, Postgres 16 + PostGIS 3.4 (CI uses `postgis/postgis:16-3.4`).
 - **Dev runtime**: backend at `:5212`, vite at `:5173`/`:5174`, Postgres at `:5432`.
 - **Build & Test workflow**: `.github/workflows/build-and-test.yml` — restores, builds Release, runs tests, smoke-publishes a container. `working-directory` defaults to `backend/`.
 - **Deploy**: `.github/workflows/deploy.yml`.
