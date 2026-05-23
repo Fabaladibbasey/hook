@@ -46,8 +46,10 @@ public class PhoneExchangerTests
             .ReturnsAsync((PickClaim claim, CancellationToken _) =>
             {
                 _lastClaim = claim;
-                // Production: TryClaimPickAsync is a DB UPDATE; the in-memory match object
-                // is not refreshed afterwards, so ContactShared stays false here.
+                // Production: TryClaimPickAsync is a DB UPDATE; PhoneExchanger then
+                // calls match.ClaimForPickup(...) to mirror the committed state on the
+                // tracked aggregate. This mock leaves ContactShared/PickedAt untouched
+                // — PhoneExchanger does the sync, not the repository.
                 return _claimResult;
             });
 

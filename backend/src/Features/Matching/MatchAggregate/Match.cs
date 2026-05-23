@@ -53,8 +53,8 @@ public class Match : AggregateRoot
 
     public void MarkContactExchanged(Guid requestId, string clientPhone, string providerPhone)
     {
-        if (ContactShared)
-            throw new InvalidOperationException($"Match {Id} contacts already exchanged");
+        if (PickedAt is null)
+            throw new InvalidOperationException($"Match {Id} contact-exchange before claim");
         RaiseDomainEvent(new ContactExchangedEvent(Id, requestId, clientPhone, providerPhone));
     }
 }

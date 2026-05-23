@@ -79,6 +79,12 @@ public sealed class PhoneExchanger(
             return ExchangeOutcome.RaceLost;
         }
 
+        // TryClaimPickAsync uses ExecuteUpdateAsync, which bypasses the EF change
+        // tracker. Mirror the committed state on the tracked aggregate so any
+        // subsequent read inside this scope sees the post-claim state and does not
+        // misreport RaceLost instead of AlreadyShared/AlreadyRouted.
+        match.ClaimForPickup(bothConsent, now);
+
         if (!bothConsent)
         {
             await events.PublishAsync(new RouteMatchToChatCommand(

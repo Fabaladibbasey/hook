@@ -43,6 +43,6 @@ public sealed class JudgeParentSlugDispatchHandler(
         if (string.Equals(parent, cmd.Slug, StringComparison.Ordinal)) return;
 
         await bus.PublishAsync(new AssignServiceParentCommand(cmd.Slug, parent));
-        logger.LogInformation("[Taxonomy] Assigned {Slug} -> {Parent}", cmd.Slug, parent);
+        logger.LogInformation("[Taxonomy] Enqueued parent assignment {Slug} -> {Parent}", cmd.Slug, parent);
     }
 }

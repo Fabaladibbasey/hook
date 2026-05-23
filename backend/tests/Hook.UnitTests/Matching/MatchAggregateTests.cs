@@ -1,3 +1,4 @@
+using Hook.Features.ContactSharing.Events;
 using Hook.Features.Matching.MatchAggregate;
 using Shouldly;
 
@@ -71,5 +72,31 @@ public sealed class MatchAggregateTests
         m.ClaimForChat(chatId);
 
         m.ChatId.ShouldBe(chatId);
+    }
+
+    [Fact]
+    public void MarkContactExchanged_BeforeClaim_Throws()
+    {
+        var m = NewMatch();
+
+        Should.Throw<InvalidOperationException>(
+                () => m.MarkContactExchanged(m.RequestId, "+2203339999", m.ProviderPhone))
+            .Message.ShouldContain("before claim");
+    }
+
+    [Fact]
+    public void MarkContactExchanged_AfterClaim_RaisesContactExchangedEvent()
+    {
+        var m = NewMatch();
+        m.ClaimForPickup(contactShared: true, now: Now);
+
+        m.MarkContactExchanged(m.RequestId, "+2203339999", m.ProviderPhone);
+
+        var raised = m.DequeueEvents();
+        raised.ShouldHaveSingleItem();
+        var evt = raised[0].ShouldBeOfType<ContactExchangedEvent>();
+        evt.MatchId.ShouldBe(m.Id);
+        evt.RequestId.ShouldBe(m.RequestId);
+        evt.ProviderPhone.ShouldBe(m.ProviderPhone);
     }
 }
