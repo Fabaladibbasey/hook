@@ -66,7 +66,7 @@ public sealed class FeedbackResponseService(
         if (parsed is null && now - pending.PromptedAt > opts.ParseRetryWindow)
         {
             if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct)) return;
-            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+            await bus.PublishAsync(new SendWhatsAppTextCommand(msg.From,
                 "Thanks — recorded that. No more questions on this one."));
             return;
         }
@@ -81,7 +81,7 @@ public sealed class FeedbackResponseService(
         if (parsed != FeedbackAnswer.Yes)
         {
             if (!await feedback.TryClaimPendingAsync(pending.Id, parsed.Value, now, ct)) return;
-            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+            await bus.PublishAsync(new SendWhatsAppTextCommand(msg.From,
                 "Thanks for letting us know. We'll keep looking for someone better next time."));
             return;
         }
@@ -113,7 +113,7 @@ public sealed class FeedbackResponseService(
         if (!await feedback.TryAddPendingAsync(winner, ct)) return;
 
         var prompt = $"Which provider worked out? Reply with the number — {PickedMatchListFormatter.Format(picked)}.";
-        await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From, prompt));
+        await bus.PublishAsync(new SendWhatsAppTextCommand(msg.From, prompt));
 
         await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Yes, now, ct);
     }
@@ -134,7 +134,7 @@ public sealed class FeedbackResponseService(
             {
                 logger.LogWarning("IdentifyWinner parse window expired for match {MatchId}", pending.MatchId);
                 if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct)) return;
-                await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+                await bus.PublishAsync(new SendWhatsAppTextCommand(msg.From,
                     "Thanks — recorded that. No more questions on this one."));
                 return;
             }
@@ -161,7 +161,7 @@ public sealed class FeedbackResponseService(
         if (parsed is null && now - pending.PromptedAt > opts.ParseRetryWindow)
         {
             if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct)) return;
-            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+            await bus.PublishAsync(new SendWhatsAppTextCommand(msg.From,
                 "Thanks — recorded that. No more questions on this one."));
             return;
         }
@@ -185,7 +185,7 @@ public sealed class FeedbackResponseService(
                 pending.MatchId, pending.RequestId, FeedbackStep.AwaitingEta, now);
             if (!await feedback.TryAddPendingAsync(eta, ct)) return;
 
-            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+            await bus.PublishAsync(new SendWhatsAppTextCommand(msg.From,
                 "Got it — when do you think it'll be done? e.g. 'in 3 hours' or 'tomorrow at 5pm'."));
             return;
         }
@@ -193,7 +193,7 @@ public sealed class FeedbackResponseService(
         var step2Ack = parsed == FeedbackAnswer.Yes
             ? "Glad it worked out — thanks for the feedback!"
             : "Thanks for letting us know. We'll factor that into future matches.";
-        await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From, step2Ack));
+        await bus.PublishAsync(new SendWhatsAppTextCommand(msg.From, step2Ack));
         await RecordOutcomeAsync(pending.MatchId, parsed.Value, now, ct);
     }
 
@@ -213,16 +213,16 @@ public sealed class FeedbackResponseService(
             {
                 var retry = "Sorry, didn't catch that. When do you think the job will be done? "
                     + "e.g. 'in 3 hours' or 'tomorrow at 5pm'.";
-                await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From, retry));
+                await bus.PublishAsync(new SendWhatsAppTextCommand(msg.From, retry));
                 return;
             }
             await ClaimSkippedAndFallbackAsync(pending, opts, now, msg.From, ct);
             return;
         }
 
-        await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+        await bus.PublishAsync(new SendWhatsAppTextCommand(msg.From,
             "Got your ETA — one sec…"));
-        await bus.PublishAsync(new ExtractEtaRequested(pending.Id, pending.MatchId, msg.From, text));
+        await bus.PublishAsync(new ExtractEtaCommand(pending.Id, pending.MatchId, msg.From, text));
     }
 
     internal async Task ClaimSkippedAndFallbackAsync(
@@ -234,7 +234,7 @@ public sealed class FeedbackResponseService(
     {
         if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct)) return;
         await events.ScheduleAsync(new Step2FeedbackCheck(pending.MatchId), opts.Step2InProgressRecheckDelay, ct);
-        await bus.PublishAsync(new SendWhatsAppTextRequested(from,
+        await bus.PublishAsync(new SendWhatsAppTextCommand(from,
             "Thanks — recorded that. No more questions on this one."));
         logger.LogInformation(
             "ETA unusable for match {MatchId}; Step2 recheck scheduled at +{Delay}",
@@ -282,7 +282,7 @@ public sealed class FeedbackResponseService(
         // Bound the spammy retry prompt to ParseRetryWindow so a forgotten Pending row
         // can't re-arm "didn't catch that" replies indefinitely on every inbound.
         if (now - pending.PromptedAt > opts.ParseRetryWindow) return;
-        await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From, $"Sorry, didn't catch that. {hint}"));
+        await bus.PublishAsync(new SendWhatsAppTextCommand(msg.From, $"Sorry, didn't catch that. {hint}"));
     }
 
     private async Task RecordOutcomeAsync(Guid matchId, FeedbackAnswer answer, DateTimeOffset now, CancellationToken ct)

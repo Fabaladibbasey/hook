@@ -19,7 +19,7 @@ public class Step2PromptDispatchHandlerTests
         new(_ai.Object, _whatsapp.Object, _feedback.Object,
             NullLogger<Step2PromptDispatchHandler>.Instance);
 
-    private static Step2PromptDispatchRequested Req() => new(
+    private static Step2PromptDispatchCommand Req() => new(
         FeedbackId: Guid.NewGuid(),
         MatchId: Guid.NewGuid(),
         ClientPhone: PhoneNumber.Parse("+220300001"),

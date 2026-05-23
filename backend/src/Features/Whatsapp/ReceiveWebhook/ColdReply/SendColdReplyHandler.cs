@@ -14,7 +14,7 @@ public sealed class SendColdReplyHandler(
     // [NonTransactional]: AI inference takes 60-150s; opt out of AutoApplyTransactions
     // so the handler doesn't pin an Npgsql connection across the Ollama window.
     [NonTransactional]
-    public async Task Handle(SendColdReplyRequested evt, CancellationToken ct)
+    public async Task Handle(SendColdReplyCommand evt, CancellationToken ct)
     {
         var ctx = new ReplyContext(
             Purpose: evt.Purpose,
@@ -32,6 +32,6 @@ public sealed class SendColdReplyHandler(
             : "I help connect people who need services with providers. "
                 + "Reply REQUEST if you need help, or REGISTER if you offer a service.";
         var reply = await AiReplyHelper.TryGenerateOrFallbackAsync(ai, ctx, evt.Purpose, fallback, logger, ct);
-        await bus.PublishAsync(new SendWhatsAppTextRequested(evt.To, reply));
+        await bus.PublishAsync(new SendWhatsAppTextCommand(evt.To, reply));
     }
 }

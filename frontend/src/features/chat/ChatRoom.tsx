@@ -8,7 +8,7 @@ import WaitingForPeer from "./WaitingForPeer";
 import LegalFooter from "@/components/LegalFooter";
 import { fetchJson } from "@/api/fetchJson";
 
-type OpenResponse = {
+type OpenChatResponse = {
   chatId: string;
   participantId: string;
   role: "Client" | "Provider";
@@ -19,12 +19,12 @@ type OpenResponse = {
 
 export default function ChatRoom() {
   const { token } = useParams<{ chatId: string; token: string }>();
-  const [open, setOpen] = useState<OpenResponse | null>(null);
+  const [open, setOpen] = useState<OpenChatResponse | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) return;
-    fetchJson<OpenResponse>(`/api/chat/open?token=${encodeURIComponent(token)}`)
+    fetchJson<OpenChatResponse>(`/api/chat/open?token=${encodeURIComponent(token)}`)
       .then(setOpen)
       .catch((err) => setOpenError(err instanceof Error ? err.message : String(err)));
   }, [token]);

@@ -9,7 +9,7 @@ public sealed class ContactExchangedHandler(
     IOptions<FeedbackOptions> options,
     ILogger<ContactExchangedHandler> logger)
 {
-    public async Task Handle(ContactExchanged evt, CancellationToken ct)
+    public async Task Handle(ContactExchangedEvent evt, CancellationToken ct)
     {
         var delay = options.Value.Step1InitialDelay;
         await bus.ScheduleAsync(new Step1FeedbackCheck(evt.MatchId), delay);

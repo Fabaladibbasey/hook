@@ -12,7 +12,7 @@ public sealed class Step2PromptDispatchHandler(
     ILogger<Step2PromptDispatchHandler> logger)
 {
     [NonTransactional]
-    public async Task Handle(Step2PromptDispatchRequested evt, CancellationToken ct)
+    public async Task Handle(Step2PromptDispatchCommand evt, CancellationToken ct)
     {
         var ctx = new ReplyContext(
             Purpose: "feedback-step-2-job-completed",

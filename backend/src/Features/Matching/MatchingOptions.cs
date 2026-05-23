@@ -57,10 +57,11 @@ public class MatchingOptions
     [Range(0.1, 1.0)]
     public double NarrowedMatchFactor { get; init; } = 0.6;
 
-    // After this elapses without an AdvanceClientRequestDraft callback, ClientRequestOrchestrator
-    // force-reverts a ResolvingService draft so the user is not trapped if the LLM dead-lettered
-    // or the host crashed mid-call. Keep aligned with Wolverine.DefaultExecutionTimeout and
-    // OllamaOptions.TimeoutSeconds + 30 — the three values move together.
+    // After this elapses without an Apply/ResetClientServiceResolutionCommand callback,
+    // ClientRequestOrchestrator force-reverts a ResolvingService draft so the user is not trapped
+    // if the LLM dead-lettered or the host crashed mid-call. Keep aligned with
+    // Wolverine.DefaultExecutionTimeout and OllamaOptions.TimeoutSeconds + 30 — the three values
+    // move together.
     [Range(typeof(TimeSpan), "00:00:30", "00:30:00")]
     public TimeSpan ResolveStuckTtl { get; init; } = TimeSpan.FromSeconds(120);
 }

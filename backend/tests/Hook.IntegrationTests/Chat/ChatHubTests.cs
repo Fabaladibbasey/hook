@@ -156,7 +156,7 @@ public sealed class ChatHubTests : PipelineTestBase
         var ready = await Task.WhenAny(providerReady.Task, Task.Delay(Timeout));
         ready.ShouldBe(providerReady.Task);
 
-        var dto = new SendMessageDto(Guid.NewGuid(), Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 1);
+        var dto = new EncryptedChatMessage(Guid.NewGuid(), Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 1);
         await clientConn.InvokeAsync("SendMessage", dto);
 
         var received = await Await(receivedTcs);
@@ -174,10 +174,10 @@ public sealed class ChatHubTests : PipelineTestBase
         await using var conn = BuildHub(chat.ClientToken, chat.Client.SessionId);
         await conn.StartAsync();
 
-        var rejects = new List<MessageSendRejectedDto>();
-        conn.On<MessageSendRejectedDto>(ChatHubConstants.Events.MessageSendRejected, dto => { lock (rejects) rejects.Add(dto); });
+        var rejects = new List<ChatMessageRejected>();
+        conn.On<ChatMessageRejected>(ChatHubConstants.Events.MessageSendRejected, dto => { lock (rejects) rejects.Add(dto); });
 
-        var first = new SendMessageDto(Guid.NewGuid(), Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 5);
+        var first = new EncryptedChatMessage(Guid.NewGuid(), Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 5);
         await conn.InvokeAsync("SendMessage", first);
 
         var second = first with { MessageId = Guid.NewGuid() };
@@ -194,7 +194,7 @@ public sealed class ChatHubTests : PipelineTestBase
         {
             var match = rejects.SingleOrDefault(r => r.MessageId == second.MessageId);
             match.ShouldNotBeNull();
-            match!.Reason.ShouldBe(MessageRejectReason.Replay);
+            match!.Reason.ShouldBe(ChatMessageRejectReason.Replay);
         }
     }
 
@@ -205,26 +205,26 @@ public sealed class ChatHubTests : PipelineTestBase
         await using var conn = BuildHub(chat.ClientToken, chat.Client.SessionId);
         await conn.StartAsync();
 
-        var rejects = new List<MessageSendRejectedDto>();
-        conn.On<MessageSendRejectedDto>(ChatHubConstants.Events.MessageSendRejected, dto => { lock (rejects) rejects.Add(dto); });
+        var rejects = new List<ChatMessageRejected>();
+        conn.On<ChatMessageRejected>(ChatHubConstants.Events.MessageSendRejected, dto => { lock (rejects) rejects.Add(dto); });
 
         var msgId = Guid.NewGuid();
-        var first = new SendMessageDto(msgId, Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 1);
+        var first = new EncryptedChatMessage(msgId, Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 1);
         await conn.InvokeAsync("SendMessage", first);
 
-        var dup = new SendMessageDto(msgId, Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 2);
+        var dup = new EncryptedChatMessage(msgId, Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 2);
         await conn.InvokeAsync("SendMessage", dup);
 
         await WhatsappPipelineHelpers.WaitForConditionAsync(
             () =>
             {
-                lock (rejects) return Task.FromResult(rejects.Any(r => r.MessageId == msgId && r.Reason == MessageRejectReason.Duplicate));
+                lock (rejects) return Task.FromResult(rejects.Any(r => r.MessageId == msgId && r.Reason == ChatMessageRejectReason.Duplicate));
             },
             timeout: TimeSpan.FromSeconds(2),
             description: "Duplicate reject not received");
         lock (rejects)
         {
-            var match = rejects.SingleOrDefault(r => r.MessageId == msgId && r.Reason == MessageRejectReason.Duplicate);
+            var match = rejects.SingleOrDefault(r => r.MessageId == msgId && r.Reason == ChatMessageRejectReason.Duplicate);
             match.ShouldNotBeNull();
         }
 
@@ -248,7 +248,7 @@ public sealed class ChatHubTests : PipelineTestBase
         var revoked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         conn.On(ChatHubConstants.Events.SessionRevoked, () => revoked.TrySetResult());
 
-        var dto = new SendMessageDto(Guid.NewGuid(), Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 1);
+        var dto = new EncryptedChatMessage(Guid.NewGuid(), Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 1);
         try { await conn.InvokeAsync("SendMessage", dto); } catch { /* abort can surface mid-invoke */ }
 
         var winner = await Task.WhenAny(revoked.Task, Task.Delay(Timeout));

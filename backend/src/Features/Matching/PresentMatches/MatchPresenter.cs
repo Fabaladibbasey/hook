@@ -19,16 +19,16 @@ public sealed class MatchPresenter(IMessageBus bus)
     {
         if (batch.Scored.Count == 0)
         {
-            return bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone,
+            return bus.PublishAsync(new SendWhatsAppTextCommand(clientPhone,
                 "No providers found nearby. Reply INCREASE to widen the search or NEW to change the service."));
         }
 
-        var dtos = batch.Scored
-            .Select(s => new MatchPresentationDto(
+        var matches = batch.Scored
+            .Select(s => new PresentedMatch(
                 s.Candidate.Phone, s.Candidate.DistanceKm, s.Score, s.Kind))
             .ToList();
 
-        return bus.PublishAsync(new PresentMatchesRequested(
-            clientPhone, batch.RequestId, serviceSlug, dtos));
+        return bus.PublishAsync(new PresentMatchesCommand(
+            clientPhone, batch.RequestId, serviceSlug, matches));
     }
 }

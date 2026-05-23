@@ -17,12 +17,12 @@ public class ProviderRefreshCheckHandlerTests
     private readonly Mock<IProviderAvailabilityRepository> _repo = new();
     private readonly Mock<IConversationAi> _ai = new();
     private readonly Mock<IMessageBus> _bus = new();
-    private readonly List<SendWhatsAppTextRequested> _sent = [];
+    private readonly List<SendWhatsAppTextCommand> _sent = [];
 
     public ProviderRefreshCheckHandlerTests()
     {
-        _bus.Setup(b => b.PublishAsync(It.IsAny<SendWhatsAppTextRequested>(), It.IsAny<DeliveryOptions>()))
-            .Callback<object, DeliveryOptions>((msg, _) => _sent.Add((SendWhatsAppTextRequested)msg))
+        _bus.Setup(b => b.PublishAsync(It.IsAny<SendWhatsAppTextCommand>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions>((msg, _) => _sent.Add((SendWhatsAppTextCommand)msg))
             .Returns(ValueTask.CompletedTask);
     }
 

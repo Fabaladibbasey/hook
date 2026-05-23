@@ -15,7 +15,7 @@ public sealed class Step1PromptDispatchHandler(
     // its own short tx via ExecuteDeleteAsync. Opt out of AutoApplyTransactions
     // so the handler doesn't pin a connection across the Ollama window.
     [NonTransactional]
-    public async Task Handle(Step1PromptDispatchRequested evt, CancellationToken ct)
+    public async Task Handle(Step1PromptDispatchCommand evt, CancellationToken ct)
     {
         var facts = new Dictionary<string, string> { ["service"] = evt.ServiceSlug };
         if (!string.IsNullOrEmpty(evt.PickedFormatted))

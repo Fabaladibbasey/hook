@@ -117,7 +117,7 @@ Contact sharing requires **both** parties to consent independently:
 - **Provider** sets `ShareContact` at registration.
 - Gate in `PhoneExchanger`: `request.SharePhoneNumber && provider.ShareContact`.
   - Both `true` → direct phone exchange (client gets provider phone; provider gets client phone).
-  - Either `false` → `ChatRoutingRequested`: both sides receive a signed chat link, no raw phone shared.
+  - Either `false` → `RouteMatchToChatCommand`: both sides receive a signed chat link, no raw phone shared.
 - Re-pick on an already-shared match: client gets a reminder; provider is not re-notified (idempotent).
 - Providers with `PickedAt = null` (never selected) receive **zero messages** about the request — privacy invariant.
 

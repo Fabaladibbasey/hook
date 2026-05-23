@@ -121,7 +121,7 @@ public class SlugResolver(
         return result;
     }
 
-    // Returns PublishSlug != null when the caller must publish JudgeParentSlugRequested
+    // Returns PublishSlug != null when the caller must publish JudgeParentSlugCommand
     // for it. Splitting publish from resolution lets the batch path defer publishes to
     // the outer ambient context after inner isolated contexts commit.
     //
@@ -224,7 +224,7 @@ public class SlugResolver(
     // handler context (AutoApplyTransactions + outbox) so the envelope is
     // durable; see NonHandlerContextEventLossTests for the parallel guard pattern.
     private ValueTask PublishParentJudgmentAsync(string slug) =>
-        bus.PublishAsync(new JudgeParentSlugRequested(slug));
+        bus.PublishAsync(new JudgeParentSlugCommand(slug));
 
     // Max stored slug length. Service.Slug PK has HasMaxLength(80); cap below that so
     // trim slack remains for future suffixing (e.g. disambiguation).

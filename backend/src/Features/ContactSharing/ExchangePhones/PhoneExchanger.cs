@@ -1,4 +1,4 @@
-using Hook.Features.ContactSharing.Events;
+using Hook.Features.ChatPrivacyRouting.RouteMatch;
 using Hook.Features.Matching.MatchAggregate;
 using Hook.Features.ProviderAvailability.AvailabilityAggregate;
 using Hook.Features.ServiceRequest.RequestAggregate;
@@ -51,21 +51,21 @@ public sealed class PhoneExchanger(
 
         if (match.ContactShared)
         {
-            await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone,
+            await bus.PublishAsync(new SendWhatsAppTextCommand(clientPhone,
                 FormatProviderResend(matchPosition, match.ServiceSlug, providerPhone)));
             return ExchangeOutcome.AlreadyShared;
         }
 
         if (match.PickedAt is not null)
         {
-            // Re-pick of a chat-routed match: ChatRoutingRequestedHandler is idempotent
+            // Re-pick of a chat-routed match: RouteMatchToChatHandler is idempotent
             // on ChatId, so re-publishing wouldn't re-deliver the link. Send a brief
             // notice pointing the client at the existing chat thread instead.
             var text =
                 $"Match #{matchPosition} ({providerPhone.Mask()}): " +
                 $"already connected to chat with the provider for {match.ServiceSlug}. " +
                 "Check your earlier messages for the chat link.";
-            await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone, text));
+            await bus.PublishAsync(new SendWhatsAppTextCommand(clientPhone, text));
             return ExchangeOutcome.AlreadyRouted;
         }
 
@@ -81,7 +81,7 @@ public sealed class PhoneExchanger(
 
         if (!bothConsent)
         {
-            await events.PublishAsync(new ChatRoutingRequested(
+            await events.PublishAsync(new RouteMatchToChatCommand(
                 match.Id,
                 request.Id,
                 request.ClientPhone,
@@ -96,13 +96,13 @@ public sealed class PhoneExchanger(
             return ExchangeOutcome.RoutedToChat;
         }
 
-        await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone,
+        await bus.PublishAsync(new SendWhatsAppTextCommand(clientPhone,
             FormatProviderResend(matchPosition, match.ServiceSlug, providerPhone)));
         var providerText = RequestDetailsFormatter.AppendIfPresent(
             $"Client wants {match.ServiceSlug} ({clientPhone.Value}). Expect a message.",
             request.Description);
-        await bus.PublishAsync(new SendWhatsAppTextRequested(providerPhone, providerText));
-        await events.PublishAsync(new ContactExchanged(match.Id, request.Id, request.ClientPhone, provider.Phone), ct);
+        await bus.PublishAsync(new SendWhatsAppTextCommand(providerPhone, providerText));
+        match.MarkContactExchanged(request.Id, request.ClientPhone, provider.Phone);
         return ExchangeOutcome.Exchanged;
     }
 

@@ -45,7 +45,7 @@ public sealed class RegistrationOrchestrator(
                 await drafts.DeleteAsync(phone.Value, ct);
                 await feedback.DeleteStatsAsync(phone.Value, ct);
                 logger.LogDebug("Unlisted provider {Phone}", phone.Mask());
-                await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+                await bus.PublishAsync(new SendWhatsAppTextCommand(phone,
                     "You are unlisted. Reply 'I offer …' to list again, or 'I need …' to request a service."));
                 return;
             }
@@ -63,12 +63,12 @@ public sealed class RegistrationOrchestrator(
 
             // Incremental add: a listed provider sending "I offer X" must confirm before
             // the listing mutates. Defer the LLM extract to the outbox so the funnel does
-            // not block on Ollama; AdvanceRegistrationDraftHandler promotes the inbound
+            // not block on Ollama; ExtendProviderListingHandler promotes the inbound
             // to ConfirmAddServices if extraction yields new slugs. The heartbeat ack
             // below still fires inline so the user always sees a visible reply.
             if (QuickIntent.DetectIntentHint(message.Text) == IntentKind.ProviderRegistration)
             {
-                await bus.PublishAsync(new RegistrationExtractServicesRequested(
+                await bus.PublishAsync(new RegistrationExtractServicesCommand(
                     phone.Value, message.Text ?? string.Empty, RegistrationExtractMode.AddToExisting));
             }
 
@@ -80,7 +80,7 @@ public sealed class RegistrationOrchestrator(
                 $"You're listed as a provider for {listed} (extended for {options.Value.ExpiryHours}h). " +
                 "To request a different service yourself, send 'I need …'. " +
                 "Reply LEAVE to unlist.";
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, text));
+            await bus.PublishAsync(new SendWhatsAppTextCommand(phone, text));
             return;
         }
 
@@ -145,13 +145,13 @@ public sealed class RegistrationOrchestrator(
     {
         var input = message.Text ?? string.Empty;
         // Park the draft in ResolvingServices and defer ExtractServices to the outbox so
-        // the 60-150s Ollama window doesn't block the user. AdvanceRegistrationDraftHandler
+        // the 60-150s Ollama window doesn't block the user. BeginProviderRegistrationHandler
         // advances the draft to ConfirmServices (or back to AwaitingServices on no-slug).
         draft.StepTo(RegistrationStep.ResolvingServices, now);
         await drafts.UpsertAsync(draft, ct);
-        await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+        await bus.PublishAsync(new SendWhatsAppTextCommand(phone,
             "Looking up the service you mentioned…"));
-        await bus.PublishAsync(new RegistrationExtractServicesRequested(
+        await bus.PublishAsync(new RegistrationExtractServicesCommand(
             phone.Value, input, RegistrationExtractMode.NewRegistration));
     }
 
@@ -174,7 +174,7 @@ public sealed class RegistrationOrchestrator(
             await StartAsync(draft, message, phone, now, ct);
             return;
         }
-        await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+        await bus.PublishAsync(new SendWhatsAppTextCommand(phone,
             "Still looking up your earlier message — one moment."));
     }
 
@@ -189,14 +189,14 @@ public sealed class RegistrationOrchestrator(
 
         // Bracket-style "and X": if the reply is not a confirm/reject/edit/cancel token,
         // defer extract to the outbox so the 60-150s Ollama window doesn't block.
-        // AdvanceRegistrationDraftHandler (AppendToDraft mode) merges the canonical
-        // slugs into the existing draft and re-prompts.
+        // AmendRegistrationDraftHandler merges the canonical slugs into the existing
+        // draft and re-prompts.
         if (quick is null
             or not (IntentKind.Confirmation or IntentKind.Rejection or IntentKind.Edit or IntentKind.Cancel))
         {
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+            await bus.PublishAsync(new SendWhatsAppTextCommand(phone,
                 "Looking up the service you mentioned…"));
-            await bus.PublishAsync(new RegistrationExtractServicesRequested(
+            await bus.PublishAsync(new RegistrationExtractServicesCommand(
                 phone.Value, message.Text ?? string.Empty, RegistrationExtractMode.AppendToDraft));
             return;
         }
@@ -205,7 +205,7 @@ public sealed class RegistrationOrchestrator(
         {
             draft.StepTo(RegistrationStep.AwaitingLocation, now);
             await drafts.UpsertAsync(draft, ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(
+            await bus.PublishAsync(new SendWhatsAppTextCommand(
                 phone,
                 "Send your location pin (or type your address)."));
             return;
@@ -215,13 +215,13 @@ public sealed class RegistrationOrchestrator(
         {
             draft.StepTo(RegistrationStep.AwaitingServices, now);
             await drafts.UpsertAsync(draft, ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(
+            await bus.PublishAsync(new SendWhatsAppTextCommand(
                 phone,
                 "Send the corrected list of services in one message."));
             return;
         }
 
-        await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Reply YES to confirm or EDIT to change."));
+        await bus.PublishAsync(new SendWhatsAppTextCommand(phone, "Reply YES to confirm or EDIT to change."));
     }
 
     private async Task ConfirmAddServicesAsync(
@@ -235,13 +235,13 @@ public sealed class RegistrationOrchestrator(
         var quick = QuickIntent.Detect(message.Text);
 
         // Mid-confirm append: defer extract to the outbox (mirrors the bracket-style
-        // "and X" path in ConfirmServicesAsync). AdvanceRegistrationDraftHandler
-        // (AppendToAddDraft mode) merges into the proposal, capped by remaining slots.
+        // "and X" path in ConfirmServicesAsync). AmendAddServicesDraftHandler merges
+        // into the proposal, capped by remaining slots.
         if (quick is null or not (IntentKind.Confirmation or IntentKind.Rejection or IntentKind.Edit))
         {
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+            await bus.PublishAsync(new SendWhatsAppTextCommand(phone,
                 "Looking up the service you mentioned…"));
-            await bus.PublishAsync(new RegistrationExtractServicesRequested(
+            await bus.PublishAsync(new RegistrationExtractServicesCommand(
                 phone.Value, message.Text ?? string.Empty, RegistrationExtractMode.AppendToAddDraft));
             return;
         }
@@ -259,14 +259,14 @@ public sealed class RegistrationOrchestrator(
             var text =
                 $"Added {addedList}. You're now listed for {allServices} " +
                 $"(extended for {options.Value.ExpiryHours}h). Reply LEAVE to unlist.";
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, text));
+            await bus.PublishAsync(new SendWhatsAppTextCommand(phone, text));
             return;
         }
 
         if (quick == IntentKind.Edit)
         {
             await drafts.DeleteAsync(phone.Value, ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+            await bus.PublishAsync(new SendWhatsAppTextCommand(phone,
                 "Send the corrected list of services you want to add in one message."));
             return;
         }
@@ -280,11 +280,11 @@ public sealed class RegistrationOrchestrator(
             var text =
                 $"Keeping your listing as is for {listed} (extended for {options.Value.ExpiryHours}h). " +
                 "Reply LEAVE to unlist.";
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, text));
+            await bus.PublishAsync(new SendWhatsAppTextCommand(phone, text));
             return;
         }
 
-        await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+        await bus.PublishAsync(new SendWhatsAppTextCommand(phone,
             "Reply YES to add or EDIT to change."));
     }
 
@@ -300,7 +300,7 @@ public sealed class RegistrationOrchestrator(
             draft.CaptureLocation(loc.Latitude, loc.Longitude, loc.Address ?? loc.Name ?? "(GPS pin)", now);
             draft.StepTo(RegistrationStep.AwaitingConsent, now);
             await drafts.UpsertAsync(draft, ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(
+            await bus.PublishAsync(new SendWhatsAppTextCommand(
                 phone,
                 "Got your location. Share your phone with clients on match? " +
                 "Reply YES to share, NO to keep it private."));
@@ -311,14 +311,14 @@ public sealed class RegistrationOrchestrator(
         {
             // Defer geocoding HTTP off the inbound critical path (~10s Google timeout).
             await drafts.UpsertAsync(draft, ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+            await bus.PublishAsync(new SendWhatsAppTextCommand(phone,
                 "Looking up that address — one sec…"));
-            await bus.PublishAsync(new GeocodeAddressRequested(
+            await bus.PublishAsync(new GeocodeAddressCommand(
                 phone.Value, message.Text!, GeocodeFlow.Provider, DraftStampedAt: draft.UpdatedAt));
             return;
         }
 
-        await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Send your location pin or type your address."));
+        await bus.PublishAsync(new SendWhatsAppTextCommand(phone, "Send your location pin or type your address."));
     }
 
     private async Task ConfirmLocationAsync(
@@ -333,7 +333,7 @@ public sealed class RegistrationOrchestrator(
             draft.CaptureLocation(loc.Latitude, loc.Longitude, loc.Address ?? loc.Name ?? "(GPS pin)", now);
             draft.StepTo(RegistrationStep.AwaitingConsent, now);
             await drafts.UpsertAsync(draft, ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(
+            await bus.PublishAsync(new SendWhatsAppTextCommand(
                 phone,
                 "Got your location. Share your phone with clients on match? " +
                 "Reply YES to share, NO to keep it private."));
@@ -344,14 +344,14 @@ public sealed class RegistrationOrchestrator(
         {
             draft.StepTo(RegistrationStep.AwaitingConsent, now);
             await drafts.UpsertAsync(draft, ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(
+            await bus.PublishAsync(new SendWhatsAppTextCommand(
                 phone,
                 "Share your phone with clients on match? " +
                 "Reply YES to share, NO to keep it private."));
             return;
         }
 
-        await bus.PublishAsync(new SendWhatsAppTextRequested(
+        await bus.PublishAsync(new SendWhatsAppTextCommand(
             phone,
             "Reply YES to confirm this address, or send your GPS pin instead."));
     }
@@ -373,7 +373,7 @@ public sealed class RegistrationOrchestrator(
 
         if (consent is null)
         {
-            await bus.PublishAsync(new SendWhatsAppTextRequested(
+            await bus.PublishAsync(new SendWhatsAppTextCommand(
                 phone,
                 "Share your phone with clients on match? " +
                 "Reply YES to share, NO to keep it private."));
@@ -389,7 +389,7 @@ public sealed class RegistrationOrchestrator(
             var text =
                 "Couldn't list you — I'm missing your service or location. " +
                 "Reply \"I offer …\" and send a location pin to try again.";
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, text));
+            await bus.PublishAsync(new SendWhatsAppTextCommand(phone, text));
             return;
         }
 
@@ -413,7 +413,7 @@ public sealed class RegistrationOrchestrator(
                 "You can't be both client and provider for the same service. " +
                 $"You have an open request for {human} — reply CANCEL to close it, " +
                 "then register again.";
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, text));
+            await bus.PublishAsync(new SendWhatsAppTextCommand(phone, text));
             return;
         }
 
@@ -436,7 +436,7 @@ public sealed class RegistrationOrchestrator(
                 $"You are listed for {options.Value.ExpiryHours}h. " +
                 "Reply 'I offer …' anytime to update your services, " +
                 "or LEAVE to unlist.";
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, text));
+            await bus.PublishAsync(new SendWhatsAppTextCommand(phone, text));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -446,7 +446,7 @@ public sealed class RegistrationOrchestrator(
         {
             logger.LogError(ex, "Failed to finalize provider registration for {Phone}", phone.Mask());
             await drafts.DeleteAsync(phone.Value, ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
+            await bus.PublishAsync(new SendWhatsAppTextCommand(phone,
                 "Something went wrong listing you. Try again in a moment — reply \"I offer …\" to retry."));
         }
     }

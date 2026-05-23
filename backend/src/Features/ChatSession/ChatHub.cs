@@ -99,11 +99,11 @@ public sealed class ChatHub(
         logger.LogDebug("Public key published chat={ChatId} participant={ParticipantId}", chatId, participantId);
     }
 
-    public async Task SendMessage(SendMessageDto dto)
+    public async Task SendMessage(EncryptedChatMessage message)
     {
-        if (dto is null || dto.MessageId == Guid.Empty)
+        if (message is null || message.MessageId == Guid.Empty)
         {
-            await RejectAsync(dto?.MessageId ?? Guid.Empty, MessageRejectReason.InvalidPayload);
+            await RejectAsync(message?.MessageId ?? Guid.Empty, ChatMessageRejectReason.InvalidPayload);
             return;
         }
 
@@ -121,30 +121,30 @@ public sealed class ChatHub(
         var session = await chats.GetSessionAsync(chatId);
         if (session is null || !session.CanSendMessage(clock.GetUtcNow()))
         {
-            await RejectAsync(dto.MessageId, MessageRejectReason.SessionEnded);
+            await RejectAsync(message.MessageId, ChatMessageRejectReason.SessionEnded);
             return;
         }
 
         if (!TryDecodeBytes(
-                dto.CiphertextB64,
+                message.CiphertextB64,
                 minLen: 17,
                 maxLen: ChatHubConstants.MaxCiphertextBytes,
                 out var ciphertext)
             || !TryDecodeBytes(
-                dto.NonceB64,
+                message.NonceB64,
                 minLen: ChatHubConstants.NonceBytes,
                 maxLen: ChatHubConstants.NonceBytes,
                 out var nonce))
         {
-            await RejectAsync(dto.MessageId, MessageRejectReason.DecodeFailed);
+            await RejectAsync(message.MessageId, ChatMessageRejectReason.DecodeFailed);
             return;
         }
 
         var msg = ChatMessage.Create(
-            id: dto.MessageId,
+            id: message.MessageId,
             chatId: chatId,
             participantId: participantId,
-            sequence: dto.Sequence,
+            sequence: message.Sequence,
             ciphertext: ciphertext,
             nonce: nonce,
             now: clock.GetUtcNow());
@@ -152,15 +152,15 @@ public sealed class ChatHub(
         var inserted = await chats.TryAddMessageAsync(msg);
         if (!inserted)
         {
-            await RejectAsync(dto.MessageId, MessageRejectReason.Duplicate);
+            await RejectAsync(message.MessageId, ChatMessageRejectReason.Duplicate);
             return;
         }
 
-        if (!participant.TryAdvanceSequence(dto.Sequence))
+        if (!participant.TryAdvanceSequence(message.Sequence))
         {
             logger.LogWarning("Replayed/out-of-order seq rejected chat={ChatId} participant={ParticipantId} seq={Seq}",
-                chatId, participantId, dto.Sequence);
-            await RejectAsync(dto.MessageId, MessageRejectReason.Replay);
+                chatId, participantId, message.Sequence);
+            await RejectAsync(message.MessageId, ChatMessageRejectReason.Replay);
             return;
         }
 
@@ -172,7 +172,7 @@ public sealed class ChatHub(
         await Clients.OthersInGroup(ChatGroup(chatId)).SendAsync(ChatHubConstants.Events.MessageReceived, ToWire(msg));
 
         logger.LogDebug("ChatMessage stored chat={ChatId} sender={ParticipantId} seq={Seq}",
-            chatId, participantId, dto.Sequence);
+            chatId, participantId, message.Sequence);
     }
 
     public async Task EndChat()
@@ -188,12 +188,12 @@ public sealed class ChatHub(
         if (participant is null) return;
         var role = (Context.Items[ChatHubConstants.Items.Role] as string) ?? participant.Role.ToString();
 
-        var outcome = await bus.InvokeAsync<EndChatOutcome>(new EndChatCommand(chatId, EndChatReason.User, role));
-        if (outcome.Result == EndChatResult.AlreadyEnded)
+        var response = await bus.InvokeAsync<EndChatResponse>(new EndChatCommand(chatId, EndChatReason.User, role));
+        if (response.Result == EndChatResult.AlreadyEnded)
             await Clients.Caller.SendAsync(
                 ChatHubConstants.Events.ChatEnded,
                 new ChatEndedPayload(EndChatReason.AlreadyEnded.ToWire()));
-        else if (outcome.Result == EndChatResult.Ended)
+        else if (response.Result == EndChatResult.Ended)
             logger.LogInformation("Chat {ChatId} ended by {Role} ({ParticipantId})", chatId, role, participant.Id);
     }
 
@@ -210,10 +210,10 @@ public sealed class ChatHub(
         return participant;
     }
 
-    private Task RejectAsync(Guid messageId, MessageRejectReason reason) =>
+    private Task RejectAsync(Guid messageId, ChatMessageRejectReason reason) =>
         Clients.Caller.SendAsync(
             ChatHubConstants.Events.MessageSendRejected,
-            new MessageSendRejectedDto(messageId, reason));
+            new ChatMessageRejected(messageId, reason));
 
     // Pre-check bounds the buffer allocation against length-attacks before
     // allocating ((b64.Length + 3) / 4) * 3 bytes.

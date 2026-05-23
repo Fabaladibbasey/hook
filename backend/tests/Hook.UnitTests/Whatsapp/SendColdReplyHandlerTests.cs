@@ -14,13 +14,13 @@ public class SendColdReplyHandlerTests
 {
     private readonly Mock<IConversationAi> _aiMock = new();
     private readonly Mock<IMessageBus> _busMock = new();
-    private readonly List<SendWhatsAppTextRequested> _sent = [];
+    private readonly List<SendWhatsAppTextCommand> _sent = [];
     private ReplyContext? _capturedCtx;
 
     public SendColdReplyHandlerTests()
     {
-        _busMock.Setup(x => x.PublishAsync(It.IsAny<SendWhatsAppTextRequested>(), It.IsAny<DeliveryOptions>()))
-            .Callback<object, DeliveryOptions>((msg, _) => _sent.Add((SendWhatsAppTextRequested)msg))
+        _busMock.Setup(x => x.PublishAsync(It.IsAny<SendWhatsAppTextCommand>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions>((msg, _) => _sent.Add((SendWhatsAppTextCommand)msg))
             .Returns(ValueTask.CompletedTask);
         _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ReplyContext ctx, CancellationToken _) =>
@@ -41,7 +41,7 @@ public class SendColdReplyHandlerTests
         var detected = new IntentDetectionResult(IntentKind.Greeting, 0.99, "en", "ai");
 
         await Build().Handle(
-            new SendColdReplyRequested(To(), "hi", detected, "greeting-reply"), CancellationToken.None);
+            new SendColdReplyCommand(To(), "hi", detected, "greeting-reply"), CancellationToken.None);
 
         _capturedCtx.ShouldNotBeNull();
         _capturedCtx!.Purpose.ShouldBe("greeting-reply");
@@ -58,7 +58,7 @@ public class SendColdReplyHandlerTests
         var detected = new IntentDetectionResult(IntentKind.Unknown, 0.2, "en", "ai");
 
         await Build().Handle(
-            new SendColdReplyRequested(To(), "asdf", detected, "out-of-scope"), CancellationToken.None);
+            new SendColdReplyCommand(To(), "asdf", detected, "out-of-scope"), CancellationToken.None);
 
         _sent.ShouldHaveSingleItem();
         _sent[0].Text.ShouldContain("connect people who need services");
@@ -72,7 +72,7 @@ public class SendColdReplyHandlerTests
         var detected = new IntentDetectionResult(IntentKind.Greeting, 0.95, "en", "ai");
 
         await Build().Handle(
-            new SendColdReplyRequested(To(), "hi", detected, "greeting-reply"), CancellationToken.None);
+            new SendColdReplyCommand(To(), "hi", detected, "greeting-reply"), CancellationToken.None);
 
         _sent.ShouldHaveSingleItem();
         _sent[0].Text.ShouldContain("I connect people with local service providers");

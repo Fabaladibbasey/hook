@@ -54,7 +54,7 @@ With 3 numbers available, these scenarios — previously dev-only or impractical
 ### Time-driven flows (Step1 +30m / 22h / 24h)
 
 Pillar A / Pillar B feedback model:
-- **Pillar A (Step1)**: `Step1FeedbackCheck` scheduled at `Feedback:Step1InitialDelay` (default 30 min) after the match completes (`ContactExchanged` or `ChatRoutingRequested`). Per-request dedupe — only one Step1 prompt regardless of how many matches were picked. Step1 = "Did you find a provider?".
+- **Pillar A (Step1)**: `Step1FeedbackCheck` scheduled at `Feedback:Step1InitialDelay` (default 30 min) after the match completes (`ContactExchangedEvent` or `RouteMatchToChatCommand`). Per-request dedupe — only one Step1 prompt regardless of how many matches were picked. Step1 = "Did you find a provider?".
 - **Pillar B (Step2)**: published *immediately* on `Step1=Yes` for single-pick. Multi-pick requires the `IdentifyWinner` step first. `Step2=InProgress` triggers an `AwaitingEta` step; the captured ETA drives the next `Step2FeedbackCheck` at `eta + EtaScheduleBuffer`. If no parseable ETA arrives within `ParseRetryWindow` (1h), fall back to `Step2InProgressRecheckDelay` (default 20h).
 
 Other scheduled events: `IdleReminderCheck` (+20m), `IdleEndCheck` (+30m), hard-expire (+24h), `ProviderRefreshCheck` (+22h).
@@ -145,7 +145,7 @@ Copy into per-run report. Fill `result` column.
 ### WHK-003 — POST inbound with valid HMAC signature  [P0] [both]
 
 **Preconditions:** `Whatsapp:AppSecret` set; payload is a valid Meta v17 webhook envelope with one text message.
-**Expected:** HTTP 200. Log `"Inbound WhatsApp message {wamid} from +XXXX kind=Text"`. `InboundMessageReceived` published on `IMessageBus`.
+**Expected:** HTTP 200. Log `"Inbound WhatsApp message {wamid} from +XXXX kind=Text"`. `RouteInboundMessageCommand` published on `IMessageBus`.
 **Dev exec:** craft body, compute `sha256=<hex>` with secret, `POST /webhooks/whatsapp` with header `X-Hub-Signature-256`. Use a fixture script.
 **Non-dev exec:** send any text from `+2203539005` to bot; verify via backend logs `Inbound WhatsApp message wamid.…`.
 **Linked defect:** none.
@@ -153,7 +153,7 @@ Copy into per-run report. Fill `result` column.
 ### WHK-004 — POST inbound with invalid signature  [P1] [dev]
 
 **Preconditions:** `Whatsapp:AppSecret` set.
-**Expected:** HTTP 403. Log `"WhatsApp webhook signature validation failed"`. **No** `InboundMessageReceived` published.
+**Expected:** HTTP 403. Log `"WhatsApp webhook signature validation failed"`. **No** `RouteInboundMessageCommand` published.
 **Dev exec:** valid body, `X-Hub-Signature-256: sha256=000…` (bogus) → 403.
 **Non-dev exec:** N/A — Meta always signs correctly.
 **Linked defect:** none.
@@ -177,7 +177,7 @@ Copy into per-run report. Fill `result` column.
 ### WHK-007 — Malformed JSON body  [P2] [dev]
 
 **Preconditions:** any.
-**Expected:** HTTP 200 (Meta requires 200 to avoid retries). Log `"Malformed WhatsApp webhook payload"`. No `InboundMessageReceived`.
+**Expected:** HTTP 200 (Meta requires 200 to avoid retries). Log `"Malformed WhatsApp webhook payload"`. No `RouteInboundMessageCommand`.
 **Dev exec:** POST `not-json{` with valid signature for those bytes → 200.
 **Non-dev exec:** N/A.
 **Linked defect:** none.
@@ -383,7 +383,7 @@ Log: `"Route → RegistrationOrchestrator"` on each step.
 3. text address → `"Found: '<addr>'. Reply YES to confirm or send your GPS pin."`
 4. `"yes"` → `"Got your location. Want to add a description? Send it now or reply SKIP."`
 5. `"SKIP"` → `"Should we share your phone number with selected providers? Reply YES or NO."`
-6. `"NO"` → `"Looking for nearby providers…"` and `service_requests` row created. `ServiceRequestCreated` event published.
+6. `"NO"` → `"Looking for nearby providers…"` and `service_requests` row created. `ServiceRequestCreatedEvent` published.
 
 DB: `service_requests` with `ClientPhone=<sender>`, `ServiceSlug="plumbing"`, `Status=Open`, `CurrentRadiusKm=5`, `SharePhoneNumber=false`.
 **Dev exec:** standard 6 inbound calls.
@@ -409,7 +409,7 @@ DB: `service_requests` with `ClientPhone=<sender>`, `ServiceSlug="plumbing"`, `S
 **Expected:**
 - text `"leak under kitchen sink"` → `Description` saved on request row.
 - `"SKIP"` / `"no thanks"` / `"all good"` / `"continue"` / yes / no (`IsSkipDescription` returns true) → `Description=null`.
-Both finalize the request and publish `ServiceRequestCreated`.
+Both finalize the request and publish `ServiceRequestCreatedEvent`.
 **Dev exec:** two sub-runs.
 **Non-dev exec:** same.
 
@@ -468,7 +468,7 @@ Both finalize the request and publish `ServiceRequestCreated`.
 
 ## § 4. Matching & iteration
 
-### MA-001 — ServiceRequestCreated → present top-N  [P0] [both]
+### MA-001 — ServiceRequestCreatedEvent → present top-N  [P0] [both]
 
 **Preconditions:** ≥ 3 active providers seeded for service `plumbing` within 5 km of client.
 **Expected:** `ServiceRequestCreatedHandler` runs → `MatchingService.RunForRequestAsync` → `MatchPresenter` outbound listing top 1–5 with format `"<n>. <masked-phone> — <km>km away"` (or AI-rephrased equivalent), tail line `"Reply PICK 1 to PICK <N> to share contact, NEXT for more, or NEW for a different service."`.
@@ -576,7 +576,7 @@ Both finalize the request and publish `ServiceRequestCreated`.
 ### CN-001 — PICK 1 with share=true (both sides)  [P0] [both]
 
 **Preconditions:** matches presented; picked provider has `ShareContact=true` AND `ServiceRequest.SharePhoneNumber=true`.
-**Expected:** client sends `"PICK 1"` → outbound `"Provider for <slug>: <provider-phone>. Reach out directly."`. Provider receives `"Client wants <slug> (<client-phone>). Expect a message."`. `match.ContactShared=true`, `match.PickedAt` set. `ContactExchanged` event published.
+**Expected:** client sends `"PICK 1"` → outbound `"Provider for <slug>: <provider-phone>. Reach out directly."`. Provider receives `"Client wants <slug> (<client-phone>). Expect a message."`. `match.ContactShared=true`, `match.PickedAt` set. `ContactExchangedEvent` published.
 **Dev exec / Non-dev exec:** standard.
 
 ### CN-002 — PICK out of bounds  [P2] [both]
@@ -588,11 +588,11 @@ Both finalize the request and publish `ServiceRequestCreated`.
 ### CN-003 — PICK with share=false → chat link  [P0] [both]
 
 **Preconditions:** picked provider has `ShareContact=false`.
-**Expected:** `PhoneExchanger.TryExchangeAsync` publishes `ChatRoutingRequested`. **No phone number** sent to either side. `ChatRoutingRequestedHandler` creates `chat_sessions` row + 2 `chat_participants` with random tokens.
+**Expected:** `PhoneExchanger.TryExchangeAsync` publishes `RouteMatchToChatCommand`. **No phone number** sent to either side. `RouteMatchToChatHandler` creates `chat_sessions` row + 2 `chat_participants` with random tokens.
 - Client outbound: `"Match #N (+220***NN): your private chat is ready. Open: <ClientUrl>"` (or `"…the other party prefers a private chat. Open: <ClientUrl>"` when only the client consented).
 - Provider outbound: `"<slug> client at <address> (<mapsUrl>) wants to chat. Open: <ProviderUrl>"` (or `"…prefers a private chat. Open: <ProviderUrl>"` when only the provider consented). When the client supplied a description, the provider message ends with a forwarded-and-framed segment: `\n\n— client message (forwarded, not verified) —\n<sanitized description>\n— end client message —`.
 - `match.ChatId` set to new chat id.
-- Idempotent: re-firing `ChatRoutingRequested` for an already-routed match is a no-op (`if (match.ChatId is not null) return`).
+- Idempotent: re-firing `RouteMatchToChatCommand` for an already-routed match is a no-op (`if (match.ChatId is not null) return`).
 **Dev exec:** seed share=false provider; run pick; assert `chat_sessions` row, both outbounds with link.
 **Non-dev exec:** same.
 
@@ -608,10 +608,10 @@ Both finalize the request and publish `ServiceRequestCreated`.
 **Expected:** `"yes"` → `"Which match? Reply 1, 2, or N."`. No phone shared.
 **Dev exec / Non-dev exec:** standard.
 
-### CN-006 — ContactExchanged event raised once  [P1] [dev]
+### CN-006 — ContactExchangedEvent raised once  [P1] [dev]
 
 **Preconditions:** as CN-001.
-**Expected:** `ContactExchanged` published exactly once on first share. Subsequent PICK on same match does NOT republish.
+**Expected:** `ContactExchangedEvent` published exactly once on first share. Subsequent PICK on same match does NOT republish.
 **Dev exec:** Wolverine local message log (or temporary handler counting events).
 **Non-dev exec:** N/A — internal event, not user-visible.
 
@@ -639,8 +639,8 @@ Both finalize the request and publish `ServiceRequestCreated`.
 ### CN-010 — Re-pick idempotency  [P1] [both]
 
 **Preconditions:** CN-001 completed; `match.ContactShared=true`.
-**Expected:** second `"PICK 1"` → client receives reminder (provider phone again); **provider NOT re-notified**; `ContactExchanged` NOT re-published; `match.ContactShared` unchanged.
-**Dev exec:** run CN-001; send `"PICK 1"` again; assert only 1 outbound (to client); assert `ContactExchanged` count unchanged.
+**Expected:** second `"PICK 1"` → client receives reminder (provider phone again); **provider NOT re-notified**; `ContactExchangedEvent` NOT re-published; `match.ContactShared` unchanged.
+**Dev exec:** run CN-001; send `"PICK 1"` again; assert only 1 outbound (to client); assert `ContactExchangedEvent` count unchanged.
 **Non-dev exec:** same.
 
 ### CN-011 — Unpicked providers receive zero messages  [P1] [both]
@@ -801,14 +801,14 @@ Both finalize the request and publish `ServiceRequestCreated`.
 
 ### FB-001 — Step1 prompt fires at Step1InitialDelay after contact share  [P0] [both]
 
-**Preconditions:** `ContactExchanged` event published (CN-001).
-**Expected:** `ContactExchangedHandler` schedules `Step1FeedbackCheck` at `Feedback:Step1InitialDelay` (default 30 min in prod, 2 min in dev). When fired, `Step1FeedbackHandler` reserves a `MatchFeedback { MatchId, RequestId, Step=DidYouFind }` Pending row — the per-match partial unique index blocks same-match double-fire AND the per-request partial unique on `(RequestId, Step=DidYouFind)` blocks cross-match siblings under a multi-PICK fan-out, so the client only ever sees one Step1 prompt per request; losers exit silently. The handler then publishes `Step1PromptDispatchRequested` to the post-commit outbox. The dispatch handler runs after the publishing tx commits: AI generation + WhatsApp send + cleanup-on-AI-null (DeletePending) all happen there. Outbound is **AI-rephrased** from `Purpose: "feedback-step-1-did-you-find"` with instruction `"Ask if the client found a service provider. Mention they can reply YES or NO."` — assert the outbound contains an interrogative + tokens YES/NO/yes/no, NOT exact text. If `AiReplyHelper.TryGenerateAsync` returns null, the dispatch handler deletes the Pending row and **no outbound sent** (XC-004 path).
+**Preconditions:** `ContactExchangedEvent` published (CN-001).
+**Expected:** `ContactExchangedHandler` schedules `Step1FeedbackCheck` at `Feedback:Step1InitialDelay` (default 30 min in prod, 2 min in dev). When fired, `Step1FeedbackHandler` reserves a `MatchFeedback { MatchId, RequestId, Step=DidYouFind }` Pending row — the per-match partial unique index blocks same-match double-fire AND the per-request partial unique on `(RequestId, Step=DidYouFind)` blocks cross-match siblings under a multi-PICK fan-out, so the client only ever sees one Step1 prompt per request; losers exit silently. The handler then publishes `Step1PromptDispatchCommand` to the post-commit outbox. The dispatch handler runs after the publishing tx commits: AI generation + WhatsApp send + cleanup-on-AI-null (DeletePending) all happen there. Outbound is **AI-rephrased** from `Purpose: "feedback-step-1-did-you-find"` with instruction `"Ask if the client found a service provider. Mention they can reply YES or NO."` — assert the outbound contains an interrogative + tokens YES/NO/yes/no, NOT exact text. If `AiReplyHelper.TryGenerateAsync` returns null, the dispatch handler deletes the Pending row and **no outbound sent** (XC-004 path).
 **Dev exec:** publish `Step1FeedbackCheck { matchId }` directly.
 **Non-dev exec:** same.
 
 ### FB-002 — Step1 routes through ChatRoutingFeedbackScheduler for chat-routed matches  [P1] [both]
 
-**Preconditions:** match resolved via `ChatRoutingRequested` (one or both parties withheld phone consent).
+**Preconditions:** match resolved via `RouteMatchToChatCommand` (one or both parties withheld phone consent).
 **Expected:** `ChatRoutingFeedbackScheduler` (Feedback slice) mirrors `ContactExchangedHandler` and schedules the same `Step1FeedbackCheck`. Step1 prompt fires regardless of which exchange path resolved the match.
 **Dev exec / Non-dev exec:** standard.
 
@@ -875,7 +875,7 @@ Both finalize the request and publish `ServiceRequestCreated`.
 ### FB-012 — Step1 schedule fires for share=true direct path  [P2] [both]
 
 **Preconditions:** match presented and contact shared (share=true), no chat created.
-**Expected:** Step1 fires at `Feedback:Step1InitialDelay` after `ContactExchanged` (via `ContactExchangedHandler`). Same handler chain as FB-001; this scenario simply pins the share=true variant explicitly so the chat-routed path (FB-002) is not the only documented entry point.
+**Expected:** Step1 fires at `Feedback:Step1InitialDelay` after `ContactExchangedEvent` (via `ContactExchangedHandler`). Same handler chain as FB-001; this scenario simply pins the share=true variant explicitly so the chat-routed path (FB-002) is not the only documented entry point.
 **Dev exec / Non-dev exec:** standard.
 
 ---

@@ -21,7 +21,7 @@ public class MatchPresenterFactsShapeTests
 {
     private readonly Mock<IConversationAi> _aiMock = new();
     private readonly Mock<IMessageBus> _busMock = new();
-    private readonly List<SendWhatsAppTextRequested> _sent = [];
+    private readonly List<SendWhatsAppTextCommand> _sent = [];
     private IReadOnlyDictionary<string, string>? _capturedFacts;
 
     public MatchPresenterFactsShapeTests()
@@ -33,8 +33,8 @@ public class MatchPresenterFactsShapeTests
                 return "ok";
             });
 
-        _busMock.Setup(x => x.PublishAsync(It.IsAny<SendWhatsAppTextRequested>(), It.IsAny<DeliveryOptions>()))
-            .Callback<object, DeliveryOptions>((msg, _) => _sent.Add((SendWhatsAppTextRequested)msg))
+        _busMock.Setup(x => x.PublishAsync(It.IsAny<SendWhatsAppTextCommand>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions>((msg, _) => _sent.Add((SendWhatsAppTextCommand)msg))
             .Returns(ValueTask.CompletedTask);
     }
 
@@ -150,16 +150,16 @@ public class MatchPresenterFactsShapeTests
     }
 
     [Fact]
-    public async Task MatchPresenter_NonEmpty_PublishesPresentMatchesRequested_WithDtos()
+    public async Task MatchPresenter_NonEmpty_PublishesPresentMatchesCommand_WithMatches()
     {
         var batchMatches = Enumerable.Range(0, 3)
             .Select(i => MatchEntity.Create(Guid.NewGuid(), $"+220300{i:D4}", "plumbing", 1, 0.5, DateTimeOffset.UtcNow))
             .ToList();
         var batch = new MatchBatch(Guid.NewGuid(), batchMatches, Scored(3, MatchKind.Exact));
 
-        PresentMatchesRequested? captured = null;
-        _busMock.Setup(x => x.PublishAsync(It.IsAny<PresentMatchesRequested>(), It.IsAny<DeliveryOptions>()))
-            .Callback<object, DeliveryOptions>((m, _) => captured = (PresentMatchesRequested)m)
+        PresentMatchesCommand? captured = null;
+        _busMock.Setup(x => x.PublishAsync(It.IsAny<PresentMatchesCommand>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions>((m, _) => captured = (PresentMatchesCommand)m)
             .Returns(ValueTask.CompletedTask);
 
         await new MatchPresenter(_busMock.Object).PresentAsync(
@@ -174,7 +174,7 @@ public class MatchPresenterFactsShapeTests
     }
 
     [Fact]
-    public async Task MatchPresenter_Empty_PublishesNoProvidersText_NotPresentMatchesRequested()
+    public async Task MatchPresenter_Empty_PublishesNoProvidersText_NotPresentMatchesCommand()
     {
         var batch = new MatchBatch(Guid.NewGuid(), [], []);
 
@@ -184,7 +184,7 @@ public class MatchPresenterFactsShapeTests
         _sent.Count.ShouldBe(1);
         _sent[0].Text.ShouldContain("No providers found");
         _busMock.Verify(b => b.PublishAsync(
-            It.IsAny<PresentMatchesRequested>(), It.IsAny<DeliveryOptions>()), Times.Never);
+            It.IsAny<PresentMatchesCommand>(), It.IsAny<DeliveryOptions>()), Times.Never);
     }
 
     private PresentMatchesHandler BuildHandler(int cap) =>
@@ -194,23 +194,23 @@ public class MatchPresenterFactsShapeTests
             Options.Create(new MatchingOptions { TopMatchesPerBatch = cap }),
             NullLogger<PresentMatchesHandler>.Instance);
 
-    private static PresentMatchesRequested BuildRequest(
+    private static PresentMatchesCommand BuildRequest(
         int count,
         string slug = "plumbing",
         MatchKind kind = MatchKind.Exact)
     {
-        var dtos = Enumerable.Range(0, count)
-            .Select(i => new MatchPresentationDto(
+        var matches = Enumerable.Range(0, count)
+            .Select(i => new PresentedMatch(
                 ProviderPhone: $"+220300{i:D4}",
                 DistanceKm: i + 1.234,
                 Score: 1.0 - (i * 0.05),
                 Kind: kind))
             .ToList();
-        return new PresentMatchesRequested(
+        return new PresentMatchesCommand(
             PhoneNumber.Parse("+220300001"),
             Guid.NewGuid(),
             slug,
-            dtos);
+            matches);
     }
 
     private static IReadOnlyList<ScoredCandidate> Scored(int count, MatchKind kind) =>

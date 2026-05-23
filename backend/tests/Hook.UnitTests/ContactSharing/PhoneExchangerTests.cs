@@ -1,3 +1,4 @@
+using Hook.Features.ChatPrivacyRouting.RouteMatch;
 using Hook.Features.ContactSharing.Events;
 using Hook.Features.ContactSharing.ExchangePhones;
 using Hook.Features.Geocoding.Models;
@@ -31,7 +32,7 @@ public class PhoneExchangerTests
     private readonly Mock<ProviderRepoIface> _providersMock = new();
     private readonly Mock<IMessageBus> _busMock = new();
     private readonly Mock<IEventPublisher> _eventsMock = new();
-    private readonly TimeProvider _clock = new FakeTimeProvider(DateTimeOffset.Parse("2026-05-07T12:00:00Z"));
+    private readonly TimeProvider _clock = new FakeTimeProvider(DateTimeOffset.UtcNow);
 
     private bool _claimResult = true;
     private PickClaim? _lastClaim;
@@ -45,10 +46,8 @@ public class PhoneExchangerTests
             .ReturnsAsync((PickClaim claim, CancellationToken _) =>
             {
                 _lastClaim = claim;
-                if (_claimResult && _matches.TryGetValue(claim.MatchId, out var m))
-                {
-                    m.ClaimForPickup(claim.RevealContact, claim.Now);
-                }
+                // Production: TryClaimPickAsync is a DB UPDATE; the in-memory match object
+                // is not refreshed afterwards, so ContactShared stays false here.
                 return _claimResult;
             });
 
@@ -60,10 +59,10 @@ public class PhoneExchangerTests
             .ReturnsAsync((string phone, CancellationToken _) =>
                 _providers.TryGetValue(phone, out var p) ? p : null);
 
-        _busMock.Setup(x => x.PublishAsync(It.IsAny<SendWhatsAppTextRequested>(), It.IsAny<DeliveryOptions>()))
+        _busMock.Setup(x => x.PublishAsync(It.IsAny<SendWhatsAppTextCommand>(), It.IsAny<DeliveryOptions>()))
             .Callback<object, DeliveryOptions>((msg, _) =>
             {
-                var req = (SendWhatsAppTextRequested)msg;
+                var req = (SendWhatsAppTextCommand)msg;
                 _sent.Add((req.To, req.Text));
             })
             .Returns(ValueTask.CompletedTask);
@@ -197,8 +196,9 @@ public class PhoneExchangerTests
         Assert.Equal(2, _sent.Count);
         var clientNotice = _sent.Single(s => s.To.Value == "+2203339999");
         Assert.StartsWith("Match #2: provider for plumbing: ", clientNotice.Body);
-        Assert.Single(_published);
-        Assert.IsType<ContactExchanged>(_published[0]);
+        var raised = match.DequeueEvents();
+        Assert.Single(raised);
+        Assert.IsType<ContactExchangedEvent>(raised[0]);
         Assert.True(_lastClaim?.RevealContact);
     }
 
@@ -212,7 +212,7 @@ public class PhoneExchangerTests
         Assert.Equal(ExchangeOutcome.RoutedToChat, outcome);
         Assert.Empty(_sent);
         Assert.Single(_published);
-        var evt = Assert.IsType<ChatRoutingRequested>(_published[0]);
+        var evt = Assert.IsType<RouteMatchToChatCommand>(_published[0]);
         Assert.False(evt.ClientConsented);
         Assert.True(evt.ProviderConsented);
         Assert.Equal("Banjul", evt.RequesterAddress);
@@ -231,7 +231,7 @@ public class PhoneExchangerTests
 
         Assert.Equal(ExchangeOutcome.RoutedToChat, outcome);
         Assert.Empty(_sent);
-        var evt = Assert.IsType<ChatRoutingRequested>(_published[0]);
+        var evt = Assert.IsType<RouteMatchToChatCommand>(_published[0]);
         Assert.False(evt.ClientConsented);
         Assert.False(evt.ProviderConsented);
         Assert.Equal("Banjul", evt.RequesterAddress);
@@ -247,7 +247,7 @@ public class PhoneExchangerTests
         var outcome = await Build().TryExchangeAsync(match.Id, 1);
 
         Assert.Equal(ExchangeOutcome.RoutedToChat, outcome);
-        var evt = Assert.IsType<ChatRoutingRequested>(_published[0]);
+        var evt = Assert.IsType<RouteMatchToChatCommand>(_published[0]);
         Assert.True(evt.ClientConsented);
         Assert.False(evt.ProviderConsented);
     }
@@ -307,13 +307,13 @@ public class PhoneExchangerTests
     }
 
     [Fact]
-    public async Task TryExchange_NoBilateralConsent_PublishesChatRoutingRequestedCarryingDescription()
+    public async Task TryExchange_NoBilateralConsent_PublishesRouteMatchToChatCommandCarryingDescription()
     {
         var match = SeedMatch(sharePhone: false, providerConsent: true, description: "kitchen sink leak");
 
         await Build().TryExchangeAsync(match.Id, 1);
 
-        var evt = Assert.IsType<ChatRoutingRequested>(_published[0]);
+        var evt = Assert.IsType<RouteMatchToChatCommand>(_published[0]);
         evt.Description.ShouldBe("kitchen sink leak");
     }
 }

@@ -210,7 +210,7 @@ public class SlugResolverTests
 
         await resolver.ResolveAsync("astrology", "horoscope");
 
-        _published.OfType<JudgeParentSlugRequested>()
+        _published.OfType<JudgeParentSlugCommand>()
             .ShouldContain(r => r.Slug == "astrology");
     }
 
@@ -222,7 +222,7 @@ public class SlugResolverTests
 
         await resolver.ResolveAsync("plumbing", "I need a plumber");
 
-        _published.OfType<JudgeParentSlugRequested>().ShouldBeEmpty();
+        _published.OfType<JudgeParentSlugCommand>().ShouldBeEmpty();
     }
 
     [Fact]
@@ -234,7 +234,7 @@ public class SlugResolverTests
 
         await resolver.ResolveAsync("plumbings");
 
-        _published.OfType<JudgeParentSlugRequested>().ShouldBeEmpty();
+        _published.OfType<JudgeParentSlugCommand>().ShouldBeEmpty();
     }
 
     [Fact]
@@ -252,7 +252,7 @@ public class SlugResolverTests
         var resolver = Build();
         await resolver.ResolveAsync("ghosts");
 
-        _published.OfType<JudgeParentSlugRequested>()
+        _published.OfType<JudgeParentSlugCommand>()
             .ShouldContain(r => r.Slug == "ghost");
     }
 

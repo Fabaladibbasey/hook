@@ -48,7 +48,7 @@ public sealed class ProviderRefreshCheckHandler(
             ai, ctx, "provider_refresh", logger, ct, AiReplyHelper.NonCriticalReplyTimeout);
         if (reply is null) return;
 
-        await bus.PublishAsync(new SendWhatsAppTextRequested(phone, reply));
+        await bus.PublishAsync(new SendWhatsAppTextCommand(phone, reply));
         logger.LogInformation("Sent 22h refresh prompt to {Phone}", phone.Mask());
     }
 }

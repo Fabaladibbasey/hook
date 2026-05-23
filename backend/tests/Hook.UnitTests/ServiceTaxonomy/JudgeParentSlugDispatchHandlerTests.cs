@@ -16,17 +16,17 @@ public class JudgeParentSlugDispatchHandlerTests
     private readonly Mock<IMessageBus> _bus = new();
     private readonly Mock<ILogger<JudgeParentSlugDispatchHandler>> _logger = new();
     private readonly StubDedupGate _dedup = new(claim: true);
-    private readonly List<AssignServiceParent> _invoked = [];
+    private readonly List<AssignServiceParentCommand> _invoked = [];
 
     public JudgeParentSlugDispatchHandlerTests()
     {
-        _bus.Setup(b => b.InvokeAsync(It.IsAny<AssignServiceParent>(), It.IsAny<CancellationToken>(), It.IsAny<TimeSpan?>()))
-            .Callback<object, CancellationToken, TimeSpan?>((cmd, _, _) => _invoked.Add((AssignServiceParent)cmd))
-            .Returns(Task.CompletedTask);
+        _bus.Setup(b => b.PublishAsync(It.IsAny<AssignServiceParentCommand>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions?>((cmd, _) => _invoked.Add((AssignServiceParentCommand)cmd))
+            .Returns(ValueTask.CompletedTask);
     }
 
     private JudgeParentSlugDispatchHandler Build() =>
-        new(_repo.Object, _ai.Object, _bus.Object, _dedup, _logger.Object);
+        new(_repo.Object, _ai.Object, _dedup, _logger.Object);
 
     private sealed class StubDedupGate(bool claim) : IJudgeParentDedupGate
     {
@@ -50,7 +50,7 @@ public class JudgeParentSlugDispatchHandlerTests
                 It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("doctor");
 
-        await Build().Handle(new JudgeParentSlugRequested("cardiology"), CancellationToken.None);
+        await Build().Handle(new JudgeParentSlugCommand("cardiology"), _bus.Object, CancellationToken.None);
 
         _invoked.ShouldHaveSingleItem();
         _invoked[0].Slug.ShouldBe("cardiology");
@@ -63,7 +63,7 @@ public class JudgeParentSlugDispatchHandlerTests
         // "doctor" is a seeded RootSlug — handler must skip without calling AI.
         SetupSlug(Service.Create("doctor"));
 
-        await Build().Handle(new JudgeParentSlugRequested("doctor"), CancellationToken.None);
+        await Build().Handle(new JudgeParentSlugCommand("doctor"), _bus.Object, CancellationToken.None);
 
         _invoked.ShouldBeEmpty();
         _ai.Verify(a => a.JudgeParentSlugAsync(It.IsAny<string>(),
@@ -79,7 +79,7 @@ public class JudgeParentSlugDispatchHandlerTests
                 It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string?)null);
 
-        await Build().Handle(new JudgeParentSlugRequested("astrology"), CancellationToken.None);
+        await Build().Handle(new JudgeParentSlugCommand("astrology"), _bus.Object, CancellationToken.None);
 
         _invoked.ShouldBeEmpty();
     }
@@ -97,7 +97,7 @@ public class JudgeParentSlugDispatchHandlerTests
             .ThrowsAsync(new HttpRequestException("ollama down"));
 
         await Should.ThrowAsync<HttpRequestException>(() =>
-            Build().Handle(new JudgeParentSlugRequested("astrology"), CancellationToken.None));
+            Build().Handle(new JudgeParentSlugCommand("astrology"), _bus.Object, CancellationToken.None));
 
         _invoked.ShouldBeEmpty();
     }
@@ -111,7 +111,7 @@ public class JudgeParentSlugDispatchHandlerTests
             .ThrowsAsync(new OperationCanceledException("shutdown"));
 
         await Should.ThrowAsync<OperationCanceledException>(() =>
-            Build().Handle(new JudgeParentSlugRequested("astrology"), CancellationToken.None));
+            Build().Handle(new JudgeParentSlugCommand("astrology"), _bus.Object, CancellationToken.None));
 
         _invoked.ShouldBeEmpty();
     }
@@ -124,7 +124,7 @@ public class JudgeParentSlugDispatchHandlerTests
                 It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("evil-slug");
 
-        await Build().Handle(new JudgeParentSlugRequested("cardiology"), CancellationToken.None);
+        await Build().Handle(new JudgeParentSlugCommand("cardiology"), _bus.Object, CancellationToken.None);
 
         _invoked.ShouldBeEmpty();
         _logger.Verify(l => l.Log(
@@ -143,7 +143,7 @@ public class JudgeParentSlugDispatchHandlerTests
         svc.AssignParent(Service.Create("doctor"));
         SetupSlug(svc);
 
-        await Build().Handle(new JudgeParentSlugRequested("cardiology"), CancellationToken.None);
+        await Build().Handle(new JudgeParentSlugCommand("cardiology"), _bus.Object, CancellationToken.None);
 
         _invoked.ShouldBeEmpty();
         _ai.Verify(a => a.JudgeParentSlugAsync(It.IsAny<string>(),
@@ -156,33 +156,30 @@ public class JudgeParentSlugDispatchHandlerTests
     {
         _repo.Setup(r => r.GetBySlugAsync("gone", It.IsAny<CancellationToken>())).ReturnsAsync((Service?)null);
 
-        await Build().Handle(new JudgeParentSlugRequested("gone"), CancellationToken.None);
+        await Build().Handle(new JudgeParentSlugCommand("gone"), _bus.Object, CancellationToken.None);
 
         _invoked.ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task Handle_NoOp_WhenSvcDeletedBetweenAiAndAssign()
+    public async Task Handle_PublishesAssignCommand_WhenAiReturnsValidParent()
     {
-        // Race: dispatch handler reads svc (call #1), AI infers parent, then
-        // retention sweep / manual delete removes the row before the inner
-        // AssignServiceParentHandler re-reads it (call #2 returns null).
-        var first = Service.Create("cardiology");
-        var calls = 0;
+        // Dispatch handler publishes AssignServiceParentCommand to the durable outbox;
+        // AssignServiceParentHandler commits the mutation in its own transaction.
+        // This test verifies the dispatch handler itself does not mutate the aggregate.
+        var svc = Service.Create("cardiology");
         _repo.Setup(r => r.GetBySlugAsync("cardiology", It.IsAny<CancellationToken>()))
-             .ReturnsAsync(() => Interlocked.Increment(ref calls) == 1 ? first : null);
-        _repo.Setup(r => r.GetBySlugAsync("doctor", It.IsAny<CancellationToken>()))
-             .ReturnsAsync(Service.Create("doctor"));
+             .ReturnsAsync(svc);
         _ai.Setup(a => a.JudgeParentSlugAsync("cardiology", It.IsAny<IReadOnlyList<string>>(),
                 It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("doctor");
-        _bus.Setup(b => b.InvokeAsync(It.IsAny<AssignServiceParent>(), It.IsAny<CancellationToken>(), It.IsAny<TimeSpan?>()))
-            .Returns(async (object cmd, CancellationToken ct, TimeSpan? _) =>
-                await new AssignServiceParentHandler(_repo.Object).Handle((AssignServiceParent)cmd, ct));
 
-        await Build().Handle(new JudgeParentSlugRequested("cardiology"), CancellationToken.None);
+        await Build().Handle(new JudgeParentSlugCommand("cardiology"), _bus.Object, CancellationToken.None);
 
-        first.ParentSlug.ShouldBeNull();
+        _invoked.ShouldHaveSingleItem();
+        _invoked[0].Slug.ShouldBe("cardiology");
+        _invoked[0].ParentSlug.ShouldBe("doctor");
+        svc.ParentSlug.ShouldBeNull();
     }
 
     [Fact]
@@ -191,7 +188,7 @@ public class JudgeParentSlugDispatchHandlerTests
         SetupSlug(Service.Create("cardiology"));
         _dedup.Claim = false;
 
-        await Build().Handle(new JudgeParentSlugRequested("cardiology"), CancellationToken.None);
+        await Build().Handle(new JudgeParentSlugCommand("cardiology"), _bus.Object, CancellationToken.None);
 
         _invoked.ShouldBeEmpty();
         _ai.Verify(a => a.JudgeParentSlugAsync(It.IsAny<string>(),

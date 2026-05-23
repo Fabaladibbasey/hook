@@ -15,7 +15,7 @@ public sealed class FeedbackDispatchPipelineTests : PipelineTestBase
     public async Task ContactExchanged_DispatchesStep1_ThenYesDispatchesStep2()
     {
         // Both-consent client + provider #1 (ShareContact=true seeded) so PhoneExchanger
-        // publishes ContactExchanged on PICK 1 → Step1FeedbackCheck → Step1 prompt.
+        // publishes ContactExchangedEvent on PICK 1 → Step1FeedbackCheck → Step1 prompt.
         // Fixture pins Feedback:Step1InitialDelay=00:00:00 so the Wolverine scheduler
         // dispatches the prompt synchronously. Step2 publishes immediately on Step1=Yes
         // (no separate delay knob).
@@ -29,7 +29,7 @@ public sealed class FeedbackDispatchPipelineTests : PipelineTestBase
 
         await _fx.InjectTextAndAwaitAsync(clientPhone, "PICK 1", timeout: TimeSpan.FromSeconds(20));
 
-        // ContactExchanged → handler schedules Step1 with TimeSpan.Zero. TrackActivity
+        // ContactExchangedEvent → handler schedules Step1 with TimeSpan.Zero. TrackActivity
         // does not always await scheduled-message dispatches, so poll.
         var step1 = await http.WaitForOutboundAsync(
             clientPhone,
@@ -46,7 +46,7 @@ public sealed class FeedbackDispatchPipelineTests : PipelineTestBase
         }
 
         // Sanity: provider #1 received the phone-reveal notice (proves the bilateral
-        // exchange path actually published ContactExchanged, not just a chat-route).
+        // exchange path actually published ContactExchangedEvent, not just a chat-route).
         await http.ExpectOutboundAsync(
             consentingProvider,
             m => m.Body.StartsWith("Client wants ", StringComparison.OrdinalIgnoreCase) &&
@@ -200,7 +200,7 @@ public sealed class FeedbackDispatchPipelineTests : PipelineTestBase
     public async Task ChatRoutedMatch_AlsoDispatchesStep1Feedback()
     {
         // Provider #2 (+2203000002) seeds with ShareContact=false, so PICK 2 here
-        // routes to chat (publishes ChatRoutingRequested instead of ContactExchanged).
+        // routes to chat (publishes RouteMatchToChatCommand instead of ContactExchangedEvent).
         // ChatRoutingFeedbackScheduler in the Feedback slice must still schedule Step1.
         const string clientPhone = "+22070007002";
         const string nonConsentingProvider = "+2203000002";

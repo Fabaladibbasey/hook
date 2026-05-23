@@ -89,7 +89,7 @@ public static class ReceiveWebhookEndpoint
                 message.From.Mask(),
                 message.Kind);
 
-            await bus.PublishAsync(new InboundMessageReceived(message));
+            await bus.PublishAsync(new RouteInboundMessageCommand(message));
         }
 
         return Results.Ok();
