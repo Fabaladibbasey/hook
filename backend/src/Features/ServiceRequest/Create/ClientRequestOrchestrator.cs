@@ -37,7 +37,7 @@ public sealed class ClientRequestOrchestrator(
         // 60-150s Ollama window doesn't block the funnel. The hint guard keeps us off the
         // LLM for every location reply. AwaitingDescription is intentionally excluded —
         // we just asked the user to describe their problem, so a problem statement there
-        // IS the description, not a new service intent. ClientServiceResolutionHandler
+        // IS the description, not a new service intent. ApplyClientServiceResolutionHandler
         // race-guards against the user advancing the draft while the LLM runs.
         if (draft.Step is ClientRequestStep.AwaitingLocation
                        or ClientRequestStep.ConfirmLocation
@@ -90,8 +90,8 @@ public sealed class ClientRequestOrchestrator(
     {
         var input = message.Text ?? string.Empty;
         // Park the draft in ResolvingService and defer ExtractServices to the outbox so
-        // the 60-150s Ollama window doesn't block the user. ClientServiceResolutionHandler
-        // advances the draft to ConfirmService (or back to AwaitingService on no-slug).
+        // the 60-150s Ollama window doesn't block the user. ApplyClientServiceResolutionHandler
+        // advances the draft to ConfirmService; ResetClientServiceResolutionHandler returns to AwaitingService on no-slug.
         draft.StepTo(ClientRequestStep.ResolvingService, now);
         await drafts.UpsertAsync(draft, ct);
         await bus.PublishAsync(new SendWhatsAppTextCommand(phone,

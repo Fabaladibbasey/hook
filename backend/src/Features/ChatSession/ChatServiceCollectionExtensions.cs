@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Hook.Features.ChatSession;
@@ -18,7 +19,9 @@ public static class ChatServiceCollectionExtensions
             options.EnableDetailedErrors = false;
             options.MaximumReceiveMessageSize = 32 * 1024;
             options.AddFilter<ChatHubExceptionFilter>();
-        });
+        })
+        .AddJsonProtocol(opts =>
+            opts.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
         return services;
     }

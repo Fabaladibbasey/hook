@@ -27,8 +27,11 @@ public class ClientServiceResolutionHandlerTests
             .Returns(Task.CompletedTask);
     }
 
-    private ClientServiceResolutionHandler Build() =>
-        new(_draftsMock.Object, _clock, NullLogger<ClientServiceResolutionHandler>.Instance);
+    private ApplyClientServiceResolutionHandler BuildApply() =>
+        new(_draftsMock.Object, _clock, NullLogger<ApplyClientServiceResolutionHandler>.Instance);
+
+    private ResetClientServiceResolutionHandler BuildReset() =>
+        new(_draftsMock.Object, _clock, NullLogger<ResetClientServiceResolutionHandler>.Instance);
 
     private ClientRequestDraft SeedDraft(ClientRequestStep step) => SeedDraft(step, "+220300001");
 
@@ -46,7 +49,7 @@ public class ClientServiceResolutionHandlerTests
         _draftsMock.Setup(x => x.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ClientRequestDraft?)null);
 
-        await Build().Handle(
+        await BuildApply().Handle(
             new ApplyClientServiceResolutionCommand("+220300001", "plumbing", IsSwitch: false),
             _busMock.Object, CancellationToken.None);
 
@@ -61,7 +64,7 @@ public class ClientServiceResolutionHandlerTests
         // phone-parse branch is the one that returns.
         SeedDraft(ClientRequestStep.ResolvingService, "not-a-phone");
 
-        await Build().Handle(
+        await BuildApply().Handle(
             new ApplyClientServiceResolutionCommand("not-a-phone", "plumbing", IsSwitch: false),
             _busMock.Object, CancellationToken.None);
 
@@ -75,7 +78,7 @@ public class ClientServiceResolutionHandlerTests
         _draftsMock.Setup(x => x.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ClientRequestDraft?)null);
 
-        await Build().Handle(
+        await BuildReset().Handle(
             new ResetClientServiceResolutionCommand("+220300001", IsSwitch: false),
             _busMock.Object, CancellationToken.None);
 
@@ -88,7 +91,7 @@ public class ClientServiceResolutionHandlerTests
     {
         SeedDraft(ClientRequestStep.AwaitingService, "not-a-phone");
 
-        await Build().Handle(
+        await BuildReset().Handle(
             new ResetClientServiceResolutionCommand("not-a-phone", IsSwitch: false),
             _busMock.Object, CancellationToken.None);
 
@@ -101,7 +104,7 @@ public class ClientServiceResolutionHandlerTests
     {
         SeedDraft(ClientRequestStep.ResolvingService);
 
-        await Build().Handle(
+        await BuildReset().Handle(
             new ResetClientServiceResolutionCommand("+220300001", IsSwitch: false),
             _busMock.Object, CancellationToken.None);
 
@@ -118,7 +121,7 @@ public class ClientServiceResolutionHandlerTests
         // The handler must not interrupt the funnel but should acknowledge.
         SeedDraft(ClientRequestStep.AwaitingDescription);
 
-        await Build().Handle(
+        await BuildReset().Handle(
             new ResetClientServiceResolutionCommand("+220300001", IsSwitch: true),
             _busMock.Object, CancellationToken.None);
 
@@ -132,7 +135,7 @@ public class ClientServiceResolutionHandlerTests
     {
         SeedDraft(ClientRequestStep.ResolvingService);
 
-        await Build().Handle(
+        await BuildApply().Handle(
             new ApplyClientServiceResolutionCommand("+220300001", "plumbing", IsSwitch: false),
             _busMock.Object, CancellationToken.None);
 
@@ -149,7 +152,7 @@ public class ClientServiceResolutionHandlerTests
         // User advanced past the location steps while LLM ran.
         SeedDraft(ClientRequestStep.AwaitingPhoneShareConsent);
 
-        await Build().Handle(
+        await BuildApply().Handle(
             new ApplyClientServiceResolutionCommand("+220300001", "carpentry", IsSwitch: true),
             _busMock.Object, CancellationToken.None);
 
@@ -163,7 +166,7 @@ public class ClientServiceResolutionHandlerTests
         var draft = SeedDraft(ClientRequestStep.AwaitingLocation);
         draft.SwitchSlug("plumbing", _clock.GetUtcNow());
 
-        await Build().Handle(
+        await BuildApply().Handle(
             new ApplyClientServiceResolutionCommand("+220300001", "plumbing", IsSwitch: true),
             _busMock.Object, CancellationToken.None);
 
@@ -177,7 +180,7 @@ public class ClientServiceResolutionHandlerTests
         var draft = SeedDraft(ClientRequestStep.AwaitingLocation);
         draft.SwitchSlug("plumbing", _clock.GetUtcNow());
 
-        await Build().Handle(
+        await BuildApply().Handle(
             new ApplyClientServiceResolutionCommand("+220300001", "carpentry", IsSwitch: true),
             _busMock.Object, CancellationToken.None);
 

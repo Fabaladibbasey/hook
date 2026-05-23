@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text.Json.Serialization;
 using Hook.Features.ChatSession;
 using Hook.Features.ChatSession.ParticipantAggregate;
 using Hook.Features.ChatSession.SessionAggregate;
@@ -69,6 +70,10 @@ public sealed class ChatHubTests : PipelineTestBase
                 opts.HttpMessageHandlerFactory = _ => _fx.Factory.Server.CreateHandler();
                 opts.Transports = HttpTransportType.LongPolling;
             })
+            // Mirror server-side JsonStringEnumConverter so ChatMessageRejectReason
+            // round-trips from the "Replay"/"Duplicate"/... wire form back into the enum.
+            .AddJsonProtocol(opts =>
+                opts.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter()))
             .Build();
         return conn;
     }

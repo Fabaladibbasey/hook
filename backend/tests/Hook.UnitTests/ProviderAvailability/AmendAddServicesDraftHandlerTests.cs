@@ -105,4 +105,21 @@ public class AmendAddServicesDraftHandlerTests : RegistrationHandlerTestBase
         _sent.ShouldHaveSingleItem().Text.ShouldContain("Pending add");
         _upserted.ShouldBeEmpty();
     }
+
+    [Fact]
+    public async Task Handle_PendingDraftPlusNew_RespectsCap()
+    {
+        // listed=3, pending draft already holds 1 ("carpentry"), command brings 2 new
+        // ("welding","tiling"). cap=5 ⇒ remaining=2 ⇒ pending + 1 new fits, second new is clipped.
+        SeedListed("plumbing", "electrical", "masonry");
+        SeedDraft(RegistrationStep.ConfirmAddServices, "carpentry");
+
+        await Build().Handle(
+            new AmendAddServicesDraftCommand(TestPhone, ["welding", "tiling"]),
+            _busMock.Object, CancellationToken.None);
+
+        _upserted.ShouldHaveSingleItem();
+        _upserted[0].DraftServices.ShouldBe(["carpentry", "welding"]);
+        _sent.ShouldHaveSingleItem().Text.ShouldContain("Updated: carpentry, welding");
+    }
 }

@@ -7,7 +7,7 @@ namespace Hook.UnitTests.Chat;
 public class OpenChatResponseTests
 {
     [Fact]
-    public void OpenChatResponse_SerializesToCamelCaseKeys()
+    public void OpenChatResponse_SerializesToCamelCaseKeys_WithExpectedValueTypes()
     {
         var response = new OpenChatResponse(
             Guid.NewGuid(),
@@ -21,11 +21,11 @@ public class OpenChatResponseTests
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
-        root.TryGetProperty("chatId", out _).ShouldBeTrue();
-        root.TryGetProperty("participantId", out _).ShouldBeTrue();
-        root.TryGetProperty("role", out _).ShouldBeTrue();
-        root.TryGetProperty("sessionId", out _).ShouldBeTrue();
-        root.TryGetProperty("status", out _).ShouldBeTrue();
-        root.TryGetProperty("expiresAt", out _).ShouldBeTrue();
+        root.GetProperty("chatId").GetGuid().ShouldBe(response.ChatId);
+        root.GetProperty("participantId").GetGuid().ShouldBe(response.ParticipantId);
+        root.GetProperty("role").GetString().ShouldBe(response.Role);
+        root.GetProperty("sessionId").GetGuid().ShouldBe(response.SessionId);
+        root.GetProperty("status").GetString().ShouldBe(response.Status);
+        root.GetProperty("expiresAt").GetDateTimeOffset().ShouldBe(response.ExpiresAt);
     }
 }

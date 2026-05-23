@@ -108,7 +108,7 @@ public sealed class PhoneExchanger(
             $"Client wants {match.ServiceSlug} ({clientPhone.Value}). Expect a message.",
             request.Description);
         await bus.PublishAsync(new SendWhatsAppTextCommand(providerPhone, providerText));
-        match.MarkContactExchanged(request.Id, request.ClientPhone, provider.Phone);
+        match.MarkContactExchanged();
         return ExchangeOutcome.Exchanged;
     }
 

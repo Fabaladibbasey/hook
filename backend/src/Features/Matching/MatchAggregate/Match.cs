@@ -51,10 +51,10 @@ public class Match : AggregateRoot
         ChatId = chatId;
     }
 
-    public void MarkContactExchanged(Guid requestId, string clientPhone, string providerPhone)
+    public void MarkContactExchanged()
     {
         if (PickedAt is null)
             throw new InvalidOperationException($"Match {Id} contact-exchange before claim");
-        RaiseDomainEvent(new ContactExchangedEvent(Id, requestId, clientPhone, providerPhone));
+        RaiseDomainEvent(new ContactExchangedEvent(Id));
     }
 }

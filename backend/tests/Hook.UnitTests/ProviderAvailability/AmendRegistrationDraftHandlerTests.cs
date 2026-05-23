@@ -73,6 +73,20 @@ public class AmendRegistrationDraftHandlerTests : RegistrationHandlerTestBase
     }
 
     [Fact]
+    public async Task Handle_DraftNull_NoOp()
+    {
+        // No SeedDraft — drafts.GetAsync returns null. Mirrors
+        // AmendAddServicesDraftHandlerTests.Handle_DraftNull_DropsSilently so the three
+        // Amend* handlers cover identical guard surfaces.
+        await Build().Handle(
+            new AmendRegistrationDraftCommand(TestPhone, ["plumbing"]),
+            _busMock.Object, CancellationToken.None);
+
+        _sent.ShouldBeEmpty();
+        _upserted.ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Handle_AppendBeyondCap_ClipsAtMaxServices()
     {
         var max = _options.MaxServicesPerProvider;

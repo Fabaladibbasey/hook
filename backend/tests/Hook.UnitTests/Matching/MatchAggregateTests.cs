@@ -80,7 +80,7 @@ public sealed class MatchAggregateTests
         var m = NewMatch();
 
         Should.Throw<InvalidOperationException>(
-                () => m.MarkContactExchanged(m.RequestId, "+2203339999", m.ProviderPhone))
+                () => m.MarkContactExchanged())
             .Message.ShouldContain("before claim");
     }
 
@@ -90,13 +90,11 @@ public sealed class MatchAggregateTests
         var m = NewMatch();
         m.ClaimForPickup(contactShared: true, now: Now);
 
-        m.MarkContactExchanged(m.RequestId, "+2203339999", m.ProviderPhone);
+        m.MarkContactExchanged();
 
         var raised = m.DequeueEvents();
         raised.ShouldHaveSingleItem();
         var evt = raised[0].ShouldBeOfType<ContactExchangedEvent>();
         evt.MatchId.ShouldBe(m.Id);
-        evt.RequestId.ShouldBe(m.RequestId);
-        evt.ProviderPhone.ShouldBe(m.ProviderPhone);
     }
 }
