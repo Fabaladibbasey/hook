@@ -11,7 +11,8 @@ public sealed class AiReadinessProbe(
     ILogger<AiReadinessProbe> logger)
 {
     private readonly TimeSpan _cacheTtl = TimeSpan.FromSeconds(Math.Max(1, options.Value.ReadinessCacheSeconds));
-    private readonly TimeSpan _probeTimeout = TimeSpan.FromSeconds(Math.Max(1, options.Value.ReadinessProbeTimeoutSeconds));
+    private readonly TimeSpan _probeTimeout = TimeSpan.FromSeconds(
+        Math.Max(1, options.Value.ReadinessProbeTimeoutSeconds));
     private readonly SemaphoreSlim _gate = new(1, 1);
     private CachedResult? _cached;
 

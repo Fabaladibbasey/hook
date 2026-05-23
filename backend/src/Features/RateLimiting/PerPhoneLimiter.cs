@@ -53,7 +53,9 @@ public sealed class PerPhoneLimiter : IDisposable
 
     private static TimeSpan GetRetryAfter(RateLimitLease lease)
     {
-        return lease.TryGetMetadata(MetadataName.RetryAfter, out var retry) && retry is TimeSpan ts ? ts : TimeSpan.FromSeconds(5);
+        return lease.TryGetMetadata(MetadataName.RetryAfter, out var retry) && retry is TimeSpan ts
+            ? ts
+            : TimeSpan.FromSeconds(5);
     }
 
     public void Dispose()

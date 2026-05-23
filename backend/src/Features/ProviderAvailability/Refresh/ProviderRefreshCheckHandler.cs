@@ -39,7 +39,8 @@ public sealed class ProviderRefreshCheckHandler(
             Facts = new Dictionary<string, string>
             {
                 ["services"] = string.Join(", ", provider.Services),
-                ["instruction"] = "Ask the provider whether they are still available. Mention they can reply YES to stay listed."
+                ["instruction"] = "Ask the provider whether they are still available. "
+                    + "Mention they can reply YES to stay listed."
             }
         };
 

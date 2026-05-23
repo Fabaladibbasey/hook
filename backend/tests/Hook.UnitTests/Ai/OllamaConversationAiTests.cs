@@ -171,7 +171,9 @@ public class OllamaConversationAiTests
 
     private sealed class ScriptedHandler(string content) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
         {
             var encoded = System.Text.Json.JsonSerializer.Serialize(content);
             var json = "{\"message\":{\"content\":" + encoded + "}}";
@@ -184,13 +186,17 @@ public class OllamaConversationAiTests
 
     private sealed class FailingHandler : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
             throw new HttpRequestException("ollama unreachable");
     }
 
     private sealed class CancellingHandler : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             throw new OperationCanceledException(cancellationToken);

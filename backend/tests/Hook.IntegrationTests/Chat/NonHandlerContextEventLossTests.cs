@@ -86,8 +86,11 @@ public sealed class NonHandlerContextEventLossTests : PipelineTestBase
 
     private HubConnection BuildHub(string token, Guid sessionId)
     {
+        var hubUri = new Uri(
+            _fx.Factory.Server.BaseAddress,
+            $"hubs/chat?token={Uri.EscapeDataString(token)}&sessionId={sessionId}");
         return new HubConnectionBuilder()
-            .WithUrl(new Uri(_fx.Factory.Server.BaseAddress, $"hubs/chat?token={Uri.EscapeDataString(token)}&sessionId={sessionId}"), opts =>
+            .WithUrl(hubUri, opts =>
             {
                 opts.HttpMessageHandlerFactory = _ => _fx.Factory.Server.CreateHandler();
                 opts.Transports = HttpTransportType.LongPolling;

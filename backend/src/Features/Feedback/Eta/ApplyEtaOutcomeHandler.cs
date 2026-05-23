@@ -53,8 +53,9 @@ public sealed class ApplyEtaOutcomeHandler(
 
         if (now - pending.PromptedAt <= opts.ParseRetryWindow)
         {
-            await bus.PublishAsync(new SendWhatsAppTextRequested(evt.From,
-                "Sorry, didn't catch that. When do you think the job will be done? e.g. 'in 3 hours' or 'tomorrow at 5pm'."));
+            var retry = "Sorry, didn't catch that. When do you think the job will be done? "
+                + "e.g. 'in 3 hours' or 'tomorrow at 5pm'.";
+            await bus.PublishAsync(new SendWhatsAppTextRequested(evt.From, retry));
             return;
         }
 
@@ -62,8 +63,12 @@ public sealed class ApplyEtaOutcomeHandler(
     }
 
     private async Task ClaimSkippedAndFallbackAsync(
-        MatchFeedback pending, FeedbackOptions opts, DateTimeOffset now, PhoneNumber from,
-        IMessageBus bus, CancellationToken ct)
+        MatchFeedback pending,
+        FeedbackOptions opts,
+        DateTimeOffset now,
+        PhoneNumber from,
+        IMessageBus bus,
+        CancellationToken ct)
     {
         if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct)) return;
         await events.ScheduleAsync(new Step2FeedbackCheck(pending.MatchId), opts.Step2InProgressRecheckDelay, ct);

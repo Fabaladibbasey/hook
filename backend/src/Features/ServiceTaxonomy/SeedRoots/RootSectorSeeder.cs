@@ -63,7 +63,7 @@ public sealed class RootSectorSeeder(
                 return;
             }
             catch (DbUpdateException ex) when (ex.InnerException is PostgresException
-                { SqlState: PostgresErrorCodes.UniqueViolation })
+            { SqlState: PostgresErrorCodes.UniqueViolation })
             {
                 // A peer host raced us between our existence query and our insert.
                 // Detach the failed batch so the per-slug fallback below starts clean.

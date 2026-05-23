@@ -33,7 +33,9 @@ public sealed class ApplyGeocodeResultClientTests
     private ApplyGeocodeResultClientHandler Build() =>
         new(_drafts.Object, _clock, NullLogger<ApplyGeocodeResultClientHandler>.Instance);
 
-    private static ClientRequestDraft DraftAt(DateTimeOffset stamp, ClientRequestStep step = ClientRequestStep.AwaitingLocation)
+    private static ClientRequestDraft DraftAt(
+        DateTimeOffset stamp,
+        ClientRequestStep step = ClientRequestStep.AwaitingLocation)
     {
         var d = ClientRequestDraft.Start(Phone, stamp);
         if (step != ClientRequestStep.AwaitingService)

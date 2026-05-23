@@ -21,7 +21,12 @@ public class AiReplyHelperTests
         _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("Hi there");
 
-        var result = await AiReplyHelper.TryGenerateAsync(_aiMock.Object, Ctx, "test", NullLogger.Instance, CancellationToken.None);
+        var result = await AiReplyHelper.TryGenerateAsync(
+            _aiMock.Object,
+            Ctx,
+            "test",
+            NullLogger.Instance,
+            CancellationToken.None);
 
         result.ShouldBe("Hi there");
     }
@@ -32,7 +37,12 @@ public class AiReplyHelperTests
         _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("ollama down"));
 
-        var result = await AiReplyHelper.TryGenerateAsync(_aiMock.Object, Ctx, "test", NullLogger.Instance, CancellationToken.None);
+        var result = await AiReplyHelper.TryGenerateAsync(
+            _aiMock.Object,
+            Ctx,
+            "test",
+            NullLogger.Instance,
+            CancellationToken.None);
 
         result.ShouldBeNull();
     }
@@ -43,7 +53,12 @@ public class AiReplyHelperTests
         _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("   ");
 
-        var result = await AiReplyHelper.TryGenerateAsync(_aiMock.Object, Ctx, "test", NullLogger.Instance, CancellationToken.None);
+        var result = await AiReplyHelper.TryGenerateAsync(
+            _aiMock.Object,
+            Ctx,
+            "test",
+            NullLogger.Instance,
+            CancellationToken.None);
 
         result.ShouldBeNull();
     }
@@ -132,7 +147,12 @@ public class AiReplyHelperTests
         _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(refusal);
 
-        var result = await AiReplyHelper.TryGenerateAsync(_aiMock.Object, Ctx, "test", NullLogger.Instance, CancellationToken.None);
+        var result = await AiReplyHelper.TryGenerateAsync(
+            _aiMock.Object,
+            Ctx,
+            "test",
+            NullLogger.Instance,
+            CancellationToken.None);
 
         result.ShouldBeNull();
     }
@@ -146,7 +166,12 @@ public class AiReplyHelperTests
         _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(reply);
 
-        var result = await AiReplyHelper.TryGenerateAsync(_aiMock.Object, Ctx, "test", NullLogger.Instance, CancellationToken.None);
+        var result = await AiReplyHelper.TryGenerateAsync(
+            _aiMock.Object,
+            Ctx,
+            "test",
+            NullLogger.Instance,
+            CancellationToken.None);
 
         result.ShouldBe(reply);
     }
@@ -162,7 +187,12 @@ public class AiReplyHelperTests
         _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(reply);
 
-        var result = await AiReplyHelper.TryGenerateAsync(_aiMock.Object, Ctx, "test", NullLogger.Instance, CancellationToken.None);
+        var result = await AiReplyHelper.TryGenerateAsync(
+            _aiMock.Object,
+            Ctx,
+            "test",
+            NullLogger.Instance,
+            CancellationToken.None);
 
         result.ShouldBeNull();
     }
@@ -176,7 +206,12 @@ public class AiReplyHelperTests
         _aiMock.Setup(x => x.GenerateReplyAsync(It.IsAny<ReplyContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(reply);
 
-        var result = await AiReplyHelper.TryGenerateAsync(_aiMock.Object, Ctx, "test", NullLogger.Instance, CancellationToken.None);
+        var result = await AiReplyHelper.TryGenerateAsync(
+            _aiMock.Object,
+            Ctx,
+            "test",
+            NullLogger.Instance,
+            CancellationToken.None);
 
         result.ShouldBe(reply);
     }

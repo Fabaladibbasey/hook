@@ -49,18 +49,19 @@ public sealed class ChatRoutingRequestedHandler(
         var providerParsed = PhoneNumber.TryParse(evt.ProviderPhone, out var provider);
         var maskedProvider = providerParsed ? provider.Mask() : evt.ProviderPhone;
         var prefix = $"Match #{evt.MatchPosition} ({maskedProvider}): ";
-        var clientBody = evt.ClientConsented
+        var clientText = evt.ClientConsented
             ? $"{prefix}the other party prefers a private chat. Open: {links.ClientUrl}"
             : $"{prefix}your private chat is ready. Open: {links.ClientUrl}";
-        var providerBody = evt.ProviderConsented
-            ? $"{match.ServiceSlug} client at {evt.RequesterAddress} ({mapsUrl}) prefers a private chat. Open: {links.ProviderUrl}"
-            : $"{match.ServiceSlug} client at {evt.RequesterAddress} ({mapsUrl}) wants to chat. Open: {links.ProviderUrl}";
-        providerBody = RequestDetailsFormatter.AppendIfPresent(providerBody, evt.Description);
+        var providerIntro = $"{match.ServiceSlug} client at {evt.RequesterAddress} ({mapsUrl})";
+        var providerText = evt.ProviderConsented
+            ? $"{providerIntro} prefers a private chat. Open: {links.ProviderUrl}"
+            : $"{providerIntro} wants to chat. Open: {links.ProviderUrl}";
+        providerText = RequestDetailsFormatter.AppendIfPresent(providerText, evt.Description);
 
         if (PhoneNumber.TryParse(evt.ClientPhone, out var client))
-            await bus.PublishAsync(new SendWhatsAppTextRequested(client, clientBody));
+            await bus.PublishAsync(new SendWhatsAppTextRequested(client, clientText));
         if (providerParsed)
-            await bus.PublishAsync(new SendWhatsAppTextRequested(provider, providerBody));
+            await bus.PublishAsync(new SendWhatsAppTextRequested(provider, providerText));
 
         logger.LogInformation("Chat routing complete for match {MatchId}, chat {ChatId}", evt.MatchId, links.ChatId);
     }

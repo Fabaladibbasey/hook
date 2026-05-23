@@ -62,7 +62,8 @@ public sealed class RetentionSweeper(
             // right axis for retention.
             (RetentionTableKeys.WolverineDeadLetters,
                 () => db.Database.ExecuteSqlRawAsync(
-                    $"DELETE FROM {WolverineConfig.Schema}.{RetentionTableKeys.WolverineDeadLetters} WHERE sent_at < {{0}}",
+                    $"DELETE FROM {WolverineConfig.Schema}.{RetentionTableKeys.WolverineDeadLetters} "
+                        + "WHERE sent_at < {0}",
                     [dlqCutoff], ct)),
         };
 
@@ -122,8 +123,12 @@ public sealed class RetentionSweeper(
 
         var total = counts.Values.Where(v => v >= 0).Sum();
         logger.LogInformation(
-            "Retention sweep complete: cutoff={Cutoff} total_deleted={Total} per_table={@PerTable} duration_ms={DurationMs}",
-            cutoff, total, counts, sw.Elapsed.TotalMilliseconds);
+            "Retention sweep complete: cutoff={Cutoff} total_deleted={Total} "
+                + "per_table={@PerTable} duration_ms={DurationMs}",
+            cutoff,
+            total,
+            counts,
+            sw.Elapsed.TotalMilliseconds);
 
         return new RetentionSweepResult(new ReadOnlyDictionary<string, int>(counts));
     }

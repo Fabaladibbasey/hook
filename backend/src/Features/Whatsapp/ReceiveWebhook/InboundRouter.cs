@@ -49,7 +49,8 @@ public sealed class InboundRouterHandler(
     // provider?") so users see one consistent ask. ParseDisambiguation accepts
     // both REQUEST/REGISTER and the legacy HIRE/OFFER tokens.
     internal const string DisambiguationPrompt =
-        "Quick check — do you want to REQUEST a service (you need help) or REGISTER as a provider (you offer one)? Reply REQUEST or REGISTER.";
+        "Quick check — do you want to REQUEST a service (you need help) " +
+        "or REGISTER as a provider (you offer one)? Reply REQUEST or REGISTER.";
 
     public Task Handle(InboundMessageReceived evt, CancellationToken ct) =>
         RouteAsync(evt.Message, prefetchedIntent: null, ct);
@@ -311,7 +312,9 @@ public sealed class InboundRouterHandler(
         if (choice is null)
         {
             logger.LogDebug("Unrecognised disambiguation reply '{Text}' from {Phone}", text, masked);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From, "Reply REQUEST if you need a service, or REGISTER if you provide one."));
+            await bus.PublishAsync(new SendWhatsAppTextRequested(
+                msg.From,
+                "Reply REQUEST if you need a service, or REGISTER if you provide one."));
             return true;
         }
 
@@ -344,10 +347,19 @@ public sealed class InboundRouterHandler(
         };
     }
 
-    private ValueTask SendColdReplyAsync(PhoneNumber from, string text, IntentDetectionResult detected, string purpose, CancellationToken ct) =>
+    private ValueTask SendColdReplyAsync(
+        PhoneNumber from,
+        string text,
+        IntentDetectionResult detected,
+        string purpose,
+        CancellationToken ct) =>
         bus.PublishAsync(new SendColdReplyRequested(from, text, detected, purpose));
 
-    private async Task TryPickAsync(ServiceRequest.RequestAggregate.ServiceRequest request, string text, string maskedPhone, CancellationToken ct)
+    private async Task TryPickAsync(
+        ServiceRequest.RequestAggregate.ServiceRequest request,
+        string text,
+        string maskedPhone,
+        CancellationToken ct)
     {
         var matchOrder = await matches.GetForRequestAsync(request.Id, ct);
         if (matchOrder.Count == 0) return;
@@ -366,7 +378,11 @@ public sealed class InboundRouterHandler(
         {
             try
             {
-                logger.LogDebug("Route → PhoneExchanger.TryExchange match={MatchId} pos={Position} for {Phone}", p.Match.Id, p.Position, maskedPhone);
+                logger.LogDebug(
+                    "Route → PhoneExchanger.TryExchange match={MatchId} pos={Position} for {Phone}",
+                    p.Match.Id,
+                    p.Position,
+                    maskedPhone);
                 var outcome = await phoneExchanger.TryExchangeAsync(p.Match.Id, p.Position, ct);
                 switch (outcome)
                 {
@@ -396,7 +412,10 @@ public sealed class InboundRouterHandler(
             }
             catch (PostgresException ex) when (TransientPgStates.IsTransient(ex.SqlState))
             {
-                logger.LogWarning(ex, "Transient Postgres failure during PhoneExchanger for match {MatchId}", p.Match.Id);
+                logger.LogWarning(
+                    ex,
+                    "Transient Postgres failure during PhoneExchanger for match {MatchId}",
+                    p.Match.Id);
                 transientFail++;
             }
         }
@@ -414,7 +433,8 @@ public sealed class InboundRouterHandler(
         if (consideredTotal == failedTotal)
         {
             if (unavailable == failedTotal)
-                reply = "Those providers' listings expired. Reply NEXT for more matches, or INCREASE to search further.";
+                reply = "Those providers' listings expired. "
+                    + "Reply NEXT for more matches, or INCREASE to search further.";
             else if (raceLost == failedTotal)
                 reply = "Another client just picked that provider. Reply NEXT to see more matches.";
             else
@@ -422,7 +442,8 @@ public sealed class InboundRouterHandler(
         }
         else
         {
-            reply = $"Connected you with {freshSuccess} of {consideredTotal} providers. Reply PICK <#> or NEXT for more.";
+            reply = $"Connected you with {freshSuccess} of {consideredTotal} providers. "
+                + "Reply PICK <#> or NEXT for more.";
         }
         await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone, reply));
     }

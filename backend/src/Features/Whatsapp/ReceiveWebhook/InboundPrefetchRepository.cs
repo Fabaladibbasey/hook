@@ -37,7 +37,9 @@ public sealed class InboundPrefetchRepository(HookDbContext db)
          orderby f.PromptedAt descending
          select f).FirstOrDefaultAsync(ct);
 
-    public Task<ServiceRequest.RequestAggregate.ServiceRequest?> GetActiveRequestAsync(string phone, CancellationToken ct) =>
+    public Task<ServiceRequest.RequestAggregate.ServiceRequest?> GetActiveRequestAsync(
+        string phone,
+        CancellationToken ct) =>
         db.ServiceRequests
             .Where(r => r.ClientPhone == phone && r.Status != ServiceRequestStatus.Closed)
             .OrderByDescending(r => r.CreatedAt)

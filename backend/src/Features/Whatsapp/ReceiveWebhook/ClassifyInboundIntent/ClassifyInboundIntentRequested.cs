@@ -8,4 +8,7 @@ public sealed record ClassifyInboundIntentRequested(InboundMessage Message, stri
 
 // Re-enters the transactional router with a prefetched intent, so the
 // post-classification switch runs inside a normal Wolverine handler context.
-public sealed record RouteClassifiedIntent(InboundMessage Message, IntentDetectionResult Detected, string Reserved = "");
+public sealed record RouteClassifiedIntent(
+    InboundMessage Message,
+    IntentDetectionResult Detected,
+    string Reserved = "");

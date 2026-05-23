@@ -13,10 +13,17 @@ public sealed class ChatSessionFactory(
     public Task<ChatLinks> CreateAsync(string clientPhone, string providerPhone, CancellationToken ct = default) =>
         CreateAsync(Guid.CreateVersion7(), clientPhone, providerPhone, ct);
 
-    public async Task<ChatLinks> CreateAsync(Guid chatId, string clientPhone, string providerPhone, CancellationToken ct = default)
+    public async Task<ChatLinks> CreateAsync(
+        Guid chatId,
+        string clientPhone,
+        string providerPhone,
+        CancellationToken ct = default)
     {
         var opts = options.Value;
-        var session = SessionAggregate.ChatSession.Create(chatId, TimeSpan.FromHours(opts.HardExpiryHours), clock.GetUtcNow());
+        var session = SessionAggregate.ChatSession.Create(
+            chatId,
+            TimeSpan.FromHours(opts.HardExpiryHours),
+            clock.GetUtcNow());
 
         var clientParticipant = ChatParticipant.Create(session.Id, ChatParticipantRole.Client, clientPhone);
         var providerParticipant = ChatParticipant.Create(session.Id, ChatParticipantRole.Provider, providerPhone);

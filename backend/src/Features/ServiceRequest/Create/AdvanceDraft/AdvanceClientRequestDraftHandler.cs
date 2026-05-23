@@ -28,8 +28,9 @@ public sealed class AdvanceClientRequestDraftHandler(
             {
                 draft.StepTo(ClientRequestStep.AwaitingService, now);
                 await drafts.UpsertAsync(draft, ct);
-                await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                    "What service do you need? (e.g. plumber, carpenter, computer repair) — or reply REGISTER if you're offering services instead."));
+                var prompt = "What service do you need? (e.g. plumber, carpenter, computer repair) "
+                    + "— or reply REGISTER if you're offering services instead.";
+                await bus.PublishAsync(new SendWhatsAppTextRequested(phone, prompt));
             }
             else
             {
@@ -53,7 +54,10 @@ public sealed class AdvanceClientRequestDraftHandler(
             }
             if (string.Equals(evt.CanonicalSlug, draft.DraftServiceSlug, StringComparison.Ordinal))
             {
-                logger.LogDebug("Slug-switch resolved to same slug {Slug} for {Phone}; no-op", evt.CanonicalSlug, phone.Mask());
+                logger.LogDebug(
+                    "Slug-switch resolved to same slug {Slug} for {Phone}; no-op",
+                    evt.CanonicalSlug,
+                    phone.Mask());
                 return;
             }
             draft.SwitchSlug(evt.CanonicalSlug, now);
@@ -67,7 +71,8 @@ public sealed class AdvanceClientRequestDraftHandler(
         draft.SwitchSlug(evt.CanonicalSlug, now);
         draft.StepTo(ClientRequestStep.ConfirmService, now);
         await drafts.UpsertAsync(draft, ct);
-        await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-            $"Do you need {evt.CanonicalSlug.Replace('-', ' ')}? Reply YES or NO — YES to confirm, NO to choose another service."));
+        var confirm = $"Do you need {evt.CanonicalSlug.Replace('-', ' ')}? "
+            + "Reply YES or NO — YES to confirm, NO to choose another service.";
+        await bus.PublishAsync(new SendWhatsAppTextRequested(phone, confirm));
     }
 }

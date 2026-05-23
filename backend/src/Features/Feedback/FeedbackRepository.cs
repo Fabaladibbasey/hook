@@ -23,7 +23,10 @@ public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
         db.MatchFeedback.FirstOrDefaultAsync(
             f => f.MatchId == matchId && f.Step == step && f.Answer == FeedbackAnswer.Pending, ct);
 
-    public Task<MatchFeedback?> GetLatestByMatchAndStepAsync(Guid matchId, FeedbackStep step, CancellationToken ct = default) =>
+    public Task<MatchFeedback?> GetLatestByMatchAndStepAsync(
+        Guid matchId,
+        FeedbackStep step,
+        CancellationToken ct = default) =>
         db.MatchFeedback
             .Where(f => f.MatchId == matchId && f.Step == step)
             .OrderByDescending(f => f.PromptedAt)
@@ -44,7 +47,11 @@ public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
     // and the same UPDATE so a concurrent fire can't see the answer flip without the
     // ETA, or vice-versa.
     public async Task<bool> TryClaimPendingWithEtaAsync(
-        Guid feedbackId, FeedbackAnswer answer, DateTimeOffset etaUtc, DateTimeOffset now, CancellationToken ct = default)
+        Guid feedbackId,
+        FeedbackAnswer answer,
+        DateTimeOffset etaUtc,
+        DateTimeOffset now,
+        CancellationToken ct = default)
     {
         var rows = await db.MatchFeedback
             .Where(f => f.Id == feedbackId && f.Answer == FeedbackAnswer.Pending)

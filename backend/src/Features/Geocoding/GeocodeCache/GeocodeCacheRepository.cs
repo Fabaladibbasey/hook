@@ -11,7 +11,11 @@ public sealed class GeocodeCacheRepository(HookDbContext db) : IGeocodeCache
         var entry = await db.GeocodeCache.FirstOrDefaultAsync(e => e.Key == key, ct);
         return entry is null
             ? null
-            : new GeocodeResult(new Location(entry.Latitude, entry.Longitude), entry.FormattedAddress, entry.Provider, FromCache: true);
+            : new GeocodeResult(
+                new Location(entry.Latitude, entry.Longitude),
+                entry.FormattedAddress,
+                entry.Provider,
+                FromCache: true);
     }
 
     public async Task SetAsync(string key, GeocodeResult result, CancellationToken ct = default)

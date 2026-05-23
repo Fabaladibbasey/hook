@@ -7,11 +7,18 @@ namespace Hook.Features.ChatLifecycle;
 
 public sealed class ChatScheduler(IMessageBus bus, IOptions<ChatOptions> options)
 {
-    public async Task ScheduleIdleChecksAsync(Guid chatId, DateTimeOffset lastActivityAt, CancellationToken ct = default)
+    public async Task ScheduleIdleChecksAsync(
+        Guid chatId,
+        DateTimeOffset lastActivityAt,
+        CancellationToken ct = default)
     {
         var opts = options.Value;
-        await bus.ScheduleAsync(new IdleReminderCheck(chatId, lastActivityAt), TimeSpan.FromMinutes(opts.IdleReminderMinutes));
-        await bus.ScheduleAsync(new IdleEndCheck(chatId, lastActivityAt), TimeSpan.FromMinutes(opts.IdleEndMinutes));
+        await bus.ScheduleAsync(
+            new IdleReminderCheck(chatId, lastActivityAt),
+            TimeSpan.FromMinutes(opts.IdleReminderMinutes));
+        await bus.ScheduleAsync(
+            new IdleEndCheck(chatId, lastActivityAt),
+            TimeSpan.FromMinutes(opts.IdleEndMinutes));
     }
 
     public async Task ScheduleHardExpireAsync(Guid chatId, CancellationToken ct = default)

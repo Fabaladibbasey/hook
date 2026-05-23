@@ -137,7 +137,12 @@ public sealed class OllamaConversationAi(
             Candidate slugs: {{string.Join(", ", candidateSlugs)}}
             """;
 
-        using var json = await CallJsonAsync(AiPrompts.ServiceJudgeSystem, prompt, schema, options.Value.MaxOutputTokens.Judge, ct);
+        using var json = await CallJsonAsync(
+            AiPrompts.ServiceJudgeSystem,
+            prompt,
+            schema,
+            options.Value.MaxOutputTokens.Judge,
+            ct);
         var root = json.RootElement;
 
         var matched = root.TryGetProperty("matchedSlug", out var m) ? m.GetString() ?? string.Empty : string.Empty;
@@ -197,7 +202,12 @@ public sealed class OllamaConversationAi(
             {{examples}}
             """;
 
-        using var json = await CallJsonAsync(AiPrompts.ParentSlugJudgeSystem, prompt, schema, options.Value.MaxOutputTokens.Judge, ct);
+        using var json = await CallJsonAsync(
+            AiPrompts.ParentSlugJudgeSystem,
+            prompt,
+            schema,
+            options.Value.MaxOutputTokens.Judge,
+            ct);
         var root = json.RootElement;
         if (!root.TryGetProperty("parentSlug", out var p) || p.ValueKind == JsonValueKind.Null)
             return null;
@@ -250,11 +260,17 @@ public sealed class OllamaConversationAi(
         return reply;
     }
 
-    public Task<DateTimeOffset?> ExtractEtaAsync(string userMessage, DateTimeOffset now, CancellationToken ct = default) =>
+    public Task<DateTimeOffset?> ExtractEtaAsync(
+        string userMessage,
+        DateTimeOffset now,
+        CancellationToken ct = default) =>
         TryCallAsync<DateTimeOffset?>(AiStage.ExtractEta, null,
             () => ExtractEtaCoreAsync(userMessage, now, ct), ct);
 
-    private async Task<DateTimeOffset?> ExtractEtaCoreAsync(string userMessage, DateTimeOffset now, CancellationToken ct)
+    private async Task<DateTimeOffset?> ExtractEtaCoreAsync(
+        string userMessage,
+        DateTimeOffset now,
+        CancellationToken ct)
     {
         var schema = new
         {
@@ -270,21 +286,32 @@ public sealed class OllamaConversationAi(
         // "YYYY-MM-DDTHH:MM:SSZ" — the round-trip "o" specifier emits sub-second
         // precision and "+00:00" rather than "Z", which the prompt does not
         // describe and the model occasionally garbles.
-        var referenceUtc = now.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture);
+        var referenceUtc = now.UtcDateTime.ToString(
+            "yyyy-MM-ddTHH:mm:ssZ",
+            System.Globalization.CultureInfo.InvariantCulture);
         var prompt = $$"""
             referenceUtc: {{referenceUtc}}
             {{PromptSafety.Fence(userMessage, options.Value.MaxUserInputChars)}}
             """;
 
-        using var json = await CallJsonAsync(AiPrompts.EtaExtractionSystem, prompt, schema, options.Value.MaxOutputTokens.Eta, ct);
+        using var json = await CallJsonAsync(
+            AiPrompts.EtaExtractionSystem,
+            prompt,
+            schema,
+            options.Value.MaxOutputTokens.Eta,
+            ct);
         var root = json.RootElement;
         if (!root.TryGetProperty("etaUtc", out var etaProp) || etaProp.ValueKind == JsonValueKind.Null)
             return null;
 
         var raw = etaProp.GetString();
         if (string.IsNullOrWhiteSpace(raw)) return null;
-        if (!DateTimeOffset.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture,
-                System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+        var styles = System.Globalization.DateTimeStyles.AssumeUniversal
+                   | System.Globalization.DateTimeStyles.AdjustToUniversal;
+        if (!DateTimeOffset.TryParse(
+                raw,
+                System.Globalization.CultureInfo.InvariantCulture,
+                styles,
                 out var eta))
             return null;
         // Ignore past timestamps — they're useless as a recheck schedule.
@@ -358,13 +385,22 @@ public sealed class OllamaConversationAi(
         }
     }
 
-    private async Task<JsonDocument> CallJsonAsync(string systemInstruction, string userText, object responseSchema, int numPredict, CancellationToken ct)
+    private async Task<JsonDocument> CallJsonAsync(
+        string systemInstruction,
+        string userText,
+        object responseSchema,
+        int numPredict,
+        CancellationToken ct)
     {
         var raw = await CallAsync(systemInstruction, userText, responseSchema, numPredict, ct);
         return JsonDocument.Parse(raw);
     }
 
-    private Task<string> CallTextAsync(string systemInstruction, string userText, int numPredict, CancellationToken ct) =>
+    private Task<string> CallTextAsync(
+        string systemInstruction,
+        string userText,
+        int numPredict,
+        CancellationToken ct) =>
         CallAsync(systemInstruction, userText, responseSchema: null, numPredict, ct);
 
     private async Task<string> CallAsync(

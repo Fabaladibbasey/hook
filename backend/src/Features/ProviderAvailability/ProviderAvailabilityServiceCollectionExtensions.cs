@@ -7,7 +7,9 @@ namespace Hook.Features.ProviderAvailability;
 
 public static class ProviderAvailabilityServiceCollectionExtensions
 {
-    public static IServiceCollection AddProviderAvailability(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddProviderAvailability(
+        this IServiceCollection services,
+        IConfiguration configuration)
     {
         services.AddValidatedOptions<ProviderAvailabilityOptions>(configuration);
         services.AddValidatedOptions<DevProviderSeedOptions>(configuration);

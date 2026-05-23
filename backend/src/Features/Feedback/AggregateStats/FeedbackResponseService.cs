@@ -138,8 +138,9 @@ public sealed class FeedbackResponseService(
                     "Thanks — recorded that. No more questions on this one."));
                 return;
             }
-            await SendRetryHintIfFreshAsync(msg, pending, now, opts,
-                $"Reply with the number of the provider that worked out — {PickedMatchListFormatter.Format(picked)}.", ct);
+            var hint = "Reply with the number of the provider that worked out — "
+                + $"{PickedMatchListFormatter.Format(picked)}.";
+            await SendRetryHintIfFreshAsync(msg, pending, now, opts, hint, ct);
             return;
         }
 
@@ -167,8 +168,9 @@ public sealed class FeedbackResponseService(
 
         if (parsed is null)
         {
-            await SendRetryHintIfFreshAsync(msg, pending, now, opts,
-                "Reply YES if the job is done, NO if it didn't happen, or IN PROGRESS if you're still working on it.", ct);
+            var hint = "Reply YES if the job is done, NO if it didn't happen, "
+                + "or IN PROGRESS if you're still working on it.";
+            await SendRetryHintIfFreshAsync(msg, pending, now, opts, hint, ct);
             return;
         }
 
@@ -209,8 +211,9 @@ public sealed class FeedbackResponseService(
         {
             if (now - pending.PromptedAt <= opts.ParseRetryWindow)
             {
-                await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
-                    "Sorry, didn't catch that. When do you think the job will be done? e.g. 'in 3 hours' or 'tomorrow at 5pm'."));
+                var retry = "Sorry, didn't catch that. When do you think the job will be done? "
+                    + "e.g. 'in 3 hours' or 'tomorrow at 5pm'.";
+                await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From, retry));
                 return;
             }
             await ClaimSkippedAndFallbackAsync(pending, opts, now, msg.From, ct);
@@ -223,7 +226,11 @@ public sealed class FeedbackResponseService(
     }
 
     internal async Task ClaimSkippedAndFallbackAsync(
-        MatchFeedback pending, FeedbackOptions opts, DateTimeOffset now, PhoneNumber from, CancellationToken ct)
+        MatchFeedback pending,
+        FeedbackOptions opts,
+        DateTimeOffset now,
+        PhoneNumber from,
+        CancellationToken ct)
     {
         if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct)) return;
         await events.ScheduleAsync(new Step2FeedbackCheck(pending.MatchId), opts.Step2InProgressRecheckDelay, ct);
@@ -251,7 +258,9 @@ public sealed class FeedbackResponseService(
         return EtaKeywordRegex.IsMatch(text);
     }
 
-    private async Task<IReadOnlyList<Matching.MatchAggregate.Match>> GetPickedMatchesAsync(Guid anchorMatchId, CancellationToken ct)
+    private async Task<IReadOnlyList<Matching.MatchAggregate.Match>> GetPickedMatchesAsync(
+        Guid anchorMatchId,
+        CancellationToken ct)
     {
         var anchor = await matches.GetAsync(anchorMatchId, ct);
         if (anchor is null) return [];
@@ -263,7 +272,12 @@ public sealed class FeedbackResponseService(
     }
 
     private async Task SendRetryHintIfFreshAsync(
-        InboundMessage msg, MatchFeedback pending, DateTimeOffset now, FeedbackOptions opts, string hint, CancellationToken ct)
+        InboundMessage msg,
+        MatchFeedback pending,
+        DateTimeOffset now,
+        FeedbackOptions opts,
+        string hint,
+        CancellationToken ct)
     {
         // Bound the spammy retry prompt to ParseRetryWindow so a forgotten Pending row
         // can't re-arm "didn't catch that" replies indefinitely on every inbound.

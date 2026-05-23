@@ -19,7 +19,12 @@ public sealed class ChatHubEndChatBroadcastTests : PipelineTestBase
     public ChatHubEndChatBroadcastTests(DevPipelineFixture fx) : base(fx) { }
 
     private sealed record OpenResponse(Guid ChatId, Guid ParticipantId, string Role, Guid SessionId, string Status);
-    private sealed record ChatHandle(Guid ChatId, OpenResponse Client, OpenResponse Provider, string ClientToken, string ProviderToken);
+    private sealed record ChatHandle(
+        Guid ChatId,
+        OpenResponse Client,
+        OpenResponse Provider,
+        string ClientToken,
+        string ProviderToken);
     private sealed record ChatEndedDto(string Reason, string EndedBy);
 
     [Fact]
@@ -146,8 +151,11 @@ public sealed class ChatHubEndChatBroadcastTests : PipelineTestBase
 
     private HubConnection BuildHub(string token, Guid sessionId)
     {
+        var hubUri = new Uri(
+            _fx.Factory.Server.BaseAddress,
+            $"hubs/chat?token={Uri.EscapeDataString(token)}&sessionId={sessionId}");
         return new HubConnectionBuilder()
-            .WithUrl(new Uri(_fx.Factory.Server.BaseAddress, $"hubs/chat?token={Uri.EscapeDataString(token)}&sessionId={sessionId}"), opts =>
+            .WithUrl(hubUri, opts =>
             {
                 opts.HttpMessageHandlerFactory = _ => _fx.Factory.Server.CreateHandler();
                 opts.Transports = HttpTransportType.LongPolling;

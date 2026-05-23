@@ -45,7 +45,10 @@ public sealed class ClientRequestOrchestrator(
         {
             await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
                 "Looking up the service you mentioned…"));
-            await bus.PublishAsync(new ExtractServicesRequested(phone.Value, message.Text ?? string.Empty, IsSwitch: true));
+            await bus.PublishAsync(new ExtractServicesRequested(
+                phone.Value,
+                message.Text ?? string.Empty,
+                IsSwitch: true));
             return;
         }
 
@@ -78,9 +81,14 @@ public sealed class ClientRequestOrchestrator(
         }
     }
 
-    private async Task StartAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
+    private async Task StartAsync(
+        ClientRequestDraft draft,
+        InboundMessage message,
+        PhoneNumber phone,
+        DateTimeOffset now,
+        CancellationToken ct)
     {
-        var text = message.Text ?? string.Empty;
+        var input = message.Text ?? string.Empty;
         // Park the draft in ResolvingService and defer ExtractServices to the outbox so
         // the 60-150s Ollama window doesn't block the user. AdvanceClientRequestDraftHandler
         // advances the draft to ConfirmService (or back to AwaitingService on no-slug).
@@ -88,10 +96,15 @@ public sealed class ClientRequestOrchestrator(
         await drafts.UpsertAsync(draft, ct);
         await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
             "Looking up the service you mentioned…"));
-        await bus.PublishAsync(new ExtractServicesRequested(phone.Value, text, IsSwitch: false));
+        await bus.PublishAsync(new ExtractServicesRequested(phone.Value, input, IsSwitch: false));
     }
 
-    private async Task HandleResolvingAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
+    private async Task HandleResolvingAsync(
+        ClientRequestDraft draft,
+        InboundMessage message,
+        PhoneNumber phone,
+        DateTimeOffset now,
+        CancellationToken ct)
     {
         // ResolveStartedAt anchors the TTL window: Touch() bumps UpdatedAt on every
         // inbound during Resolving, so gating on UpdatedAt would never elapse.
@@ -102,7 +115,10 @@ public sealed class ClientRequestOrchestrator(
             // The previous resolve dead-lettered or the host crashed before AdvanceClientRequestDraft
             // ran. Force-revert to AwaitingService and treat the current message as a fresh start so
             // the user is not trapped.
-            logger.LogWarning("Resolve stuck > {Ttl}s for {Phone}; reverting to AwaitingService", ttl.TotalSeconds, phone.Mask());
+            logger.LogWarning(
+                "Resolve stuck > {Ttl}s for {Phone}; reverting to AwaitingService",
+                ttl.TotalSeconds,
+                phone.Mask());
             draft.StepTo(ClientRequestStep.AwaitingService, now);
             await StartAsync(draft, message, phone, now, ct);
             return;
@@ -121,7 +137,12 @@ public sealed class ClientRequestOrchestrator(
         @"^\s*(no|nope|nah)\b[\s,.:;!?-]*(?<rest>.+)$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    private async Task ConfirmServiceAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
+    private async Task ConfirmServiceAsync(
+        ClientRequestDraft draft,
+        InboundMessage message,
+        PhoneNumber phone,
+        DateTimeOffset now,
+        CancellationToken ct)
     {
         var leadingNo = LeadingNoRx.Match(message.Text ?? string.Empty);
         if (leadingNo.Success)
@@ -148,14 +169,18 @@ public sealed class ClientRequestOrchestrator(
             {
                 draft.StepTo(ClientRequestStep.AwaitingDescription, now);
                 await drafts.UpsertAsync(draft, ct);
-                await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                    $"Got it. Using your saved location: {draft.DraftFormattedAddress}. Want to add a description? Send it now or reply SKIP."));
+                var text =
+                    $"Got it. Using your saved location: {draft.DraftFormattedAddress}. " +
+                    "Want to add a description? Send it now or reply SKIP.";
+                await bus.PublishAsync(new SendWhatsAppTextRequested(phone, text));
                 return;
             }
 
             draft.StepTo(ClientRequestStep.AwaitingLocation, now);
             await drafts.UpsertAsync(draft, ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Send your location pin (or type your address)."));
+            await bus.PublishAsync(new SendWhatsAppTextRequested(
+                phone,
+                "Send your location pin (or type your address)."));
             return;
         }
         if (intentKind == IntentKind.Rejection)
@@ -167,17 +192,29 @@ public sealed class ClientRequestOrchestrator(
                 "What service do you need? Or reply REGISTER if you're offering services instead."));
             return;
         }
-        await bus.PublishAsync(new SendWhatsAppTextRequested(phone, $"Please reply YES or NO — YES to confirm {draft.DraftServiceSlug.Replace('-', ' ')}, NO to choose another service."));
+        var slug = draft.DraftServiceSlug.Replace('-', ' ');
+        var prompt =
+            $"Please reply YES or NO — YES to confirm {slug}, " +
+            "NO to choose another service.";
+        await bus.PublishAsync(new SendWhatsAppTextRequested(phone, prompt));
     }
 
-    private async Task CollectLocationAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
+    private async Task CollectLocationAsync(
+        ClientRequestDraft draft,
+        InboundMessage message,
+        PhoneNumber phone,
+        DateTimeOffset now,
+        CancellationToken ct)
     {
         if (message.Kind == InboundMessageKind.Location && message.Location is { } loc)
         {
             draft.CaptureLocation(loc.Latitude, loc.Longitude, loc.Address ?? loc.Name ?? "(GPS pin)", now);
             draft.StepTo(ClientRequestStep.AwaitingDescription, now);
             await drafts.UpsertAsync(draft, ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Got your location. Want to add a short description? Send it now or reply SKIP."));
+            await bus.PublishAsync(new SendWhatsAppTextRequested(
+                phone,
+                "Got your location. Want to add a short description? " +
+                "Send it now or reply SKIP."));
             return;
         }
 
@@ -195,40 +232,57 @@ public sealed class ClientRequestOrchestrator(
         await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Send your location pin or type your address."));
     }
 
-    private async Task ConfirmLocationAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
+    private async Task ConfirmLocationAsync(
+        ClientRequestDraft draft,
+        InboundMessage message,
+        PhoneNumber phone,
+        DateTimeOffset now,
+        CancellationToken ct)
     {
         if (message.Kind == InboundMessageKind.Location && message.Location is { } loc)
         {
             draft.CaptureLocation(loc.Latitude, loc.Longitude, loc.Address ?? loc.Name ?? "(GPS pin)", now);
             draft.StepTo(ClientRequestStep.AwaitingDescription, now);
             await drafts.UpsertAsync(draft, ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Got your location. Want to add a description? Send it now or reply SKIP."));
+            await bus.PublishAsync(new SendWhatsAppTextRequested(
+                phone,
+                "Got your location. Want to add a description? " +
+                "Send it now or reply SKIP."));
             return;
         }
         if (QuickIntent.Detect(message.Text) == IntentKind.Confirmation)
         {
             draft.StepTo(ClientRequestStep.AwaitingDescription, now);
             await drafts.UpsertAsync(draft, ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Want to add a description? Send it now or reply SKIP."));
+            await bus.PublishAsync(new SendWhatsAppTextRequested(
+                phone,
+                "Want to add a description? Send it now or reply SKIP."));
             return;
         }
         await bus.PublishAsync(new SendWhatsAppTextRequested(phone, "Reply YES to confirm or send your GPS pin."));
     }
 
-    private async Task CollectDescriptionAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
+    private async Task CollectDescriptionAsync(
+        ClientRequestDraft draft,
+        InboundMessage message,
+        PhoneNumber phone,
+        DateTimeOffset now,
+        CancellationToken ct)
     {
-        var text = message.Text?.Trim();
-        if (!IsSkipDescription(text))
+        var input = message.Text?.Trim();
+        if (!IsSkipDescription(input))
         {
-            draft.CaptureDescription(text, now);
+            draft.CaptureDescription(input, now);
         }
 
         if (string.IsNullOrEmpty(draft.DraftServiceSlug) || draft.DraftLatitude is null || draft.DraftLongitude is null)
         {
             logger.LogWarning("Incomplete client draft for {Phone}", phone.Mask());
             await drafts.DeleteAsync(phone.Value, ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                "Couldn't save your request — I'm missing the service or your location. Reply with what you need (e.g. \"I need a plumber\") and send a location pin."));
+            await bus.PublishAsync(new SendWhatsAppTextRequested(
+                phone,
+                "Couldn't save your request — I'm missing the service or your location. " +
+                "Reply with what you need (e.g. \"I need a plumber\") and send a location pin."));
             return;
         }
 
@@ -243,8 +297,11 @@ public sealed class ClientRequestOrchestrator(
             logger.LogDebug("Rejecting same-service dual-role request for {Phone} slug={Slug}",
                 phone.Mask(), draft.DraftServiceSlug);
             await drafts.DeleteAsync(phone.Value, ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                $"You can't request a service you're already listed to provide. To request {human}, first reply LEAVE to unlist from {human} (your other services stay active), then send your request again."));
+            var text =
+                "You can't request a service you're already listed to provide. " +
+                $"To request {human}, first reply LEAVE to unlist from {human} " +
+                "(your other services stay active), then send your request again.";
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, text));
             return;
         }
 
@@ -257,7 +314,12 @@ public sealed class ClientRequestOrchestrator(
             "One more thing — should we share your phone number with selected providers? Reply YES or NO."));
     }
 
-    private async Task CollectPhoneShareConsentAsync(ClientRequestDraft draft, InboundMessage message, PhoneNumber phone, DateTimeOffset now, CancellationToken ct)
+    private async Task CollectPhoneShareConsentAsync(
+        ClientRequestDraft draft,
+        InboundMessage message,
+        PhoneNumber phone,
+        DateTimeOffset now,
+        CancellationToken ct)
     {
         var quick = QuickIntent.Detect(message.Text);
         if (quick != IntentKind.Confirmation && quick != IntentKind.Rejection)
@@ -274,8 +336,10 @@ public sealed class ClientRequestOrchestrator(
         {
             logger.LogWarning("Consent received with incomplete draft for {Phone}", phone.Mask());
             await drafts.DeleteAsync(phone.Value, ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                "Couldn't save your request — I'm missing the service or your location. Reply with what you need (e.g. \"I need a plumber\") and send a location pin."));
+            await bus.PublishAsync(new SendWhatsAppTextRequested(
+                phone,
+                "Couldn't save your request — I'm missing the service or your location. " +
+                "Reply with what you need (e.g. \"I need a plumber\") and send a location pin."));
             return;
         }
 
@@ -304,8 +368,10 @@ public sealed class ClientRequestOrchestrator(
         {
             logger.LogError(ex, "Failed to finalize client request for {Phone}", phone.Mask());
             await drafts.DeleteAsync(phone.Value, ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
-                "Something went wrong saving your request. Try again in a moment — reply with what you need (e.g. \"I need a plumber\")."));
+            await bus.PublishAsync(new SendWhatsAppTextRequested(
+                phone,
+                "Something went wrong saving your request. " +
+                "Try again in a moment — reply with what you need (e.g. \"I need a plumber\")."));
         }
     }
 

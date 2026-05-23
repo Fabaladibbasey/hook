@@ -373,7 +373,8 @@ namespace Hook
 
     internal static class RequestLogScrub
     {
-        private static readonly HashSet<string> SensitiveKeys = new(StringComparer.OrdinalIgnoreCase) { "token", "sessionId" };
+        private static readonly HashSet<string> SensitiveKeys =
+            new(StringComparer.OrdinalIgnoreCase) { "token", "sessionId" };
 
         public static string Scrub(string queryString)
         {
