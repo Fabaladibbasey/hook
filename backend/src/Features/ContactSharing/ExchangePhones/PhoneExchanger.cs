@@ -61,11 +61,11 @@ public sealed class PhoneExchanger(
             // Re-pick of a chat-routed match: ChatRoutingRequestedHandler is idempotent
             // on ChatId, so re-publishing wouldn't re-deliver the link. Send a brief
             // notice pointing the client at the existing chat thread instead.
-            var msg =
+            var text =
                 $"Match #{matchPosition} ({providerPhone.Mask()}): " +
                 $"already connected to chat with the provider for {match.ServiceSlug}. " +
                 "Check your earlier messages for the chat link.";
-            await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone, msg));
+            await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone, text));
             return ExchangeOutcome.AlreadyRouted;
         }
 
@@ -98,10 +98,10 @@ public sealed class PhoneExchanger(
 
         await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone,
             FormatProviderResend(matchPosition, match.ServiceSlug, providerPhone)));
-        var providerMsg = RequestDetailsFormatter.AppendIfPresent(
+        var providerText = RequestDetailsFormatter.AppendIfPresent(
             $"Client wants {match.ServiceSlug} ({clientPhone.Value}). Expect a message.",
             request.Description);
-        await bus.PublishAsync(new SendWhatsAppTextRequested(providerPhone, providerMsg));
+        await bus.PublishAsync(new SendWhatsAppTextRequested(providerPhone, providerText));
         await events.PublishAsync(new ContactExchanged(match.Id, request.Id, request.ClientPhone, provider.Phone), ct);
         return ExchangeOutcome.Exchanged;
     }

@@ -88,7 +88,7 @@ public sealed class ClientRequestOrchestrator(
         DateTimeOffset now,
         CancellationToken ct)
     {
-        var text = message.Text ?? string.Empty;
+        var input = message.Text ?? string.Empty;
         // Park the draft in ResolvingService and defer ExtractServices to the outbox so
         // the 60-150s Ollama window doesn't block the user. AdvanceClientRequestDraftHandler
         // advances the draft to ConfirmService (or back to AwaitingService on no-slug).
@@ -96,7 +96,7 @@ public sealed class ClientRequestOrchestrator(
         await drafts.UpsertAsync(draft, ct);
         await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
             "Looking up the service you mentioned…"));
-        await bus.PublishAsync(new ExtractServicesRequested(phone.Value, text, IsSwitch: false));
+        await bus.PublishAsync(new ExtractServicesRequested(phone.Value, input, IsSwitch: false));
     }
 
     private async Task HandleResolvingAsync(
@@ -169,10 +169,10 @@ public sealed class ClientRequestOrchestrator(
             {
                 draft.StepTo(ClientRequestStep.AwaitingDescription, now);
                 await drafts.UpsertAsync(draft, ct);
-                var msg =
+                var text =
                     $"Got it. Using your saved location: {draft.DraftFormattedAddress}. " +
                     "Want to add a description? Send it now or reply SKIP.";
-                await bus.PublishAsync(new SendWhatsAppTextRequested(phone, msg));
+                await bus.PublishAsync(new SendWhatsAppTextRequested(phone, text));
                 return;
             }
 
@@ -269,10 +269,10 @@ public sealed class ClientRequestOrchestrator(
         DateTimeOffset now,
         CancellationToken ct)
     {
-        var text = message.Text?.Trim();
-        if (!IsSkipDescription(text))
+        var input = message.Text?.Trim();
+        if (!IsSkipDescription(input))
         {
-            draft.CaptureDescription(text, now);
+            draft.CaptureDescription(input, now);
         }
 
         if (string.IsNullOrEmpty(draft.DraftServiceSlug) || draft.DraftLatitude is null || draft.DraftLongitude is null)
@@ -297,11 +297,11 @@ public sealed class ClientRequestOrchestrator(
             logger.LogDebug("Rejecting same-service dual-role request for {Phone} slug={Slug}",
                 phone.Mask(), draft.DraftServiceSlug);
             await drafts.DeleteAsync(phone.Value, ct);
-            var msg =
+            var text =
                 "You can't request a service you're already listed to provide. " +
                 $"To request {human}, first reply LEAVE to unlist from {human} " +
                 "(your other services stay active), then send your request again.";
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, msg));
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, text));
             return;
         }
 

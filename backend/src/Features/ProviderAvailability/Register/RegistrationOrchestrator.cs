@@ -76,12 +76,11 @@ public sealed class RegistrationOrchestrator(
             await refreshScheduler.ScheduleAsync(phone.Value, now, ct);
             logger.LogDebug("Heartbeat for active provider {Phone}", phone.Mask());
             var listed = string.Join(", ", existing.Services);
-            var hours = options.Value.ExpiryHours;
-            var msg =
-                $"You're listed as a provider for {listed} (extended for {hours}h). " +
+            var text =
+                $"You're listed as a provider for {listed} (extended for {options.Value.ExpiryHours}h). " +
                 "To request a different service yourself, send 'I need …'. " +
                 "Reply LEAVE to unlist.";
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, msg));
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, text));
             return;
         }
 
@@ -144,7 +143,7 @@ public sealed class RegistrationOrchestrator(
         DateTimeOffset now,
         CancellationToken ct)
     {
-        var text = message.Text ?? string.Empty;
+        var input = message.Text ?? string.Empty;
         // Park the draft in ResolvingServices and defer ExtractServices to the outbox so
         // the 60-150s Ollama window doesn't block the user. AdvanceRegistrationDraftHandler
         // advances the draft to ConfirmServices (or back to AwaitingServices on no-slug).
@@ -153,7 +152,7 @@ public sealed class RegistrationOrchestrator(
         await bus.PublishAsync(new SendWhatsAppTextRequested(phone,
             "Looking up the service you mentioned…"));
         await bus.PublishAsync(new RegistrationExtractServicesRequested(
-            phone.Value, text, RegistrationExtractMode.NewRegistration));
+            phone.Value, input, RegistrationExtractMode.NewRegistration));
     }
 
     private async Task HandleResolvingAsync(
@@ -257,11 +256,10 @@ public sealed class RegistrationOrchestrator(
             logger.LogDebug("Added {Count} services for provider {Phone}", added.Count, phone.Mask());
             var addedList = string.Join(", ", added);
             var allServices = string.Join(", ", existing.Services);
-            var hours = options.Value.ExpiryHours;
-            var msg =
+            var text =
                 $"Added {addedList}. You're now listed for {allServices} " +
-                $"(extended for {hours}h). Reply LEAVE to unlist.";
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, msg));
+                $"(extended for {options.Value.ExpiryHours}h). Reply LEAVE to unlist.";
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, text));
             return;
         }
 
@@ -279,11 +277,10 @@ public sealed class RegistrationOrchestrator(
             existing.Heartbeat(TimeSpan.FromHours(options.Value.ExpiryHours), now);
             await refreshScheduler.ScheduleAsync(phone.Value, now, ct);
             var listed = string.Join(", ", existing.Services);
-            var hours = options.Value.ExpiryHours;
-            var msg =
-                $"Keeping your listing as is for {listed} (extended for {hours}h). " +
+            var text =
+                $"Keeping your listing as is for {listed} (extended for {options.Value.ExpiryHours}h). " +
                 "Reply LEAVE to unlist.";
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, msg));
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, text));
             return;
         }
 
@@ -389,10 +386,10 @@ public sealed class RegistrationOrchestrator(
         {
             logger.LogWarning("Incomplete draft for {Phone} cannot finalize", phone.Mask());
             await drafts.DeleteAsync(phone.Value, ct);
-            var msg =
+            var text =
                 "Couldn't list you — I'm missing your service or location. " +
                 "Reply \"I offer …\" and send a location pin to try again.";
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, msg));
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, text));
             return;
         }
 
@@ -412,11 +409,11 @@ public sealed class RegistrationOrchestrator(
             logger.LogDebug("Rejecting same-service registration for {Phone} slug={Slug}",
                 phone.Mask(), openRequest.ServiceSlug);
             await drafts.DeleteAsync(phone.Value, ct);
-            var msg =
+            var text =
                 "You can't be both client and provider for the same service. " +
                 $"You have an open request for {human} — reply CANCEL to close it, " +
                 "then register again.";
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, msg));
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, text));
             return;
         }
 
@@ -435,12 +432,11 @@ public sealed class RegistrationOrchestrator(
             await drafts.DeleteAsync(phone.Value, ct);
             await refreshScheduler.ScheduleAsync(phone.Value, now, ct);
 
-            var hours = options.Value.ExpiryHours;
-            var msg =
-                $"You are listed for {hours}h. " +
+            var text =
+                $"You are listed for {options.Value.ExpiryHours}h. " +
                 "Reply 'I offer …' anytime to update your services, " +
                 "or LEAVE to unlist.";
-            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, msg));
+            await bus.PublishAsync(new SendWhatsAppTextRequested(phone, text));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

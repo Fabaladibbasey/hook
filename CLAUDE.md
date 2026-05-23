@@ -127,6 +127,13 @@ Wolverine messaging runs in-process. `Wolverine.DefaultExecutionTimeout` (defaul
 - **Gambianize fixtures**: The Gambia is the default seed market — tests, fixtures, dev-console scenarios, and internal docs MUST use Gambian phones (`+220…`) and Banjul coordinates (~`13.45, -16.6`). Never `+1…` US numbers or other locales in fixtures. Pre-existing `+1…` numbers in integration tests are legacy; do not add new ones. **Product is global** — user-facing copy (landing page, marketing surfaces) must stay locale-neutral; do not bake Gambia into UI strings.
 - **Keep things simple**: less code, less to maintain. Self-explanatory names beat comments. Three similar lines beat a premature abstraction. No half-finished implementations, no error handling for cases that can't happen, no feature flags / backwards-compat shims when you can just change the code.
 
+## Change Discipline
+- **Do not change anything without a defensible reason.** Before every edit, ask: is the change *necessary*? Does it add *business value*, *clarity*, *consistency*, or *simplification*? If none apply, do not make the change.
+- **Validate the reason for each change before applying it** — not in bulk, but per edit. A plan that justifies one change does not justify the next.
+- **Do not change for the sake of changing.** No drive-by refactors, no renames-by-fashion, no "while I'm here" edits.
+- **Do not touch unrelated elements.** If it's outside the stated scope of the task, leave it alone.
+- When you do change something, be prepared to defend the reason in plain terms when asked.
+
 ## Naming Conventions
 
 - C#: PascalCase types, `_camelCase` private fields, async methods end in `Async`.
