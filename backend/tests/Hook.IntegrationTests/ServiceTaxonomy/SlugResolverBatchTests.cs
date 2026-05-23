@@ -44,7 +44,7 @@ public sealed class SlugResolverBatchTests : PipelineTestBase
 
         resolved.Select(r => r.Resolution).ShouldAllBe(r => r == SlugResolution.Created);
 
-        var publishedSlugs = tracked.Sent.MessagesOf<JudgeParentSlugRequested>()
+        var publishedSlugs = tracked.Sent.MessagesOf<JudgeParentSlugCommand>()
             .Select(e => e.Slug)
             .Where(s => slugs.Contains(s))
             .OrderBy(s => s, StringComparer.Ordinal)
@@ -94,7 +94,7 @@ public sealed class SlugResolverBatchTests : PipelineTestBase
         resolvedBySlug[brand1].Resolution.ShouldBe(SlugResolution.Created);
         resolvedBySlug[brand2].Resolution.ShouldBe(SlugResolution.Created);
 
-        var publishedSlugs = tracked.Sent.MessagesOf<JudgeParentSlugRequested>()
+        var publishedSlugs = tracked.Sent.MessagesOf<JudgeParentSlugCommand>()
             .Select(e => e.Slug)
             .Where(s => slugs.Contains(s))
             .OrderBy(s => s, StringComparer.Ordinal)
@@ -146,7 +146,7 @@ public sealed class SlugResolverBatchTests : PipelineTestBase
 
         resolved.Select(r => r.Resolution).ShouldAllBe(r => r == SlugResolution.Created);
 
-        var publishedSlugs = tracked.Sent.MessagesOf<JudgeParentSlugRequested>()
+        var publishedSlugs = tracked.Sent.MessagesOf<JudgeParentSlugCommand>()
             .Select(e => e.Slug)
             .Where(s => slugs.Contains(s))
             .OrderBy(s => s, StringComparer.Ordinal)
@@ -189,7 +189,7 @@ public sealed class SlugResolverBatchTests : PipelineTestBase
         resolved[0].CanonicalSlug.ShouldBe(normalized);
         resolved[0].Resolution.ShouldBe(SlugResolution.Created);
 
-        tracked.Sent.MessagesOf<JudgeParentSlugRequested>()
+        tracked.Sent.MessagesOf<JudgeParentSlugCommand>()
             .Count(e => e.Slug == normalized)
             .ShouldBe(1);
     }

@@ -13,13 +13,13 @@ public class ClassifyInboundIntentHandlerTests
 {
     private readonly Mock<IConversationAi> _aiMock = new();
     private readonly Mock<IMessageBus> _busMock = new();
-    private readonly List<RouteClassifiedIntent> _routed = [];
+    private readonly List<RouteClassifiedIntentCommand> _routed = [];
 
     public ClassifyInboundIntentHandlerTests()
     {
-        _busMock.Setup(x => x.InvokeAsync(It.IsAny<RouteClassifiedIntent>(), It.IsAny<CancellationToken>(), It.IsAny<TimeSpan?>()))
-            .Callback<object, CancellationToken, TimeSpan?>((m, _, _) => _routed.Add((RouteClassifiedIntent)m))
-            .Returns(Task.CompletedTask);
+        _busMock.Setup(x => x.PublishAsync(It.IsAny<RouteClassifiedIntentCommand>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions?>((m, _) => _routed.Add((RouteClassifiedIntentCommand)m))
+            .Returns(ValueTask.CompletedTask);
     }
 
     private ClassifyInboundIntentHandler Build() => new(_aiMock.Object);
@@ -29,14 +29,14 @@ public class ClassifyInboundIntentHandlerTests
             DateTimeOffset.UtcNow, InboundMessageKind.Text, text, Location: null, RawJson: null);
 
     [Fact]
-    public async Task Handle_AiReturnsIntent_InvokesRouteClassifiedIntent()
+    public async Task Handle_AiReturnsIntent_InvokesRouteClassifiedIntentCommand()
     {
         var msg = Inbound("I need a plumber");
         var detected = new IntentDetectionResult(IntentKind.ServiceRequest, 0.92, "en", "ai");
         _aiMock.Setup(x => x.DetectIntentAsync("I need a plumber", It.IsAny<CancellationToken>()))
             .ReturnsAsync(detected);
 
-        await Build().Handle(new ClassifyInboundIntentRequested(msg), _busMock.Object, CancellationToken.None);
+        await Build().Handle(new ClassifyInboundIntentCommand(msg), _busMock.Object, CancellationToken.None);
 
         _routed.ShouldHaveSingleItem();
         _routed[0].Message.MessageId.ShouldBe(msg.MessageId);
@@ -53,7 +53,7 @@ public class ClassifyInboundIntentHandlerTests
         _aiMock.Setup(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(fallback);
 
-        await Build().Handle(new ClassifyInboundIntentRequested(Inbound("hi")), _busMock.Object, CancellationToken.None);
+        await Build().Handle(new ClassifyInboundIntentCommand(Inbound("hi")), _busMock.Object, CancellationToken.None);
 
         _routed.ShouldHaveSingleItem();
         _routed[0].Detected.Intent.ShouldBe(IntentKind.Unknown);
@@ -71,7 +71,7 @@ public class ClassifyInboundIntentHandlerTests
             .ThrowsAsync(new OperationCanceledException(cts.Token));
 
         await Should.ThrowAsync<OperationCanceledException>(() => Build().Handle(
-            new ClassifyInboundIntentRequested(Inbound("hi")), _busMock.Object, cts.Token));
+            new ClassifyInboundIntentCommand(Inbound("hi")), _busMock.Object, cts.Token));
 
         _routed.ShouldBeEmpty();
     }

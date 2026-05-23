@@ -13,13 +13,13 @@ public class ExtractEtaHandlerTests
     private readonly Mock<IConversationAi> _aiMock = new();
     private readonly Mock<IMessageBus> _busMock = new();
     private readonly FakeTimeProvider _clock = new(DateTimeOffset.UtcNow);
-    private readonly List<ApplyEtaOutcome> _invoked = [];
+    private readonly List<ApplyEtaCommand> _invoked = [];
 
     public ExtractEtaHandlerTests()
     {
-        _busMock.Setup(x => x.InvokeAsync(It.IsAny<ApplyEtaOutcome>(), It.IsAny<CancellationToken>(), It.IsAny<TimeSpan?>()))
-            .Callback<object, CancellationToken, TimeSpan?>((m, _, _) => _invoked.Add((ApplyEtaOutcome)m))
-            .Returns(Task.CompletedTask);
+        _busMock.Setup(x => x.PublishAsync(It.IsAny<ApplyEtaCommand>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions?>((m, _) => _invoked.Add((ApplyEtaCommand)m))
+            .Returns(ValueTask.CompletedTask);
     }
 
     private ExtractEtaHandler Build() => new(_aiMock.Object, _clock);
@@ -36,7 +36,7 @@ public class ExtractEtaHandlerTests
         var pendingId = Guid.NewGuid();
         var matchId = Guid.NewGuid();
         await Build().Handle(
-            new ExtractEtaRequested(pendingId, matchId, From(), "in 3 hours"),
+            new ExtractEtaCommand(pendingId, matchId, From(), "in 3 hours"),
             _busMock.Object, CancellationToken.None);
 
         _invoked.ShouldHaveSingleItem();
@@ -49,13 +49,13 @@ public class ExtractEtaHandlerTests
     public async Task Handle_AdapterReturnsNull_InvokesApplyOutcomeWithNullEta()
     {
         // OllamaConversationAi.TryCallAsync absorbs transport failures and returns
-        // null; the handler passes it through so ApplyEtaOutcomeHandler can fall
+        // null; the handler passes it through so ApplyEtaHandler can fall
         // back to the fixed Step2InProgressRecheckDelay.
         _aiMock.Setup(x => x.ExtractEtaAsync(It.IsAny<string>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((DateTimeOffset?)null);
 
         await Build().Handle(
-            new ExtractEtaRequested(Guid.NewGuid(), Guid.NewGuid(), From(), "in 3 hours"),
+            new ExtractEtaCommand(Guid.NewGuid(), Guid.NewGuid(), From(), "in 3 hours"),
             _busMock.Object, CancellationToken.None);
 
         _invoked.ShouldHaveSingleItem();
@@ -71,7 +71,7 @@ public class ExtractEtaHandlerTests
             .ThrowsAsync(new OperationCanceledException(cts.Token));
 
         await Should.ThrowAsync<OperationCanceledException>(() => Build().Handle(
-            new ExtractEtaRequested(Guid.NewGuid(), Guid.NewGuid(), From(), "in 3 hours"),
+            new ExtractEtaCommand(Guid.NewGuid(), Guid.NewGuid(), From(), "in 3 hours"),
             _busMock.Object, cts.Token));
 
         _invoked.ShouldBeEmpty();

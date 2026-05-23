@@ -5,6 +5,7 @@ using Hook.Features.ProviderAvailability.Register.ExtractServices;
 using Hook.Features.ServiceTaxonomy;
 using Hook.Features.ServiceTaxonomy.ResolveSlug;
 using Hook.Features.ServiceTaxonomy.ServiceAggregate;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -18,7 +19,11 @@ public class RegistrationExtractServicesHandlerTests
     private readonly Mock<IConversationAi> _aiMock = new();
     private readonly Mock<IMessageBus> _busMock = new();
     private readonly Mock<SlugResolver> _slugResolverMock;
-    private readonly List<AdvanceRegistrationDraft> _invoked = [];
+    private readonly Mock<ILogger<RegistrationExtractServicesHandler>> _loggerMock = new();
+    private readonly List<BeginProviderRegistrationCommand> _begin = [];
+    private readonly List<ExtendProviderListingCommand> _extend = [];
+    private readonly List<AmendRegistrationDraftCommand> _amend = [];
+    private readonly List<AmendAddServicesDraftCommand> _amendAdd = [];
 
     public RegistrationExtractServicesHandlerTests()
     {
@@ -43,27 +48,38 @@ public class RegistrationExtractServicesHandlerTests
                     results.Add(await _slugResolverMock.Object.ResolveAsync(slug, raw, ct));
                 return (IReadOnlyList<ResolveSlugResult>)results;
             });
-        _busMock.Setup(x => x.InvokeAsync(It.IsAny<AdvanceRegistrationDraft>(), It.IsAny<CancellationToken>(), It.IsAny<TimeSpan?>()))
-            .Callback<object, CancellationToken, TimeSpan?>((m, _, _) => _invoked.Add((AdvanceRegistrationDraft)m))
-            .Returns(Task.CompletedTask);
+        _busMock.Setup(x => x.PublishAsync(It.IsAny<BeginProviderRegistrationCommand>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions?>((m, _) => _begin.Add((BeginProviderRegistrationCommand)m))
+            .Returns(ValueTask.CompletedTask);
+        _busMock.Setup(x => x.PublishAsync(It.IsAny<ExtendProviderListingCommand>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions?>((m, _) => _extend.Add((ExtendProviderListingCommand)m))
+            .Returns(ValueTask.CompletedTask);
+        _busMock.Setup(x => x.PublishAsync(It.IsAny<AmendRegistrationDraftCommand>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions?>((m, _) => _amend.Add((AmendRegistrationDraftCommand)m))
+            .Returns(ValueTask.CompletedTask);
+        _busMock.Setup(x => x.PublishAsync(It.IsAny<AmendAddServicesDraftCommand>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions?>((m, _) => _amendAdd.Add((AmendAddServicesDraftCommand)m))
+            .Returns(ValueTask.CompletedTask);
     }
 
     private RegistrationExtractServicesHandler Build() =>
-        new(_aiMock.Object, _slugResolverMock.Object);
+        new(_aiMock.Object, _slugResolverMock.Object, _loggerMock.Object);
 
     [Fact]
-    public async Task Handle_NoSlugs_InvokesAdvanceWithEmptyList()
+    public async Task Handle_NoSlugs_InvokesBeginWithEmptyList()
     {
         _aiMock.Setup(x => x.ExtractServicesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ServiceExtractionResult([]));
 
         await Build().Handle(
-            new RegistrationExtractServicesRequested("+220300001", "asdf", RegistrationExtractMode.NewRegistration),
+            new RegistrationExtractServicesCommand("+220300001", "asdf", RegistrationExtractMode.NewRegistration),
             _busMock.Object, CancellationToken.None);
 
-        _invoked.ShouldHaveSingleItem();
-        _invoked[0].CanonicalSlugs.ShouldBeEmpty();
-        _invoked[0].Mode.ShouldBe(RegistrationExtractMode.NewRegistration);
+        _begin.ShouldHaveSingleItem();
+        _begin[0].CanonicalSlugs.ShouldBeEmpty();
+        _extend.ShouldBeEmpty();
+        _amend.ShouldBeEmpty();
+        _amendAdd.ShouldBeEmpty();
     }
 
     [Fact]
@@ -77,28 +93,63 @@ public class RegistrationExtractServicesHandlerTests
             .ReturnsAsync(new ResolveSlugResult("carpentry", SlugResolution.AutoMerged, 0.95));
 
         await Build().Handle(
-            new RegistrationExtractServicesRequested("+220300001", "I offer plumbing and carpentry", RegistrationExtractMode.NewRegistration),
+            new RegistrationExtractServicesCommand("+220300001", "I offer plumbing and carpentry", RegistrationExtractMode.NewRegistration),
             _busMock.Object, CancellationToken.None);
 
-        _invoked.ShouldHaveSingleItem();
-        _invoked[0].CanonicalSlugs.ShouldBe(["plumbing", "carpentry"]);
+        _begin.ShouldHaveSingleItem();
+        _begin[0].CanonicalSlugs.ShouldBe(["plumbing", "carpentry"]);
+        _extend.ShouldBeEmpty();
+        _amend.ShouldBeEmpty();
+        _amendAdd.ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task Handle_AdapterReturnsEmpty_InvokesAdvanceWithEmptyList()
+    public async Task Handle_AddToExistingMode_InvokesExtendCommand()
     {
-        // OllamaConversationAi.TryCallAsync absorbs transport failures and returns
-        // an empty ServiceExtractionResult; handler must pass through with no slugs.
         _aiMock.Setup(x => x.ExtractServicesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ServiceExtractionResult([]));
 
         await Build().Handle(
-            new RegistrationExtractServicesRequested("+220300001", "I offer plumbing", RegistrationExtractMode.AddToExisting),
+            new RegistrationExtractServicesCommand("+220300001", "I offer plumbing", RegistrationExtractMode.AddToExisting),
             _busMock.Object, CancellationToken.None);
 
-        _invoked.ShouldHaveSingleItem();
-        _invoked[0].CanonicalSlugs.ShouldBeEmpty();
-        _invoked[0].Mode.ShouldBe(RegistrationExtractMode.AddToExisting);
+        _extend.ShouldHaveSingleItem();
+        _extend[0].CanonicalSlugs.ShouldBeEmpty();
+        _begin.ShouldBeEmpty();
+        _amend.ShouldBeEmpty();
+        _amendAdd.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Handle_AppendToDraftMode_InvokesAmendCommand()
+    {
+        _aiMock.Setup(x => x.ExtractServicesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ServiceExtractionResult([]));
+
+        await Build().Handle(
+            new RegistrationExtractServicesCommand("+220300001", "and carpentry", RegistrationExtractMode.AppendToDraft),
+            _busMock.Object, CancellationToken.None);
+
+        _amend.ShouldHaveSingleItem();
+        _begin.ShouldBeEmpty();
+        _extend.ShouldBeEmpty();
+        _amendAdd.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Handle_AppendToAddDraftMode_InvokesAmendAddCommand()
+    {
+        _aiMock.Setup(x => x.ExtractServicesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ServiceExtractionResult([]));
+
+        await Build().Handle(
+            new RegistrationExtractServicesCommand("+220300001", "and carpentry", RegistrationExtractMode.AppendToAddDraft),
+            _busMock.Object, CancellationToken.None);
+
+        _amendAdd.ShouldHaveSingleItem();
+        _begin.ShouldBeEmpty();
+        _extend.ShouldBeEmpty();
+        _amend.ShouldBeEmpty();
     }
 
     [Fact]
@@ -118,10 +169,10 @@ public class RegistrationExtractServicesHandlerTests
             .ThrowsAsync(new InvalidOperationException("slug resolver blew up"));
 
         await Should.ThrowAsync<InvalidOperationException>(() => Build().Handle(
-            new RegistrationExtractServicesRequested("+220300001", "plumber and carpentry", RegistrationExtractMode.NewRegistration),
+            new RegistrationExtractServicesCommand("+220300001", "plumber and carpentry", RegistrationExtractMode.NewRegistration),
             _busMock.Object, CancellationToken.None));
 
-        _invoked.ShouldBeEmpty();
+        _begin.ShouldBeEmpty();
     }
 
     [Fact]
@@ -133,10 +184,35 @@ public class RegistrationExtractServicesHandlerTests
             .ThrowsAsync(new OperationCanceledException(cts.Token));
 
         await Should.ThrowAsync<OperationCanceledException>(() => Build().Handle(
-            new RegistrationExtractServicesRequested("+220300001", "I offer plumbing", RegistrationExtractMode.NewRegistration),
+            new RegistrationExtractServicesCommand("+220300001", "I offer plumbing", RegistrationExtractMode.NewRegistration),
             _busMock.Object, cts.Token));
 
-        _invoked.ShouldBeEmpty();
+        _begin.ShouldBeEmpty();
     }
 
+    [Fact]
+    public async Task Handle_UnknownMode_LogsWarningAndDoesNotPublish()
+    {
+        _aiMock.Setup(x => x.ExtractServicesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ServiceExtractionResult([]));
+
+        var cmd = new RegistrationExtractServicesCommand(
+            "+220300001",
+            "I offer plumbing",
+            (RegistrationExtractMode)999);
+
+        await Build().Handle(cmd, _busMock.Object, default);
+
+        _begin.ShouldBeEmpty();
+        _extend.ShouldBeEmpty();
+        _amend.ShouldBeEmpty();
+        _amendAdd.ShouldBeEmpty();
+        _loggerMock.Verify(l => l.Log(
+            LogLevel.Warning,
+            It.IsAny<EventId>(),
+            It.Is<It.IsAnyType>((_, _) => true),
+            null,
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.AtLeastOnce);
+    }
 }

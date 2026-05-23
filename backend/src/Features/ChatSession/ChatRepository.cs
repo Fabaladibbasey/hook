@@ -54,7 +54,9 @@ public sealed class ChatRepository(HookDbContext db) : IChatRepository
         db.ChatParticipants.AddRangeAsync(participants, ct);
 
     public Task<bool> TryAddMessageAsync(ChatMessage message, CancellationToken ct = default) =>
-        db.TryInsertUniqueAsync(message, ct, ChatHubConstants.ChatMessagesPrimaryKey);
+        db.TryInsertUniqueAsync(message, ct,
+            ChatHubConstants.ChatMessagesPrimaryKey,
+            ChatHubConstants.SequenceUniqueIndexName);
 
     public async Task AddAccessLogAsync(ChatAccessLog log, CancellationToken ct = default) =>
         await db.ChatAccessLogs.AddAsync(log, ct);

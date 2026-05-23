@@ -52,15 +52,15 @@ public sealed class InboundRouterHandler(
         "Quick check — do you want to REQUEST a service (you need help) " +
         "or REGISTER as a provider (you offer one)? Reply REQUEST or REGISTER.";
 
-    public Task Handle(InboundMessageReceived evt, CancellationToken ct) =>
-        RouteAsync(evt.Message, prefetchedIntent: null, ct);
+    public Task Handle(RouteInboundMessageCommand cmd, CancellationToken ct) =>
+        RouteAsync(cmd.Message, prefetchedIntent: null, ct);
 
     // Post-classification re-entry: ClassifyInboundIntentHandler runs the LLM
-    // outside the user-visible critical path, then bus.InvokeAsync's RouteClassifiedIntent
+    // outside the user-visible critical path, then bus.InvokeAsync's RouteClassifiedIntentCommand
     // so the switch dispatch happens inside a normal Wolverine handler context.
     // Pre-classification deterministic checks re-run on this path too, in case
     // state changed during the Ollama window.
-    public Task Handle(RouteClassifiedIntent evt, CancellationToken ct) =>
+    public Task Handle(RouteClassifiedIntentCommand evt, CancellationToken ct) =>
         RouteAsync(evt.Message, evt.Detected, ct);
 
     private async Task RouteAsync(InboundMessage msg, IntentDetectionResult? prefetchedIntent, CancellationToken ct)
@@ -68,7 +68,7 @@ public sealed class InboundRouterHandler(
         var phone = msg.From.Value;
         var text = msg.Text ?? string.Empty;
         var masked = msg.From.Mask();
-        // Re-entry from RouteClassifiedIntent: the original entry already advanced the
+        // Re-entry from RouteClassifiedIntentCommand: the original entry already advanced the
         // contact's LastInboundAt and ran CANCEL detection. These are durable side effects
         // and must not repeat — UpsertInboundAsync would push LastInboundAt forward by
         // the Ollama window (60-150s), and re-running CANCEL detection here would race
@@ -172,14 +172,14 @@ public sealed class InboundRouterHandler(
             }
             logger.LogDebug("Route → NewRequest (closed {RequestId}, prompting) for {Phone}",
                 activeRequest.Id, masked);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+            await bus.PublishAsync(new SendWhatsAppTextCommand(msg.From,
                 "OK — what service do you need now? Reply 'I need …' to start a new request."));
             return;
         }
 
         // Deterministic hint short-circuits the LLM intent call entirely; a prefetched
         // intent from ClassifyInboundIntentHandler does the same on the re-entry path.
-        // Otherwise we publish a deterministic ack + ClassifyInboundIntentRequested so
+        // Otherwise we publish a deterministic ack + ClassifyInboundIntentCommand so
         // the 60-150s Ollama window happens off the user-visible critical path.
         var detected = prefetchedIntent ?? (hint is { } h
             ? new IntentDetectionResult(h, 1.0, "en", "hint")
@@ -188,9 +188,9 @@ public sealed class InboundRouterHandler(
         if (detected is null)
         {
             logger.LogDebug("Deferring LLM intent classification for {Phone}", masked);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From,
+            await bus.PublishAsync(new SendWhatsAppTextCommand(msg.From,
                 "Got your message — one sec…"));
-            await bus.PublishAsync(new ClassifyInboundIntentRequested(msg));
+            await bus.PublishAsync(new ClassifyInboundIntentCommand(msg));
             return;
         }
 
@@ -214,7 +214,7 @@ public sealed class InboundRouterHandler(
                 detected.Intent, detected.Confidence, masked);
             await ambiguousDrafts.UpsertAsync(
                 AmbiguousIntentDraft.Start(phone, text, clock.GetUtcNow()), ct);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From, DisambiguationPrompt));
+            await bus.PublishAsync(new SendWhatsAppTextCommand(msg.From, DisambiguationPrompt));
             return;
         }
 
@@ -259,7 +259,7 @@ public sealed class InboundRouterHandler(
                     var services = string.Join(", ", listedProvider.Services);
                     var ack = $"Hi! You're currently listed as a provider for {services}. " +
                               "Reply 'I need …' to request a different service yourself, or LEAVE to unlist.";
-                    await bus.PublishAsync(new SendWhatsAppTextRequested(msg.From, ack));
+                    await bus.PublishAsync(new SendWhatsAppTextCommand(msg.From, ack));
                     logger.LogDebug("Listed-provider greet-back for {Phone}", masked);
                     return;
                 }
@@ -312,7 +312,7 @@ public sealed class InboundRouterHandler(
         if (choice is null)
         {
             logger.LogDebug("Unrecognised disambiguation reply '{Text}' from {Phone}", text, masked);
-            await bus.PublishAsync(new SendWhatsAppTextRequested(
+            await bus.PublishAsync(new SendWhatsAppTextCommand(
                 msg.From,
                 "Reply REQUEST if you need a service, or REGISTER if you provide one."));
             return true;
@@ -353,7 +353,7 @@ public sealed class InboundRouterHandler(
         IntentDetectionResult detected,
         string purpose,
         CancellationToken ct) =>
-        bus.PublishAsync(new SendColdReplyRequested(from, text, detected, purpose));
+        bus.PublishAsync(new SendColdReplyCommand(from, text, detected, purpose));
 
     private async Task TryPickAsync(
         ServiceRequest.RequestAggregate.ServiceRequest request,
@@ -445,7 +445,7 @@ public sealed class InboundRouterHandler(
             reply = $"Connected you with {freshSuccess} of {consideredTotal} providers. "
                 + "Reply PICK <#> or NEXT for more.";
         }
-        await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone, reply));
+        await bus.PublishAsync(new SendWhatsAppTextCommand(clientPhone, reply));
     }
 
     private async Task ShareTopOrAskAsync(
@@ -472,7 +472,7 @@ public sealed class InboundRouterHandler(
             return;
         }
 
-        await bus.PublishAsync(new SendWhatsAppTextRequested(from,
+        await bus.PublishAsync(new SendWhatsAppTextCommand(from,
             $"Which match? Reply 1, 2, or {matchOrder.Count}."));
     }
 
@@ -485,7 +485,7 @@ public sealed class InboundRouterHandler(
         var hadAmbiguousDraft = await ambiguousDrafts.GetAsync(phone, ct) is not null;
         if (!hadRegDraft && !hadClientDraft && !hadAmbiguousDraft) return false;
 
-        await bus.PublishAsync(new SendWhatsAppTextRequested(from, "Session ended. Send a new message to start over."));
+        await bus.PublishAsync(new SendWhatsAppTextCommand(from, "Session ended. Send a new message to start over."));
 
         if (hadRegDraft) await registrationDrafts.DeleteAsync(phone, ct);
         if (hadClientDraft) await clientDrafts.DeleteAsync(phone, ct);

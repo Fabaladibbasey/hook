@@ -18,7 +18,8 @@ public class ExtractServicesHandlerTests
     private readonly Mock<IConversationAi> _aiMock = new();
     private readonly Mock<IMessageBus> _busMock = new();
     private readonly Mock<SlugResolver> _slugResolverMock;
-    private readonly List<AdvanceClientRequestDraft> _invoked = [];
+    private readonly List<ApplyClientServiceResolutionCommand> _applied = [];
+    private readonly List<ResetClientServiceResolutionCommand> _reset = [];
 
     public ExtractServicesHandlerTests()
     {
@@ -30,52 +31,57 @@ public class ExtractServicesHandlerTests
             NullLogger<SlugResolver>.Instance,
             null!)
         { CallBase = false };
-        _busMock.Setup(x => x.InvokeAsync(It.IsAny<AdvanceClientRequestDraft>(), It.IsAny<CancellationToken>(), It.IsAny<TimeSpan?>()))
-            .Callback<object, CancellationToken, TimeSpan?>((m, _, _) => _invoked.Add((AdvanceClientRequestDraft)m))
-            .Returns(Task.CompletedTask);
+        _busMock.Setup(x => x.PublishAsync(It.IsAny<ApplyClientServiceResolutionCommand>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions?>((m, _) => _applied.Add((ApplyClientServiceResolutionCommand)m))
+            .Returns(ValueTask.CompletedTask);
+        _busMock.Setup(x => x.PublishAsync(It.IsAny<ResetClientServiceResolutionCommand>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions?>((m, _) => _reset.Add((ResetClientServiceResolutionCommand)m))
+            .Returns(ValueTask.CompletedTask);
     }
 
     private ExtractServicesHandler Build() => new(_aiMock.Object, _slugResolverMock.Object);
 
     [Fact]
-    public async Task Handle_AiReturnsNoSlugs_InvokesAdvanceWithEmptyCanonical()
+    public async Task Handle_AiReturnsNoSlugs_InvokesResetCommand()
     {
         _aiMock.Setup(x => x.ExtractServicesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ServiceExtractionResult([]));
 
         await Build().Handle(
-            new ExtractServicesRequested("+220300001", "asdfasdf", IsSwitch: false),
+            new ExtractServicesCommand("+220300001", "asdfasdf", IsSwitch: false),
             _busMock.Object, CancellationToken.None);
 
-        _invoked.ShouldHaveSingleItem();
-        _invoked[0].CanonicalSlug.ShouldBe(string.Empty);
-        _invoked[0].IsSwitch.ShouldBeFalse();
+        _reset.ShouldHaveSingleItem();
+        _reset[0].IsSwitch.ShouldBeFalse();
+        _applied.ShouldBeEmpty();
         _slugResolverMock.Verify(x => x.ResolveAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
     [Fact]
-    public async Task Handle_AdapterReturnsEmpty_InvokesAdvanceWithEmptyCanonical()
+    public async Task Handle_AdapterReturnsEmpty_SwitchPath_InvokesResetCommand()
     {
         // OllamaConversationAi.TryCallAsync absorbs transport failures and returns
         // an empty ServiceExtractionResult; handler must short-circuit slug
-        // resolution and advance with an empty canonical slug.
+        // resolution and dispatch a reset on the switch path so the user is acked.
         _aiMock.Setup(x => x.ExtractServicesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ServiceExtractionResult([]));
 
         await Build().Handle(
-            new ExtractServicesRequested("+220300001", "I need a plumber", IsSwitch: true),
+            new ExtractServicesCommand("+220300001", "I need a plumber", IsSwitch: true),
             _busMock.Object, CancellationToken.None);
 
-        _invoked.ShouldHaveSingleItem();
-        _invoked[0].CanonicalSlug.ShouldBe(string.Empty);
-        _invoked[0].IsSwitch.ShouldBeTrue();
+        _reset.ShouldHaveSingleItem();
+        _reset[0].IsSwitch.ShouldBeTrue();
+        _applied.ShouldBeEmpty();
         _slugResolverMock.Verify(x => x.ResolveAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
-    [Fact]
-    public async Task Handle_AiReturnsSlug_ResolvesAndInvokesAdvance()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Handle_AiReturnsSlug_ResolvesAndInvokesApplyCommand(bool isSwitch)
     {
         _aiMock.Setup(x => x.ExtractServicesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ServiceExtractionResult(["plumber"]));
@@ -84,11 +90,13 @@ public class ExtractServicesHandlerTests
             .ReturnsAsync(new ResolveSlugResult("plumbing", SlugResolution.AutoMerged, 0.92));
 
         await Build().Handle(
-            new ExtractServicesRequested("+220300001", "I need a plumber", IsSwitch: false),
+            new ExtractServicesCommand("+220300001", "I need a plumber", IsSwitch: isSwitch),
             _busMock.Object, CancellationToken.None);
 
-        _invoked.ShouldHaveSingleItem();
-        _invoked[0].CanonicalSlug.ShouldBe("plumbing");
+        _applied.ShouldHaveSingleItem();
+        _applied[0].CanonicalSlug.ShouldBe("plumbing");
+        _applied[0].IsSwitch.ShouldBe(isSwitch);
+        _reset.ShouldBeEmpty();
     }
 
     [Fact]
@@ -100,9 +108,10 @@ public class ExtractServicesHandlerTests
             .ThrowsAsync(new OperationCanceledException(cts.Token));
 
         await Should.ThrowAsync<OperationCanceledException>(() => Build().Handle(
-            new ExtractServicesRequested("+220300001", "I need a plumber", IsSwitch: false),
+            new ExtractServicesCommand("+220300001", "I need a plumber", IsSwitch: false),
             _busMock.Object, cts.Token));
 
-        _invoked.ShouldBeEmpty();
+        _applied.ShouldBeEmpty();
+        _reset.ShouldBeEmpty();
     }
 }

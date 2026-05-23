@@ -8,6 +8,7 @@ internal static class ChatHubConstants
     public const int MaxPublicKeyBytes = 200;
     public const int InitialHistoryTake = 50;
     public const string ChatMessagesPrimaryKey = "PK_chat_messages";
+    public const string SequenceUniqueIndexName = "ux_chat_messages_chat_participant_sequence";
 
     public static class Items
     {

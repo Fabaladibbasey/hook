@@ -19,8 +19,8 @@ type WireMessage = {
   createdAt: string;
 };
 
-type PeerKeyDto = { peerParticipantId: string; peerPublicKeyB64: string };
-type RejectDto = { messageId: string; reason: string };
+type PeerKeyExchange = { peerParticipantId: string; peerPublicKeyB64: string };
+type ChatMessageRejected = { messageId: string; reason: string };
 
 const MAX_PENDING_WIRE = 200;
 
@@ -107,7 +107,7 @@ export function useChatHub(
       pendingWireRef.current.push(m);
     };
 
-    conn.on("PeerKeyAvailable", async (dto: PeerKeyDto) => {
+    conn.on("PeerKeyAvailable", async (dto: PeerKeyExchange) => {
       if (dto.peerParticipantId === participantId) return;
       try {
         const { privateKey } = await getOrCreateKeypair(chatId);
@@ -147,7 +147,7 @@ export function useChatHub(
       if (!cancelled) setState({ kind: "ready", messages: messagesRef.current });
     });
 
-    conn.on("MessageSendRejected", (dto: RejectDto) => {
+    conn.on("MessageSendRejected", (dto: ChatMessageRejected) => {
       const idx = messagesRef.current.findIndex(m => m.id === dto.messageId);
       if (idx === -1) return;
       const updated = [...messagesRef.current];

@@ -141,6 +141,10 @@ namespace Hook.Shared.Persistence.Data.Migrations
                     b.HasIndex("ChatId", "CreatedAt", "Sequence")
                         .HasDatabaseName("ix_chat_messages_chat_created_seq");
 
+                    b.HasIndex("ChatId", "ParticipantId", "Sequence")
+                        .IsUnique()
+                        .HasDatabaseName("ux_chat_messages_chat_participant_sequence");
+
                     b.ToTable("chat_messages", (string)null);
                 });
 

@@ -270,7 +270,7 @@ Contact sharing is **bilateral** — both the client (captured at intake) and th
 ### Case B — Either opted out
 
 * Either flag is `false`
-* Both sides receive a signed chat link (`ChatRoutingRequested`). No raw phone number shared.
+* Both sides receive a signed chat link (`RouteMatchToChatCommand`). No raw phone number shared.
 
 ### Privacy invariants
 

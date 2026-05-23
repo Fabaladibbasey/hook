@@ -11,22 +11,29 @@ public sealed class ExtractServicesHandler(
     SlugResolver slugResolver)
 {
     // [NonTransactional]: AI extraction + slug resolution can take 60-150s.
-    // bus.InvokeAsync re-enters a transactional handler so the draft mutation
-    // + outgoing prompt are committed atomically with the outbox envelope.
+    // bus.PublishAsync enqueues to the durable outbox so the apply-handler tx
+    // + outgoing prompt are committed atomically without pinning the AI worker.
     [NonTransactional]
-    public async Task Handle(ExtractServicesRequested evt, IMessageBus bus, CancellationToken ct)
+    public async Task Handle(ExtractServicesCommand cmd, IMessageBus bus, CancellationToken ct)
     {
-        var extracted = await ai.ExtractServicesAsync(evt.Text, ct);
-        var canonical = string.Empty;
-        if (extracted.Slugs.Count > 0)
+        var extracted = await ai.ExtractServicesAsync(cmd.Text, ct);
+        if (extracted.Slugs.Count == 0)
         {
-            // Single-slug contract: the client funnel models one service per request, so we
-            // pick the first extracted slug and discard the rest. Registration takes the
-            // full list because providers may offer multiple services.
-            var resolved = await slugResolver.ResolveAsync(extracted.Slugs[0], evt.Text, ct);
-            canonical = resolved.CanonicalSlug;
+            await bus.PublishAsync(new ResetClientServiceResolutionCommand(cmd.Phone, cmd.IsSwitch));
+            return;
         }
 
-        await bus.InvokeAsync(new AdvanceClientRequestDraft(evt.Phone, canonical, evt.IsSwitch), ct);
+        // Single-slug contract: the client funnel models one service per request, so we
+        // pick the first extracted slug and discard the rest. Registration takes the
+        // full list because providers may offer multiple services.
+        var resolved = await slugResolver.ResolveAsync(extracted.Slugs[0], cmd.Text, ct);
+        if (string.IsNullOrEmpty(resolved.CanonicalSlug))
+        {
+            await bus.PublishAsync(new ResetClientServiceResolutionCommand(cmd.Phone, cmd.IsSwitch));
+            return;
+        }
+
+        await bus.PublishAsync(
+            new ApplyClientServiceResolutionCommand(cmd.Phone, resolved.CanonicalSlug, cmd.IsSwitch));
     }
 }

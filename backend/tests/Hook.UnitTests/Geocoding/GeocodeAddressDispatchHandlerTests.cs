@@ -15,7 +15,7 @@ public class GeocodeAddressDispatchHandlerTests
     private readonly Mock<IGeocoder> _geocoderMock = new();
     private readonly Mock<IGeocodeCache> _cacheMock = new();
     private readonly Mock<IMessageBus> _busMock = new();
-    private readonly List<SendWhatsAppTextRequested> _sent = [];
+    private readonly List<SendWhatsAppTextCommand> _sent = [];
     private readonly List<object> _invoked = [];
 
     public GeocodeAddressDispatchHandlerTests()
@@ -25,15 +25,15 @@ public class GeocodeAddressDispatchHandlerTests
         _cacheMock.Setup(x => x.SetAsync(It.IsAny<string>(), It.IsAny<GeocodeResult>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        _busMock.Setup(x => x.PublishAsync(It.IsAny<SendWhatsAppTextRequested>(), It.IsAny<DeliveryOptions>()))
-            .Callback<object, DeliveryOptions>((m, _) => _sent.Add((SendWhatsAppTextRequested)m))
+        _busMock.Setup(x => x.PublishAsync(It.IsAny<SendWhatsAppTextCommand>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions>((m, _) => _sent.Add((SendWhatsAppTextCommand)m))
             .Returns(ValueTask.CompletedTask);
-        _busMock.Setup(x => x.InvokeAsync(It.IsAny<ApplyGeocodeResultClient>(), It.IsAny<CancellationToken>(), It.IsAny<TimeSpan?>()))
-            .Callback<object, CancellationToken, TimeSpan?>((m, _, _) => _invoked.Add(m))
-            .Returns(Task.CompletedTask);
-        _busMock.Setup(x => x.InvokeAsync(It.IsAny<ApplyGeocodeResultProvider>(), It.IsAny<CancellationToken>(), It.IsAny<TimeSpan?>()))
-            .Callback<object, CancellationToken, TimeSpan?>((m, _, _) => _invoked.Add(m))
-            .Returns(Task.CompletedTask);
+        _busMock.Setup(x => x.PublishAsync(It.IsAny<ApplyClientGeocodeResultCommand>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions?>((m, _) => _invoked.Add(m))
+            .Returns(ValueTask.CompletedTask);
+        _busMock.Setup(x => x.PublishAsync(It.IsAny<ApplyProviderGeocodeResultCommand>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions?>((m, _) => _invoked.Add(m))
+            .Returns(ValueTask.CompletedTask);
     }
 
     private GeocodeAddressDispatchHandler Build() =>
@@ -47,7 +47,7 @@ public class GeocodeAddressDispatchHandlerTests
             .ReturnsAsync((GeocodeResult?)null);
 
         await Build().Handle(
-            new GeocodeAddressRequested("+2207000001", "nowhere land", GeocodeFlow.Client),
+            new GeocodeAddressCommand("+2207000001", "nowhere land", GeocodeFlow.Client),
             _busMock.Object, CancellationToken.None);
 
         _sent.ShouldHaveSingleItem();
@@ -63,12 +63,12 @@ public class GeocodeAddressDispatchHandlerTests
             .ReturnsAsync(result);
 
         await Build().Handle(
-            new GeocodeAddressRequested("+2207000001", "Banjul", GeocodeFlow.Client),
+            new GeocodeAddressCommand("+2207000001", "Banjul", GeocodeFlow.Client),
             _busMock.Object, CancellationToken.None);
 
         _sent.ShouldBeEmpty();
         _invoked.ShouldHaveSingleItem();
-        var apply = _invoked[0].ShouldBeOfType<ApplyGeocodeResultClient>();
+        var apply = _invoked[0].ShouldBeOfType<ApplyClientGeocodeResultCommand>();
         apply.Phone.ShouldBe("+2207000001");
         apply.Result.FormattedAddress.ShouldBe("Banjul, The Gambia");
     }
@@ -81,12 +81,12 @@ public class GeocodeAddressDispatchHandlerTests
             .ReturnsAsync(result);
 
         await Build().Handle(
-            new GeocodeAddressRequested("+2207000002", "Bakau Newtown", GeocodeFlow.Provider),
+            new GeocodeAddressCommand("+2207000002", "Bakau Newtown", GeocodeFlow.Provider),
             _busMock.Object, CancellationToken.None);
 
         _sent.ShouldBeEmpty();
         _invoked.ShouldHaveSingleItem();
-        var apply = _invoked[0].ShouldBeOfType<ApplyGeocodeResultProvider>();
+        var apply = _invoked[0].ShouldBeOfType<ApplyProviderGeocodeResultCommand>();
         apply.Phone.ShouldBe("+2207000002");
         apply.Result.FormattedAddress.ShouldBe("Bakau, The Gambia");
     }
@@ -97,13 +97,13 @@ public class GeocodeAddressDispatchHandlerTests
         var result = new GeocodeResult(new Location(13.4549, -16.5790), "Banjul, The Gambia", "static-dev", FromCache: false);
         _geocoderMock.Setup(x => x.GeocodeAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(result);
-        var stamp = new DateTimeOffset(2026, 5, 21, 9, 0, 0, TimeSpan.Zero);
+        var stamp = DateTimeOffset.UtcNow;
 
         await Build().Handle(
-            new GeocodeAddressRequested("+2207000001", "Banjul", GeocodeFlow.Client, DraftStampedAt: stamp),
+            new GeocodeAddressCommand("+2207000001", "Banjul", GeocodeFlow.Client, DraftStampedAt: stamp),
             _busMock.Object, CancellationToken.None);
 
-        var apply = _invoked[0].ShouldBeOfType<ApplyGeocodeResultClient>();
+        var apply = _invoked[0].ShouldBeOfType<ApplyClientGeocodeResultCommand>();
         apply.DraftStampedAt.ShouldBe(stamp);
     }
 
@@ -111,7 +111,7 @@ public class GeocodeAddressDispatchHandlerTests
     public async Task Handle_UnparseablePhone_NoOp()
     {
         await Build().Handle(
-            new GeocodeAddressRequested("not-a-phone", "Banjul", GeocodeFlow.Client),
+            new GeocodeAddressCommand("not-a-phone", "Banjul", GeocodeFlow.Client),
             _busMock.Object, CancellationToken.None);
 
         _sent.ShouldBeEmpty();

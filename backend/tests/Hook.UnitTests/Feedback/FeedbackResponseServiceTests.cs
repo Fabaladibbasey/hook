@@ -101,7 +101,7 @@ public class FeedbackResponseServiceTests
     private readonly List<(PhoneNumber To, string Body)> _sent = [];
     private readonly List<object> _published = [];
     private readonly List<(object Message, TimeSpan Delay)> _scheduled = [];
-    private readonly List<ExtractEtaRequested> _extractEtaRequests = [];
+    private readonly List<ExtractEtaCommand> _extractEtaRequests = [];
 
     private readonly Mock<IFeedbackRepository> _feedbackMock = new();
     private readonly Mock<IMatchRepository> _matchesMock = new();
@@ -166,15 +166,15 @@ public class FeedbackResponseServiceTests
                 _scheduled.Add((inv.Arguments[0], (TimeSpan)inv.Arguments[1]))))
             .Returns(Task.CompletedTask);
 
-        _messageBusMock.Setup(x => x.PublishAsync(It.IsAny<SendWhatsAppTextRequested>(), It.IsAny<Wolverine.DeliveryOptions>()))
+        _messageBusMock.Setup(x => x.PublishAsync(It.IsAny<SendWhatsAppTextCommand>(), It.IsAny<Wolverine.DeliveryOptions>()))
             .Callback<object, Wolverine.DeliveryOptions>((msg, _) =>
             {
-                var req = (SendWhatsAppTextRequested)msg;
+                var req = (SendWhatsAppTextCommand)msg;
                 _sent.Add((req.To, req.Text));
             })
             .Returns(ValueTask.CompletedTask);
-        _messageBusMock.Setup(x => x.PublishAsync(It.IsAny<ExtractEtaRequested>(), It.IsAny<Wolverine.DeliveryOptions>()))
-            .Callback<object, Wolverine.DeliveryOptions>((msg, _) => _extractEtaRequests.Add((ExtractEtaRequested)msg))
+        _messageBusMock.Setup(x => x.PublishAsync(It.IsAny<ExtractEtaCommand>(), It.IsAny<Wolverine.DeliveryOptions>()))
+            .Callback<object, Wolverine.DeliveryOptions>((msg, _) => _extractEtaRequests.Add((ExtractEtaCommand)msg))
             .Returns(ValueTask.CompletedTask);
     }
 
@@ -524,7 +524,7 @@ public class FeedbackResponseServiceTests
     }
 
     // -- HandleAwaitingEtaAsync -----------------------------------------------
-    // ETA-extraction outcomes moved to ApplyEtaOutcomeHandler — see that handler's
+    // ETA-extraction outcomes moved to ApplyEtaHandler — see that handler's
     // tests for valid/horizon/null branches. These tests assert the orchestrator
     // defers candidate input to the outbox and handles non-candidate inline.
 

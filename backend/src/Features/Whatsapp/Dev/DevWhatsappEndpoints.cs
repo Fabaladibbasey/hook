@@ -27,7 +27,7 @@ public static class DevWhatsappEndpoints
         return routes;
     }
 
-    public sealed record InjectRequest(
+    public sealed record InjectInboundRequest(
         string From,
         string? Text,
         string? Type,
@@ -37,7 +37,7 @@ public static class DevWhatsappEndpoints
         string? MessageId = null);
 
     private static async Task<IResult> InjectInbound(
-        InjectRequest req,
+        InjectInboundRequest req,
         IInboundDedup dedup,
         IMessageBus bus,
         ILogger<DevWhatsappLog> logger,
@@ -88,14 +88,14 @@ public static class DevWhatsappEndpoints
             "[DEV] Injecting inbound {MessageId} from {From} kind={Kind}",
             messageId, phone.Mask(), kind);
 
-        await bus.PublishAsync(new InboundMessageReceived(msg));
+        await bus.PublishAsync(new RouteInboundMessageCommand(msg));
         return Results.Ok(new { messageId });
     }
 
-    public sealed record EchoRequest(string To, string Body);
+    public sealed record EchoOutboundRequest(string To, string Body);
 
     private static async Task<IResult> EchoOutbound(
-        EchoRequest req,
+        EchoOutboundRequest req,
         IWhatsappClient client,
         CancellationToken ct)
     {

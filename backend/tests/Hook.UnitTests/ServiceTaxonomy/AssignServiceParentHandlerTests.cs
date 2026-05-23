@@ -23,7 +23,7 @@ public class AssignServiceParentHandlerTests
         var repo = Repo(svc, doctor);
 
         await new AssignServiceParentHandler(repo.Object)
-            .Handle(new AssignServiceParent("cardiology", "doctor"), CancellationToken.None);
+            .Handle(new AssignServiceParentCommand("cardiology", "doctor"), CancellationToken.None);
 
         svc.ParentSlug.ShouldBe("doctor");
     }
@@ -39,7 +39,7 @@ public class AssignServiceParentHandlerTests
         var repo = Repo(svc, lawyer);
 
         await new AssignServiceParentHandler(repo.Object)
-            .Handle(new AssignServiceParent("cardiology", "lawyer"), CancellationToken.None);
+            .Handle(new AssignServiceParentCommand("cardiology", "lawyer"), CancellationToken.None);
 
         svc.ParentSlug.ShouldBe("doctor");
     }
@@ -51,7 +51,7 @@ public class AssignServiceParentHandlerTests
         repo.Setup(r => r.GetBySlugAsync("gone", It.IsAny<CancellationToken>())).ReturnsAsync((Service?)null);
 
         await new AssignServiceParentHandler(repo.Object)
-            .Handle(new AssignServiceParent("gone", "doctor"), CancellationToken.None);
+            .Handle(new AssignServiceParentCommand("gone", "doctor"), CancellationToken.None);
     }
 
     [Fact]
@@ -62,7 +62,7 @@ public class AssignServiceParentHandlerTests
         repo.Setup(r => r.GetBySlugAsync("ghost", It.IsAny<CancellationToken>())).ReturnsAsync((Service?)null);
 
         await new AssignServiceParentHandler(repo.Object)
-            .Handle(new AssignServiceParent("cardiology", "ghost"), CancellationToken.None);
+            .Handle(new AssignServiceParentCommand("cardiology", "ghost"), CancellationToken.None);
 
         svc.ParentSlug.ShouldBeNull();
     }
@@ -76,7 +76,7 @@ public class AssignServiceParentHandlerTests
         var repo = Repo(svc, mid);
 
         await new AssignServiceParentHandler(repo.Object)
-            .Handle(new AssignServiceParent("cardiology", "internal-medicine"), CancellationToken.None);
+            .Handle(new AssignServiceParentCommand("cardiology", "internal-medicine"), CancellationToken.None);
 
         svc.ParentSlug.ShouldBeNull();
     }
@@ -88,7 +88,7 @@ public class AssignServiceParentHandlerTests
         var repo = Repo(svc);
 
         await new AssignServiceParentHandler(repo.Object)
-            .Handle(new AssignServiceParent("cardiology", "cardiology"), CancellationToken.None);
+            .Handle(new AssignServiceParentCommand("cardiology", "cardiology"), CancellationToken.None);
 
         svc.ParentSlug.ShouldBeNull();
     }

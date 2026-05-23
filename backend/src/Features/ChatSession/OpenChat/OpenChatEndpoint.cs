@@ -37,15 +37,13 @@ public static class OpenChatEndpoint
             logger.LogInformation("Chat link opened: chatId={ChatId} participantId={ParticipantId}",
                 participant.ChatId, participant.Id);
 
-            return Results.Ok(new
-            {
-                chatId = participant.ChatId,
-                participantId = participant.Id,
-                role = participant.Role.ToString(),
-                sessionId = newSessionId,
-                status = session.Status.ToString(),
-                expiresAt = session.ExpiresAt
-            });
+            return Results.Ok(new OpenChatResponse(
+                participant.ChatId,
+                participant.Id,
+                participant.Role.ToString(),
+                newSessionId,
+                session.Status.ToString(),
+                session.ExpiresAt));
         });
 
         return routes;

@@ -19,7 +19,7 @@ public class DeferredGeocodeFlowTests : PipelineTestBase
         await _fx.InjectTextAndAwaitAsync(phone, "yes");
 
         // Raw inject (no Wolverine cascade wait): measure the 200-ACK latency.
-        // After the deferral, the orchestrator publishes a GeocodeAddressRequested
+        // After the deferral, the orchestrator publishes a GeocodeAddressCommand
         // envelope and returns immediately; the geocoding HTTP runs in the dispatch
         // handler off the critical path.
         var sw = Stopwatch.StartNew();

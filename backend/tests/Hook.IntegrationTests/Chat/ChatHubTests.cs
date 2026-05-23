@@ -1,11 +1,14 @@
 using System.Net.Http.Json;
+using System.Text.Json.Serialization;
 using Hook.Features.ChatSession;
 using Hook.Features.ChatSession.ParticipantAggregate;
+using Hook.Features.ChatSession.SessionAggregate;
 using Hook.Shared.Persistence.Data;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using Shouldly;
 
 namespace Hook.IntegrationTests.Chat;
@@ -67,6 +70,10 @@ public sealed class ChatHubTests : PipelineTestBase
                 opts.HttpMessageHandlerFactory = _ => _fx.Factory.Server.CreateHandler();
                 opts.Transports = HttpTransportType.LongPolling;
             })
+            // Mirror server-side JsonStringEnumConverter so ChatMessageRejectReason
+            // round-trips from the "Replay"/"Duplicate"/... wire form back into the enum.
+            .AddJsonProtocol(opts =>
+                opts.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter()))
             .Build();
         return conn;
     }
@@ -156,7 +163,7 @@ public sealed class ChatHubTests : PipelineTestBase
         var ready = await Task.WhenAny(providerReady.Task, Task.Delay(Timeout));
         ready.ShouldBe(providerReady.Task);
 
-        var dto = new SendMessageDto(Guid.NewGuid(), Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 1);
+        var dto = new EncryptedChatMessage(Guid.NewGuid(), Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 1);
         await clientConn.InvokeAsync("SendMessage", dto);
 
         var received = await Await(receivedTcs);
@@ -174,10 +181,10 @@ public sealed class ChatHubTests : PipelineTestBase
         await using var conn = BuildHub(chat.ClientToken, chat.Client.SessionId);
         await conn.StartAsync();
 
-        var rejects = new List<MessageSendRejectedDto>();
-        conn.On<MessageSendRejectedDto>(ChatHubConstants.Events.MessageSendRejected, dto => { lock (rejects) rejects.Add(dto); });
+        var rejects = new List<ChatMessageRejected>();
+        conn.On<ChatMessageRejected>(ChatHubConstants.Events.MessageSendRejected, dto => { lock (rejects) rejects.Add(dto); });
 
-        var first = new SendMessageDto(Guid.NewGuid(), Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 5);
+        var first = new EncryptedChatMessage(Guid.NewGuid(), Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 5);
         await conn.InvokeAsync("SendMessage", first);
 
         var second = first with { MessageId = Guid.NewGuid() };
@@ -194,8 +201,13 @@ public sealed class ChatHubTests : PipelineTestBase
         {
             var match = rejects.SingleOrDefault(r => r.MessageId == second.MessageId);
             match.ShouldNotBeNull();
-            match!.Reason.ShouldBe(MessageRejectReason.Replay);
+            match!.Reason.ShouldBe(ChatMessageRejectReason.Replay);
         }
+
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var rowCount = await db.ChatMessages.AsNoTracking().CountAsync(m => m.ChatId == chat.ChatId);
+        rowCount.ShouldBe(1);
     }
 
     [Fact]
@@ -205,26 +217,26 @@ public sealed class ChatHubTests : PipelineTestBase
         await using var conn = BuildHub(chat.ClientToken, chat.Client.SessionId);
         await conn.StartAsync();
 
-        var rejects = new List<MessageSendRejectedDto>();
-        conn.On<MessageSendRejectedDto>(ChatHubConstants.Events.MessageSendRejected, dto => { lock (rejects) rejects.Add(dto); });
+        var rejects = new List<ChatMessageRejected>();
+        conn.On<ChatMessageRejected>(ChatHubConstants.Events.MessageSendRejected, dto => { lock (rejects) rejects.Add(dto); });
 
         var msgId = Guid.NewGuid();
-        var first = new SendMessageDto(msgId, Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 1);
+        var first = new EncryptedChatMessage(msgId, Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 1);
         await conn.InvokeAsync("SendMessage", first);
 
-        var dup = new SendMessageDto(msgId, Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 2);
+        var dup = new EncryptedChatMessage(msgId, Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 2);
         await conn.InvokeAsync("SendMessage", dup);
 
         await WhatsappPipelineHelpers.WaitForConditionAsync(
             () =>
             {
-                lock (rejects) return Task.FromResult(rejects.Any(r => r.MessageId == msgId && r.Reason == MessageRejectReason.Duplicate));
+                lock (rejects) return Task.FromResult(rejects.Any(r => r.MessageId == msgId && r.Reason == ChatMessageRejectReason.Duplicate));
             },
             timeout: TimeSpan.FromSeconds(2),
             description: "Duplicate reject not received");
         lock (rejects)
         {
-            var match = rejects.SingleOrDefault(r => r.MessageId == msgId && r.Reason == MessageRejectReason.Duplicate);
+            var match = rejects.SingleOrDefault(r => r.MessageId == msgId && r.Reason == ChatMessageRejectReason.Duplicate);
             match.ShouldNotBeNull();
         }
 
@@ -248,11 +260,45 @@ public sealed class ChatHubTests : PipelineTestBase
         var revoked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         conn.On(ChatHubConstants.Events.SessionRevoked, () => revoked.TrySetResult());
 
-        var dto = new SendMessageDto(Guid.NewGuid(), Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 1);
+        var dto = new EncryptedChatMessage(Guid.NewGuid(), Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 1);
         try { await conn.InvokeAsync("SendMessage", dto); } catch { /* abort can surface mid-invoke */ }
 
         var winner = await Task.WhenAny(revoked.Task, Task.Delay(Timeout));
         winner.ShouldBe(revoked.Task);
+    }
+
+    [Fact]
+    public async Task ChatMessages_DuplicateChatParticipantSequence_RejectedByDb()
+    {
+        var chat = await SeedChatAsync();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+
+        var first = ChatMessage.Create(
+            id: Guid.NewGuid(),
+            chatId: chat.ChatId,
+            participantId: chat.Client.ParticipantId,
+            sequence: 1,
+            ciphertext: new byte[32],
+            nonce: new byte[12],
+            now: DateTimeOffset.UtcNow);
+        db.ChatMessages.Add(first);
+        await db.SaveChangesAsync();
+
+        var dup = ChatMessage.Create(
+            id: Guid.NewGuid(),
+            chatId: chat.ChatId,
+            participantId: chat.Client.ParticipantId,
+            sequence: 1,
+            ciphertext: new byte[32],
+            nonce: new byte[12],
+            now: DateTimeOffset.UtcNow);
+        db.ChatMessages.Add(dup);
+
+        var ex = await Should.ThrowAsync<DbUpdateException>(() => db.SaveChangesAsync());
+        var pg = ex.InnerException.ShouldBeOfType<PostgresException>();
+        pg.SqlState.ShouldBe("23505");
+        pg.ConstraintName.ShouldBe(ChatHubConstants.SequenceUniqueIndexName);
     }
 
     private static string UniquePhone() => $"+220{Random.Shared.Next(0, 10_000_000):D7}";

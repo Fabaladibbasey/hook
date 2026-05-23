@@ -1,8 +1,9 @@
+using Hook.Features.ContactSharing.Events;
 using Hook.Shared.Domain;
 
 namespace Hook.Features.Matching.MatchAggregate;
 
-public class Match : IAggregateRoot
+public class Match : AggregateRoot
 {
     public Guid Id { get; init; }
     public required Guid RequestId { get; init; }
@@ -48,5 +49,12 @@ public class Match : IAggregateRoot
         if (ChatId is not null)
             throw new InvalidOperationException($"Match {Id} already routed to chat {ChatId}");
         ChatId = chatId;
+    }
+
+    public void MarkContactExchanged()
+    {
+        if (PickedAt is null)
+            throw new InvalidOperationException($"Match {Id} contact-exchange before claim");
+        RaiseDomainEvent(new ContactExchangedEvent(Id));
     }
 }

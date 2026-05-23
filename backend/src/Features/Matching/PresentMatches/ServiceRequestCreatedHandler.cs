@@ -11,7 +11,7 @@ public sealed class ServiceRequestCreatedHandler(
     MatchPresenter presenter,
     ILogger<ServiceRequestCreatedHandler> logger)
 {
-    public async Task Handle(ServiceRequestCreated evt, CancellationToken ct)
+    public async Task Handle(ServiceRequestCreatedEvent evt, CancellationToken ct)
     {
         var batch = await matching.RunForRequestAsync(evt.RequestId, ct);
         if (batch is null)

@@ -32,7 +32,7 @@ public sealed class Step2FeedbackHandler(
             match.Id, match.RequestId, FeedbackStep.JobCompleted, clock.GetUtcNow());
         if (!await feedback.TryAddPendingAsync(entry, ct)) return;
 
-        await bus.PublishAsync(new Step2PromptDispatchRequested(
+        await bus.PublishAsync(new Step2PromptDispatchCommand(
             FeedbackId: entry.Id,
             MatchId: match.Id,
             ClientPhone: clientPhone,

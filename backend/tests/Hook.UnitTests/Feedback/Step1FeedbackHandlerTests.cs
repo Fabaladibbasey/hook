@@ -17,7 +17,7 @@ public class Step1FeedbackHandlerTests
     private readonly Dictionary<Guid, IReadOnlyList<MatchEntity>> _requestMatches = [];
     private readonly Dictionary<Guid, ServiceRequestEntity> _requests = [];
     private readonly List<MatchFeedback> _added = [];
-    private readonly List<Step1PromptDispatchRequested> _published = [];
+    private readonly List<Step1PromptDispatchCommand> _published = [];
 
     private readonly Mock<IFeedbackRepository> _feedbackMock = new();
     private readonly Mock<IMatchRepository> _matchesMock = new();
@@ -57,8 +57,8 @@ public class Step1FeedbackHandlerTests
             .ReturnsAsync((Guid id, CancellationToken _) =>
                 _requests.TryGetValue(id, out var r) ? r : null);
 
-        _busMock.Setup(x => x.PublishAsync(It.IsAny<Step1PromptDispatchRequested>(), It.IsAny<DeliveryOptions>()))
-            .Callback<object, DeliveryOptions>((msg, _) => _published.Add((Step1PromptDispatchRequested)msg))
+        _busMock.Setup(x => x.PublishAsync(It.IsAny<Step1PromptDispatchCommand>(), It.IsAny<DeliveryOptions>()))
+            .Callback<object, DeliveryOptions>((msg, _) => _published.Add((Step1PromptDispatchCommand)msg))
             .Returns(ValueTask.CompletedTask);
     }
 

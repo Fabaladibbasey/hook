@@ -40,7 +40,7 @@ public class ServiceRequestTests
     }
 
     [Fact]
-    public void Create_RaisesServiceRequestCreated()
+    public void Create_RaisesServiceRequestCreatedEvent()
     {
         var request = Features.ServiceRequest.RequestAggregate.ServiceRequest.Create(
             "+22070000123", "plumbing", new Location(13.4549, -16.5790), "x", string.Empty, 5, DateTimeOffset.UtcNow,
@@ -48,7 +48,7 @@ public class ServiceRequestTests
 
         var events = request.DequeueEvents();
         events.Count.ShouldBe(1);
-        var evt = events[0].ShouldBeOfType<ServiceRequestCreated>();
+        var evt = events[0].ShouldBeOfType<ServiceRequestCreatedEvent>();
         evt.RequestId.ShouldBe(request.Id);
 
         request.DequeueEvents().Count.ShouldBe(0);

@@ -7,10 +7,10 @@ namespace Hook.UnitTests.Chat;
 
 public class ChatSessionTests
 {
-    private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-05-09T12:00:00Z");
+    private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
 
     [Fact]
-    public void End_Idle_RaisesBroadcastChatEventRequested_WithIdlePayload()
+    public void End_Idle_RaisesBroadcastChatEvent_WithIdlePayload()
     {
         var session = ChatSession.Create(TimeSpan.FromMinutes(30), Now);
 
@@ -18,7 +18,7 @@ public class ChatSessionTests
 
         var events = session.DequeueEvents();
         events.Count.ShouldBe(1);
-        var evt = events[0].ShouldBeOfType<BroadcastChatEventRequested>();
+        var evt = events[0].ShouldBeOfType<BroadcastChatEvent>();
         evt.ChatId.ShouldBe(session.Id);
         evt.EventName.ShouldBe(ChatHubEvents.ChatEnded);
         var payload = evt.Payload.ShouldBeOfType<ChatEndedPayload>();
@@ -27,13 +27,13 @@ public class ChatSessionTests
     }
 
     [Fact]
-    public void End_User_RaisesBroadcastChatEventRequested_WithEndedBy()
+    public void End_User_RaisesBroadcastChatEvent_WithEndedBy()
     {
         var session = ChatSession.Create(TimeSpan.FromMinutes(30), Now);
 
         session.End(Now, EndChatReason.User, "Client");
 
-        var evt = session.DequeueEvents().Single().ShouldBeOfType<BroadcastChatEventRequested>();
+        var evt = session.DequeueEvents().Single().ShouldBeOfType<BroadcastChatEvent>();
         var payload = evt.Payload.ShouldBeOfType<ChatEndedPayload>();
         payload.Reason.ShouldBe("user");
         payload.EndedBy.ShouldBe("Client");
@@ -59,5 +59,15 @@ public class ChatSessionTests
         session.Status.ShouldBe(ChatSessionStatus.Ended);
         session.ExpiresAt.ShouldBe(Now);
         session.CanSendMessage(Now).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void HardExpire_WhenAlreadyEnded_Throws()
+    {
+        var session = ChatSession.Create(TimeSpan.FromMinutes(30), Now);
+        session.End(Now, EndChatReason.Idle);
+
+        Should.Throw<InvalidOperationException>(() => session.HardExpire(Now))
+            .Message.ShouldContain("cannot be hard-expired");
     }
 }

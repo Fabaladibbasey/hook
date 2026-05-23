@@ -22,7 +22,7 @@ public sealed class IterationCoordinator(
         var request = await requests.GetActiveByClientAsync(clientPhone.Value, ct);
         if (request is null)
         {
-            await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone,
+            await bus.PublishAsync(new SendWhatsAppTextCommand(clientPhone,
                 "No active request. Reply with what service you need (e.g. 'I need a plumber') to start a new one."));
             return;
         }
@@ -47,7 +47,7 @@ public sealed class IterationCoordinator(
         var opts = options.Value;
         if (request.CurrentRadiusKm >= opts.MaxRadiusKm)
         {
-            await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone,
+            await bus.PublishAsync(new SendWhatsAppTextCommand(clientPhone,
                 $"No providers found in {opts.MaxRadiusKm}km. Try a different service or check back later."));
             return;
         }
@@ -61,7 +61,7 @@ public sealed class IterationCoordinator(
             return;
         }
 
-        await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone,
+        await bus.PublishAsync(new SendWhatsAppTextCommand(clientPhone,
             $"Showing matches within {request.CurrentRadiusKm:F0}km (wider range):"));
         await presenter.PresentAsync(clientPhone, batch, request.ServiceSlug, ct);
     }
@@ -74,7 +74,7 @@ public sealed class IterationCoordinator(
         var opts = options.Value;
         if (request.CurrentRadiusKm >= opts.MaxRadiusKm)
         {
-            await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone,
+            await bus.PublishAsync(new SendWhatsAppTextCommand(clientPhone,
                 $"No providers found in {opts.MaxRadiusKm}km. Try a different service or check back later."));
             return;
         }
@@ -88,7 +88,7 @@ public sealed class IterationCoordinator(
             var second = await matching.RunForRequestAsync(request.Id, ct);
             if (second is { Scored.Count: > 0 })
             {
-                await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone,
+                await bus.PublishAsync(new SendWhatsAppTextCommand(clientPhone,
                     $"Showing matches within {nextRadius:F0}km (wider range):"));
                 await presenter.PresentAsync(clientPhone, second, request.ServiceSlug, ct);
                 return;
@@ -98,7 +98,7 @@ public sealed class IterationCoordinator(
         var followingRadius = Math.Min(request.CurrentRadiusKm * opts.RadiusExpansionFactor, opts.MaxRadiusKm);
         var exhausted = $"No more in {request.CurrentRadiusKm:F0}km. "
             + $"Reply INCREASE for {followingRadius:F0}km, or NEW for different service.";
-        await bus.PublishAsync(new SendWhatsAppTextRequested(clientPhone, exhausted));
+        await bus.PublishAsync(new SendWhatsAppTextCommand(clientPhone, exhausted));
         logger.LogDebug("Iteration exhausted for {Phone} at {Radius}km", clientPhone.Mask(), request.CurrentRadiusKm);
     }
 }

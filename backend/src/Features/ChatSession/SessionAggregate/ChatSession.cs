@@ -33,15 +33,25 @@ public class ChatSession : AggregateRoot
     {
         Status = ChatSessionStatus.Ended;
         ExpiresAt = now;
-        RaiseDomainEvent(new BroadcastChatEventRequested(
+        RaiseDomainEvent(new BroadcastChatEvent(
             Id, ChatHubEvents.ChatEnded, new ChatEndedPayload(reason.ToWire(), endedBy)));
     }
 
-    public void Expire(DateTimeOffset now)
+    public void HardExpire(DateTimeOffset now)
     {
+        if (Status != ChatSessionStatus.Active)
+            throw new InvalidOperationException($"ChatSession {Id} cannot be hard-expired from {Status}");
         Status = ChatSessionStatus.Expired;
         ExpiresAt = now;
+        RaiseDomainEvent(new BroadcastChatEvent(
+            Id, ChatHubEvents.ChatExpired, new ChatExpiredPayload("24h-expired")));
     }
+
+    // No state mutation: idle reminders can fire repeatedly; dedup lives in IdleReminderHandler.
+    public void SendIdleReminder() =>
+        RaiseDomainEvent(new BroadcastChatEvent(
+            Id, ChatHubEvents.IdleReminder,
+            new IdleReminderPayload("Are you still available? Reply to continue.")));
 
     public bool CanSendMessage(DateTimeOffset now) =>
         Status == ChatSessionStatus.Active && now < ExpiresAt;

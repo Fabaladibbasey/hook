@@ -18,7 +18,7 @@ public class BroadcastChatEventHandlerTests
         clientsMock.Setup(c => c.Group(ChatHub.ChatGroup(chatId))).Returns(groupMock.Object);
 
         IChatEventPayload payload = new ChatEndedPayload("idle");
-        var evt = new BroadcastChatEventRequested(chatId, ChatHubEvents.ChatEnded, payload);
+        var evt = new BroadcastChatEvent(chatId, ChatHubEvents.ChatEnded, payload);
 
         await new BroadcastChatEventHandler(hubMock.Object).Handle(evt, CancellationToken.None);
 

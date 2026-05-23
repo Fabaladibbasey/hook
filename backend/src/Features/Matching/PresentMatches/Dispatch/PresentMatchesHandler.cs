@@ -21,13 +21,13 @@ public sealed class PresentMatchesHandler(
     // rows are read inline by MatchingService before publish, then carried in the envelope
     // so this handler is purely send-side.
     [NonTransactional]
-    public async Task Handle(PresentMatchesRequested evt, CancellationToken ct)
+    public async Task Handle(PresentMatchesCommand command, CancellationToken ct)
     {
         var cap = options.Value.TopMatchesPerBatch;
-        var capped = evt.Matches.Take(cap).ToList();
+        var capped = command.Matches.Take(cap).ToList();
         if (capped.Count == 0)
         {
-            await bus.PublishAsync(new SendWhatsAppTextRequested(evt.ClientPhone,
+            await bus.PublishAsync(new SendWhatsAppTextCommand(command.ClientPhone,
                 "No providers found nearby. Reply INCREASE to widen the search or NEW to change the service."));
             return;
         }
@@ -45,7 +45,7 @@ public sealed class PresentMatchesHandler(
 
         var facts = new Dictionary<string, string>
         {
-            ["service"] = evt.ServiceSlug,
+            ["service"] = command.ServiceSlug,
             ["matches"] = JsonSerializer.Serialize(presented),
             ["count"] = presented.Length.ToString()
         };
@@ -72,10 +72,10 @@ public sealed class PresentMatchesHandler(
             ? "Reply PICK 1 to connect with this provider. NEXT for more, NEW for a different service."
             : "Reply PICK 1 (or e.g. PICK 1,2 or PICK ALL) to connect with one or more providers. "
                 + "NEXT for more, NEW for a different service.";
-        var fallback = $"Top matches for {evt.ServiceSlug}:\n{string.Join("\n", fallbackLines)}";
+        var fallback = $"Top matches for {command.ServiceSlug}:\n{string.Join("\n", fallbackLines)}";
 
         var reply = await AiReplyHelper.TryGenerateOrFallbackAsync(ai, ctx, "match_presenter", fallback, logger, ct);
-        await bus.PublishAsync(new SendWhatsAppTextRequested(evt.ClientPhone, $"{reply}\n\n{pickHint}"));
+        await bus.PublishAsync(new SendWhatsAppTextCommand(command.ClientPhone, $"{reply}\n\n{pickHint}"));
     }
 
     private static string Mask(string phone) =>

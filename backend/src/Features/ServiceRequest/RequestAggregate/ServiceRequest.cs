@@ -43,7 +43,7 @@ public class ServiceRequest : AggregateRoot
             CurrentRadiusKm = initialRadiusKm,
             SharePhoneNumber = sharePhoneNumber
         };
-        request.RaiseDomainEvent(new ServiceRequestCreated(request.Id));
+        request.RaiseDomainEvent(new ServiceRequestCreatedEvent(request.Id));
         return request;
     }
 
