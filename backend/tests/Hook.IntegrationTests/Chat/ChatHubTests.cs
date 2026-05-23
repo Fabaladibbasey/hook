@@ -1,11 +1,13 @@
 using System.Net.Http.Json;
 using Hook.Features.ChatSession;
 using Hook.Features.ChatSession.ParticipantAggregate;
+using Hook.Features.ChatSession.SessionAggregate;
 using Hook.Shared.Persistence.Data;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using Shouldly;
 
 namespace Hook.IntegrationTests.Chat;
@@ -258,6 +260,40 @@ public sealed class ChatHubTests : PipelineTestBase
 
         var winner = await Task.WhenAny(revoked.Task, Task.Delay(Timeout));
         winner.ShouldBe(revoked.Task);
+    }
+
+    [Fact]
+    public async Task ChatMessages_DuplicateChatParticipantSequence_RejectedByDb()
+    {
+        var chat = await SeedChatAsync();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+
+        var first = ChatMessage.Create(
+            id: Guid.NewGuid(),
+            chatId: chat.ChatId,
+            participantId: chat.Client.ParticipantId,
+            sequence: 1,
+            ciphertext: new byte[32],
+            nonce: new byte[12],
+            now: DateTimeOffset.UtcNow);
+        db.ChatMessages.Add(first);
+        await db.SaveChangesAsync();
+
+        var dup = ChatMessage.Create(
+            id: Guid.NewGuid(),
+            chatId: chat.ChatId,
+            participantId: chat.Client.ParticipantId,
+            sequence: 1,
+            ciphertext: new byte[32],
+            nonce: new byte[12],
+            now: DateTimeOffset.UtcNow);
+        db.ChatMessages.Add(dup);
+
+        var ex = await Should.ThrowAsync<DbUpdateException>(() => db.SaveChangesAsync());
+        var pg = ex.InnerException.ShouldBeOfType<PostgresException>();
+        pg.SqlState.ShouldBe("23505");
+        pg.ConstraintName.ShouldBe(ChatHubConstants.SequenceUniqueIndexName);
     }
 
     private static string UniquePhone() => $"+220{Random.Shared.Next(0, 10_000_000):D7}";
