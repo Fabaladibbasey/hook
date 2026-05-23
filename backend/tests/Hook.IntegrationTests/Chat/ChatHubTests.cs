@@ -196,6 +196,11 @@ public sealed class ChatHubTests : PipelineTestBase
             match.ShouldNotBeNull();
             match!.Reason.ShouldBe(ChatMessageRejectReason.Replay);
         }
+
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var rowCount = await db.ChatMessages.AsNoTracking().CountAsync(m => m.ChatId == chat.ChatId);
+        rowCount.ShouldBe(1);
     }
 
     [Fact]

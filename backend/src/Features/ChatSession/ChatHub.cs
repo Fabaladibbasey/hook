@@ -149,18 +149,18 @@ public sealed class ChatHub(
             nonce: nonce,
             now: clock.GetUtcNow());
 
-        var inserted = await chats.TryAddMessageAsync(msg);
-        if (!inserted)
-        {
-            await RejectAsync(message.MessageId, ChatMessageRejectReason.Duplicate);
-            return;
-        }
-
         if (!participant.TryAdvanceSequence(message.Sequence))
         {
             logger.LogWarning("Replayed/out-of-order seq rejected chat={ChatId} participant={ParticipantId} seq={Seq}",
                 chatId, participantId, message.Sequence);
             await RejectAsync(message.MessageId, ChatMessageRejectReason.Replay);
+            return;
+        }
+
+        var inserted = await chats.TryAddMessageAsync(msg);
+        if (!inserted)
+        {
+            await RejectAsync(message.MessageId, ChatMessageRejectReason.Duplicate);
             return;
         }
 
