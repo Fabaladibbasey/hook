@@ -13,6 +13,6 @@ public sealed class ExtractStep1IntentHandler(
     {
         var parsed = await ai.ExtractStep1IntentAsync(cmd.Text, clock.GetUtcNow(), ct);
         await bus.PublishAsync(new ApplyStep1IntentCommand(
-            cmd.PendingId, cmd.MatchId, parsed.Intent, parsed.Eta));
+            cmd.PendingId, cmd.MatchId, parsed.Intent, parsed.Eta, cmd.PromptedAt));
     }
 }

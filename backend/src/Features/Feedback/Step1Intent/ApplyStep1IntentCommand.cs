@@ -5,4 +5,5 @@ public sealed record ApplyStep1IntentCommand(
     Guid MatchId,
     Step1ReplyIntent Intent,
     DateTimeOffset? Eta,
+    DateTimeOffset PromptedAt = default,
     string Reserved = "");

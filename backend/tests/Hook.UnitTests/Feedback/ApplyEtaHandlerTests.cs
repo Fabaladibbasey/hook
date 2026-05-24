@@ -1,6 +1,8 @@
 using Hook.Features.Feedback;
+using Hook.Features.Feedback.AggregateStats;
 using Hook.Features.Feedback.Eta;
 using Hook.Features.Feedback.Models;
+using Hook.Features.Matching.MatchAggregate;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Core;
 using Hook.Shared.Pipeline.PostCommitSends;
@@ -52,9 +54,20 @@ public class ApplyEtaHandlerTests
             .Returns(ValueTask.CompletedTask);
     }
 
-    private ApplyEtaHandler Build() =>
-        new(_feedbackMock.Object, _eventBusMock.Object, Options.Create(_options), _clock,
-            NullLogger<ApplyEtaHandler>.Instance);
+    private ApplyEtaHandler Build()
+    {
+        var service = new FeedbackResponseService(
+            _feedbackMock.Object,
+            new Mock<IMatchRepository>().Object,
+            _eventBusMock.Object,
+            _busMock.Object,
+            Options.Create(_options),
+            _clock,
+            NullLogger<FeedbackResponseService>.Instance);
+        return new ApplyEtaHandler(
+            _feedbackMock.Object, _eventBusMock.Object, service, Options.Create(_options),
+            _clock, NullLogger<ApplyEtaHandler>.Instance);
+    }
 
     private MatchFeedback Pending(FeedbackStep step = FeedbackStep.AwaitingEta, DateTimeOffset? promptedAt = null) =>
         MatchFeedback.CreatePending(Guid.NewGuid(), Guid.NewGuid(), step, promptedAt ?? _clock.GetUtcNow());
@@ -80,8 +93,17 @@ public class ApplyEtaHandlerTests
     [Fact]
     public async Task Handle_PendingAlreadyClaimed_NoOp()
     {
-        var pending = Pending();
-        pending.Resolve(FeedbackAnswer.EtaCaptured, _clock.GetUtcNow());
+        var now = _clock.GetUtcNow();
+        var pending = new MatchFeedback
+        {
+            Id = Guid.CreateVersion7(),
+            MatchId = Guid.NewGuid(),
+            RequestId = Guid.NewGuid(),
+            Step = FeedbackStep.AwaitingEta,
+            PromptedAt = now,
+            Answer = FeedbackAnswer.EtaCaptured,
+            RepliedAt = now,
+        };
         _feedbackMock.Setup(x => x.GetByIdAsync(pending.Id, It.IsAny<CancellationToken>())).ReturnsAsync(pending);
 
         await Build().Handle(

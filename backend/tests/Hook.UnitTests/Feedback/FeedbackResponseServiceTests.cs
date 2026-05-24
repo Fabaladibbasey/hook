@@ -30,6 +30,16 @@ public class FeedbackResponseServiceTests
         Assert.Equal(expected, FeedbackResponseService.Humanize(TimeSpan.FromMinutes(totalMinutes)));
 
     [Theory]
+    [InlineData("call +220 700 12345 if you want", "call [phone] if you want")]
+    [InlineData("220-700-12345 is my number", "[phone] is my number")]
+    [InlineData("(220) 700 1234", "[phone]")]
+    [InlineData("+220.700.12345 maybe later", "[phone] maybe later")]
+    [InlineData("pure digits +22070012345", "pure digits [phone]")]
+    [InlineData("short 1234567 stays", "short 1234567 stays")]
+    public void ScrubForOutbox_replaces_separator_formatted_phone_numbers(string input, string expected) =>
+        Assert.Equal(expected, FeedbackResponseService.ScrubForOutbox(input, 1000));
+
+    [Theory]
     [InlineData("1", 3, 1)]
     [InlineData("  2  ", 3, 2)]
     [InlineData("3.", 3, 3)]

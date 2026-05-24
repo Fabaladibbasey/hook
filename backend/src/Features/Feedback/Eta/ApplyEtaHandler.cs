@@ -1,5 +1,5 @@
+using Hook.Features.Feedback.AggregateStats;
 using Hook.Features.Feedback.Models;
-using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Core;
 using Hook.Shared.Pipeline.PostCommitSends;
 using Microsoft.Extensions.Options;
@@ -10,6 +10,7 @@ namespace Hook.Features.Feedback.Eta;
 public sealed class ApplyEtaHandler(
     IFeedbackRepository feedback,
     IEventBus events,
+    FeedbackResponseService service,
     IOptions<FeedbackOptions> options,
     TimeProvider clock,
     ILogger<ApplyEtaHandler> logger)
@@ -34,7 +35,7 @@ public sealed class ApplyEtaHandler(
                 logger.LogWarning(
                     "ETA {Eta} for match {MatchId} exceeds MaxEtaHorizon ({Horizon}); falling back",
                     etaValue, cmd.MatchId, opts.MaxEtaHorizon);
-                await ClaimSkippedAndFallbackAsync(pending, opts, now, cmd.From, bus, ct);
+                await service.ClaimSkippedAndFallbackAsync(pending, opts, now, cmd.From, ct);
                 return;
             }
 
@@ -53,29 +54,10 @@ public sealed class ApplyEtaHandler(
 
         if (now - pending.PromptedAt <= opts.ParseRetryWindow)
         {
-            var retry = "Sorry, didn't catch that. When do you think the job will be done? "
-                + "e.g. 'in 3 hours' or 'tomorrow at 5pm'.";
-            await bus.PublishAsync(new SendWhatsAppTextCommand(cmd.From, retry));
+            await bus.PublishAsync(new SendWhatsAppTextCommand(cmd.From, FeedbackCopy.AwaitingEtaRetry));
             return;
         }
 
-        await ClaimSkippedAndFallbackAsync(pending, opts, now, cmd.From, bus, ct);
-    }
-
-    private async Task ClaimSkippedAndFallbackAsync(
-        MatchFeedback pending,
-        FeedbackOptions opts,
-        DateTimeOffset now,
-        PhoneNumber from,
-        IMessageBus bus,
-        CancellationToken ct)
-    {
-        if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct)) return;
-        await events.ScheduleAsync(new Step2FeedbackCheck(pending.MatchId), opts.Step2InProgressRecheckDelay, ct);
-        await bus.PublishAsync(new SendWhatsAppTextCommand(from,
-            "Thanks — recorded that. No more questions on this one."));
-        logger.LogInformation(
-            "ETA unusable for match {MatchId}; Step2 recheck scheduled at +{Delay}",
-            pending.MatchId, opts.Step2InProgressRecheckDelay);
+        await service.ClaimSkippedAndFallbackAsync(pending, opts, now, cmd.From, ct);
     }
 }

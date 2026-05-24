@@ -16,7 +16,8 @@ public sealed class ApplyStep1IntentHandler(
         if (pending is null
             || pending.Answer is not FeedbackAnswer.Pending
             || pending.Step != FeedbackStep.DidYouFind
-            || pending.MatchId != cmd.MatchId) return;
+            || pending.MatchId != cmd.MatchId
+            || pending.PromptedAt != cmd.PromptedAt) return;
 
         var request = await requests.GetAsync(pending.RequestId, ct);
         if (request is null) return;

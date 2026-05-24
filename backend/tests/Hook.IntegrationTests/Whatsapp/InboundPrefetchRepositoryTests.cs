@@ -157,9 +157,16 @@ public sealed class InboundPrefetchRepositoryTests : PipelineTestBase
             db.ServiceRequests.Add(request);
             var match = Match.Create(request.Id, UniquePhone(), "plumbing", 0, 0, now);
             db.Matches.Add(match);
-            var answered = MatchFeedback.CreatePending(
-                match.Id, request.Id, FeedbackStep.DidYouFind, now);
-            answered.Resolve(FeedbackAnswer.Yes, now);
+            var answered = new MatchFeedback
+            {
+                Id = Guid.CreateVersion7(),
+                MatchId = match.Id,
+                RequestId = request.Id,
+                Step = FeedbackStep.DidYouFind,
+                PromptedAt = now,
+                Answer = FeedbackAnswer.Yes,
+                RepliedAt = now,
+            };
             db.MatchFeedback.Add(answered);
             await db.SaveChangesAsync();
         }

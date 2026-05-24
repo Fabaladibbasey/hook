@@ -85,7 +85,9 @@ public sealed class FeedbackResponseService(
         }
 
         await bus.PublishAsync(new ExtractStep1IntentCommand(
-            pending.Id, pending.MatchId, ScrubForOutbox(text, options.Value.OutboxTextMaxChars)));
+            pending.Id, pending.MatchId,
+            ScrubForOutbox(text, options.Value.OutboxTextMaxChars),
+            pending.PromptedAt));
     }
 
     internal async Task ApplyStep1IntentAsync(
@@ -240,7 +242,7 @@ public sealed class FeedbackResponseService(
     // user-shared third-party phones do not accumulate at rest (NoReason rows
     // + ExtractStep{1,2}IntentCommand envelope bodies).
     internal static readonly Regex PhoneScrubRx = new(
-        @"\+?\d{8,15}", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+        @"\+?\(?\d[\d\s().\-]{7,19}\d", RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     internal static string ScrubForOutbox(string text, int maxChars)
     {
@@ -319,7 +321,9 @@ public sealed class FeedbackResponseService(
 
         // Layer 3: AI fallback off the user-visible critical path.
         await bus.PublishAsync(new ExtractStep2IntentCommand(
-            pending.Id, pending.MatchId, ScrubForOutbox(text, opts.OutboxTextMaxChars)));
+            pending.Id, pending.MatchId,
+            ScrubForOutbox(text, opts.OutboxTextMaxChars),
+            pending.PromptedAt));
     }
 
     internal async Task ApplyStep2IntentAsync(

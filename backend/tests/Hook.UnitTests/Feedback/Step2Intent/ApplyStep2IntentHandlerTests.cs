@@ -2,8 +2,8 @@ using Hook.Features.Feedback;
 using Hook.Features.Feedback.AggregateStats;
 using Hook.Features.Feedback.Models;
 using Hook.Features.Feedback.Step2Intent;
-using Hook.Features.Matching.MatchAggregate;
 using Hook.Features.Geocoding.Models;
+using Hook.Features.Matching.MatchAggregate;
 using Hook.Features.ServiceRequest.RequestAggregate;
 using Hook.Shared.Core;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -55,13 +55,17 @@ public class ApplyStep2IntentHandlerTests
         Guid? matchId = null,
         Guid? requestId = null)
     {
-        var row = MatchFeedback.CreatePending(
-            matchId ?? Guid.NewGuid(),
-            requestId ?? Guid.NewGuid(),
-            step,
-            _clock.GetUtcNow());
-        if (resolveAs is { } answer) row.Resolve(answer, _clock.GetUtcNow());
-        return row;
+        var now = _clock.GetUtcNow();
+        return new MatchFeedback
+        {
+            Id = Guid.CreateVersion7(),
+            MatchId = matchId ?? Guid.NewGuid(),
+            RequestId = requestId ?? Guid.NewGuid(),
+            Step = step,
+            PromptedAt = now,
+            Answer = resolveAs ?? FeedbackAnswer.Pending,
+            RepliedAt = resolveAs is null ? null : now,
+        };
     }
 
     private void StubRequest(Guid requestId, string phone = "+2203339999")
@@ -138,7 +142,7 @@ public class ApplyStep2IntentHandlerTests
             .ReturnsAsync((ServiceRequestEntity?)null);
 
         await Build().Handle(
-            new ApplyStep2IntentCommand(pending.Id, pending.MatchId, Step2ReplyIntent.Yes, null),
+            new ApplyStep2IntentCommand(pending.Id, pending.MatchId, Step2ReplyIntent.Yes, null, pending.PromptedAt),
             CancellationToken.None);
 
         _claimed.ShouldBeEmpty();
@@ -155,10 +159,29 @@ public class ApplyStep2IntentHandlerTests
             .ReturnsAsync((Match?)null);
 
         await Build().Handle(
-            new ApplyStep2IntentCommand(pending.Id, pending.MatchId, Step2ReplyIntent.Yes, null),
+            new ApplyStep2IntentCommand(pending.Id, pending.MatchId, Step2ReplyIntent.Yes, null, pending.PromptedAt),
             CancellationToken.None);
 
         _claimed.ShouldHaveSingleItem();
         _claimed[0].Answer.ShouldBe(FeedbackAnswer.Yes);
+    }
+
+    [Fact]
+    public async Task Handle_StalePromptedAt_NoOps()
+    {
+        // Re-prompt between Extract publish and Apply firing: pending.PromptedAt advanced
+        // via TryRepromptPendingAsync, so the in-flight envelope's snapshot no longer
+        // matches the row's prompted-at. Drop to avoid cross-prompt contamination.
+        var pending = Pending();
+        _feedbackMock.Setup(x => x.GetByIdAsync(pending.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pending);
+        StubRequest(pending.RequestId);
+        var stale = pending.PromptedAt - TimeSpan.FromMinutes(5);
+
+        await Build().Handle(
+            new ApplyStep2IntentCommand(pending.Id, pending.MatchId, Step2ReplyIntent.Yes, null, stale),
+            CancellationToken.None);
+
+        _claimed.ShouldBeEmpty();
     }
 }

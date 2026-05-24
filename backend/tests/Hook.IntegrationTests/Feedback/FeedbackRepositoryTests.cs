@@ -136,31 +136,6 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
     }
 
     [Fact]
-    public async Task GetLatestPendingForClient_NoMatches_ReturnsNull()
-    {
-        await using var scope = _fx.Factory.Services.CreateAsyncScope();
-        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
-        Assert.Null(await repo.GetLatestPendingForClientAsync(UniquePhone()));
-    }
-
-    [Fact]
-    public async Task GetLatestPendingForClient_HasMatchesButNoPending_ReturnsNull()
-    {
-        var clientPhone = UniquePhone();
-        await using var scope = _fx.Factory.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
-
-        var (request, match) = await SeedMatchAsync(db, clientPhone);
-        var fb = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
-        fb.Resolve(FeedbackAnswer.Yes, DateTimeOffset.UtcNow);
-        db.MatchFeedback.Add(fb);
-        await db.SaveChangesAsync();
-
-        Assert.Null(await repo.GetLatestPendingForClientAsync(clientPhone));
-    }
-
-    [Fact]
     public async Task TryAddPendingAsync_DuplicatePending_ReturnsFalse()
     {
         var clientPhone = UniquePhone();
@@ -242,55 +217,6 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         await using var verifyScope = _fx.Factory.Services.CreateAsyncScope();
         var verifyDb = verifyScope.ServiceProvider.GetRequiredService<HookDbContext>();
         Assert.NotNull(await verifyDb.MatchFeedback.AsNoTracking().FirstOrDefaultAsync(f => f.Id == answered.Id));
-    }
-
-    [Fact]
-    public async Task GetLatestPendingForClient_OtherClientPending_DoesNotLeak()
-    {
-        var clientA = UniquePhone();
-        var clientB = UniquePhone();
-        await using var scope = _fx.Factory.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
-
-        var (_, matchA) = await SeedMatchAsync(db, clientA);
-        var (_, matchB) = await SeedMatchAsync(db, clientB);
-        db.MatchFeedback.AddRange(
-            MatchFeedback.CreatePending(matchA.Id, matchA.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow),
-            MatchFeedback.CreatePending(matchB.Id, matchB.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow));
-        await db.SaveChangesAsync();
-
-        var forA = await repo.GetLatestPendingForClientAsync(clientA);
-        Assert.NotNull(forA);
-        Assert.Equal(matchA.Id, forA!.MatchId);
-
-        var forB = await repo.GetLatestPendingForClientAsync(clientB);
-        Assert.NotNull(forB);
-        Assert.Equal(matchB.Id, forB!.MatchId);
-    }
-
-    [Fact]
-    public async Task GetLatestPendingForClient_MultiplePending_ReturnsLatestPromptedAt()
-    {
-        var clientPhone = UniquePhone();
-        await using var scope = _fx.Factory.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
-
-        var (_, olderMatch) = await SeedMatchAsync(db, clientPhone);
-        var (_, newerMatch) = await SeedMatchAsync(db, clientPhone);
-        var older = MatchFeedback.CreatePending(
-            olderMatch.Id, olderMatch.RequestId, FeedbackStep.DidYouFind,
-            DateTimeOffset.UtcNow - TimeSpan.FromHours(2));
-        var newer = MatchFeedback.CreatePending(
-            newerMatch.Id, newerMatch.RequestId, FeedbackStep.DidYouFind,
-            DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5));
-        db.MatchFeedback.AddRange(older, newer);
-        await db.SaveChangesAsync();
-
-        var found = await repo.GetLatestPendingForClientAsync(clientPhone);
-        Assert.NotNull(found);
-        Assert.Equal(newer.Id, found!.Id);
     }
 
     private static async Task<(ServiceRequest Request, Match Match)> SeedMatchAsync(

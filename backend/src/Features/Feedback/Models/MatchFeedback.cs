@@ -8,13 +8,13 @@ public class MatchFeedback : IAggregateRoot
     public required Guid MatchId { get; init; }
     public required Guid RequestId { get; init; }
     public required FeedbackStep Step { get; init; }
-    public FeedbackAnswer Answer { get; private set; } = FeedbackAnswer.Pending;
+    public FeedbackAnswer Answer { get; init; } = FeedbackAnswer.Pending;
     public DateTimeOffset PromptedAt { get; init; }
-    public DateTimeOffset? RepliedAt { get; private set; }
+    public DateTimeOffset? RepliedAt { get; init; }
 
     // Set when AwaitingEta resolves to a parseable future ETA — kept for audit/replay
     // and for downstream reporting on "predicted vs actual completion".
-    public DateTimeOffset? EtaUtc { get; private set; }
+    public DateTimeOffset? EtaUtc { get; init; }
 
     // How many times Step1 has been re-asked because the user replied with a
     // reschedule signal ("still looking", "ask later"). Bumped by the reply
@@ -39,17 +39,4 @@ public class MatchFeedback : IAggregateRoot
             Step = step,
             PromptedAt = now
         };
-
-    public void Resolve(FeedbackAnswer answer, DateTimeOffset now)
-    {
-        Answer = answer;
-        RepliedAt = now;
-    }
-
-    public void ResolveWithEta(FeedbackAnswer answer, DateTimeOffset eta, DateTimeOffset now)
-    {
-        Answer = answer;
-        RepliedAt = now;
-        EtaUtc = eta;
-    }
 }
