@@ -341,13 +341,18 @@ public class FeedbackResponseServiceTests
     [Fact]
     public async Task DidYouFind_NoReply_RaceLost_DoesNotAck()
     {
+        // Reserve-then-publish-then-claim: a unique-collision on the CaptureNoReason
+        // partial index (prior run already reserved + sent the prompt) must short-circuit
+        // silently — no duplicate prompt, no Step1 claim (claim follows reserve, so the
+        // original DidYouFind row stays open for legitimate retry).
         var pending = SeedPendingForStep(FeedbackStep.DidYouFind);
-        _tryClaimResult = false;
+        _tryAddResult = false;
 
         await Build().HandleAsync(NewInbound("no"), pending, CancellationToken.None);
 
-        Assert.Empty(_claimed);
+        Assert.Empty(_added);
         Assert.Empty(_sent);
+        Assert.Empty(_claimed);
     }
 
     [Fact]

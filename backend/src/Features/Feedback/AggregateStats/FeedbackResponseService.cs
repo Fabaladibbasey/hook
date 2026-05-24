@@ -103,13 +103,19 @@ public sealed class FeedbackResponseService(
                 return;
 
             case Step1ReplyIntent.No:
-                if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.No, now, ct)) return;
+                // Reserve CaptureNoReason first, then publish prompt, then claim Step1.
+                // Reserve-then-publish-then-claim mirrors HandleStep1YesAsync's multi-pick
+                // branch: on a mid-method crash the inbound re-enters, the deterministic
+                // No re-fires, the unique (MatchId, Step) partial index collides cleanly
+                // on the prior CaptureNoReason row, and we exit silently — the prior run
+                // already sent the prompt the user sees.
                 var captureRow = MatchFeedback.CreatePending(
                     pending.MatchId, pending.RequestId, FeedbackStep.CaptureNoReason, now);
                 if (!await feedback.TryAddPendingAsync(captureRow, ct)) return;
                 await bus.PublishAsync(new SendWhatsAppTextCommand(from,
                     "Thanks. What made it hard — nobody replied, prices, distance, something else? "
                     + "(or reply SKIP)"));
+                await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.No, now, ct);
                 return;
 
             case Step1ReplyIntent.Reschedule:

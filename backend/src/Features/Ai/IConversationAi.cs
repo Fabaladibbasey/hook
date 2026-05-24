@@ -63,7 +63,7 @@ public interface IConversationAi
     // parsers in QuickIntent miss. Absorbs failures and returns
     // `Step1ParseResult(Step1ReplyIntent.Unclear, null)` so the caller stays
     // try-catch-free; the absorbed-fallback path increments the
-    // AiOutboundDropped metric with stage="step1_intent".
+    // AiOutboundDropped metric with stage="extract-step1-intent".
     Task<Step1ParseResult> ExtractStep1IntentAsync(
         string userMessage,
         DateTimeOffset now,
