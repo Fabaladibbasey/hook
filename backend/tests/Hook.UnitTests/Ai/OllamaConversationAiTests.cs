@@ -3,6 +3,7 @@ using System.Text;
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
 using Hook.Features.Feedback.Step1Intent;
+using Hook.Features.Feedback.Step2Intent;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Shouldly;
@@ -234,6 +235,116 @@ public class OllamaConversationAiTests
     private static OllamaConversationAi BuildStep1Ai(string intent, string? etaUtc)
     {
         // The handler wraps a JSON object inside the Ollama message envelope.
+        var inner = etaUtc is null
+            ? $"{{\"intent\":\"{intent}\",\"etaUtc\":null}}"
+            : $"{{\"intent\":\"{intent}\",\"etaUtc\":\"{etaUtc}\"}}";
+        return BuildAi(inner);
+    }
+
+    // -- ExtractStep2IntentAsync --
+
+    [Theory]
+    [InlineData("Yes", Step2ReplyIntent.Yes)]
+    [InlineData("no", Step2ReplyIntent.No)]
+    [InlineData("INPROGRESS", Step2ReplyIntent.InProgress)]
+    [InlineData("StopAsking", Step2ReplyIntent.StopAsking)]
+    [InlineData("in_progress", Step2ReplyIntent.Unclear)]
+    [InlineData("garbage", Step2ReplyIntent.Unclear)]
+    [InlineData("", Step2ReplyIntent.Unclear)]
+    public async Task ExtractStep2IntentAsync_CaseInsensitiveIntent_MapsToEnum(string raw, Step2ReplyIntent expected)
+    {
+        var ai = BuildStep2Ai(intent: raw, etaUtc: null);
+
+        var result = await ai.ExtractStep2IntentAsync("anything", DateTimeOffset.UtcNow);
+
+        result.Intent.ShouldBe(expected);
+        result.Eta.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ExtractStep2IntentAsync_InProgressWithFutureEta_ParsesEta()
+    {
+        var now = DateTimeOffset.Parse("2026-05-24T12:00:00Z");
+        var eta = "2026-05-24T15:00:00Z";
+        var ai = BuildStep2Ai(intent: "InProgress", etaUtc: eta);
+
+        var result = await ai.ExtractStep2IntentAsync("in 3 hours", now);
+
+        result.Intent.ShouldBe(Step2ReplyIntent.InProgress);
+        result.Eta.ShouldBe(DateTimeOffset.Parse(eta));
+    }
+
+    [Fact]
+    public async Task ExtractStep2IntentAsync_InProgressPastEta_DropsEta()
+    {
+        var now = DateTimeOffset.Parse("2026-05-24T12:00:00Z");
+        var ai = BuildStep2Ai(intent: "InProgress", etaUtc: "2026-05-23T12:00:00Z");
+
+        var result = await ai.ExtractStep2IntentAsync("in 3 hours", now);
+
+        result.Intent.ShouldBe(Step2ReplyIntent.InProgress);
+        result.Eta.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ExtractStep2IntentAsync_InProgressUnparseableEta_DropsEta()
+    {
+        var ai = BuildStep2Ai(intent: "InProgress", etaUtc: "not-a-date");
+
+        var result = await ai.ExtractStep2IntentAsync("in a while", DateTimeOffset.UtcNow);
+
+        result.Intent.ShouldBe(Step2ReplyIntent.InProgress);
+        result.Eta.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ExtractStep2IntentAsync_NonInProgressWithEta_DiscardsEta()
+    {
+        var ai = BuildStep2Ai(intent: "Yes", etaUtc: "2099-01-01T00:00:00Z");
+
+        var result = await ai.ExtractStep2IntentAsync("yes", DateTimeOffset.UtcNow);
+
+        result.Intent.ShouldBe(Step2ReplyIntent.Yes);
+        result.Eta.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ExtractStep2IntentAsync_TransportFailure_ReturnsUnclearFallback()
+    {
+        var ai = BuildFailingAi();
+
+        var result = await ai.ExtractStep2IntentAsync("anything", DateTimeOffset.UtcNow);
+
+        result.Intent.ShouldBe(Step2ReplyIntent.Unclear);
+        result.Eta.ShouldBeNull();
+    }
+
+    // T5: server-side ETA guard — AI cannot inject etaUtc when source text has
+    // no digit run and no ETA keyword.
+    [Fact]
+    public async Task ExtractStep2IntentAsync_AiFabricatesEtaForGarbageText_DropsEta()
+    {
+        var ai = BuildStep2Ai(intent: "InProgress", etaUtc: "2099-01-01T00:00:00Z");
+
+        var result = await ai.ExtractStep2IntentAsync("blegh xyz", DateTimeOffset.UtcNow);
+
+        result.Intent.ShouldBe(Step2ReplyIntent.InProgress);
+        result.Eta.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ExtractStep1IntentAsync_AiFabricatesEtaForGarbageText_DropsEta()
+    {
+        var ai = BuildStep1Ai(intent: "Reschedule", etaUtc: "2099-01-01T00:00:00Z");
+
+        var result = await ai.ExtractStep1IntentAsync("blegh xyz", DateTimeOffset.UtcNow);
+
+        result.Intent.ShouldBe(Step1ReplyIntent.Reschedule);
+        result.Eta.ShouldBeNull();
+    }
+
+    private static OllamaConversationAi BuildStep2Ai(string intent, string? etaUtc)
+    {
         var inner = etaUtc is null
             ? $"{{\"intent\":\"{intent}\",\"etaUtc\":null}}"
             : $"{{\"intent\":\"{intent}\",\"etaUtc\":\"{etaUtc}\"}}";

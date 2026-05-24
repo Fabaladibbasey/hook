@@ -1,5 +1,6 @@
 using Hook.Features.Ai.Models;
 using Hook.Features.Feedback.Step1Intent;
+using Hook.Features.Feedback.Step2Intent;
 
 namespace Hook.Features.Ai;
 
@@ -65,6 +66,16 @@ public interface IConversationAi
     // try-catch-free; the absorbed-fallback path increments the
     // AiOutboundDropped metric with stage="extract-step1-intent".
     Task<Step1ParseResult> ExtractStep1IntentAsync(
+        string userMessage,
+        DateTimeOffset now,
+        CancellationToken ct = default);
+
+    // Classifies the Step2 "is the job done?" reply when deterministic parsers
+    // in QuickIntent miss. Absorbs failures and returns
+    // `Step2ParseResult(Step2ReplyIntent.Unclear, null)` so the caller stays
+    // try-catch-free; the absorbed-fallback path increments the
+    // AiOutboundDropped metric with stage="extract-step2-intent".
+    Task<Step2ParseResult> ExtractStep2IntentAsync(
         string userMessage,
         DateTimeOffset now,
         CancellationToken ct = default);

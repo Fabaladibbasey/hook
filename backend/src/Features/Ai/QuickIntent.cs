@@ -243,11 +243,17 @@ public static class QuickIntent
         + @"in\s+(a\s+)?(bit|while|moment)|not\s+(right\s+)?now|need\s+(more\s+)?time)\b",
         RxOpts);
 
+    // Lowercase + trim + strip trailing punctuation. Single allocation site reused
+    // across Step1/Step2 deterministic detectors so a multi-call inbound (e.g. Step2
+    // → DetectInProgress → DetectReschedule) does not re-normalise the same text.
+    internal static string Normalize(string text) =>
+        text.Trim().ToLowerInvariant().TrimEnd('.', '!', '?');
+
     /// <summary>True when the text reads as "stop asking me about this".</summary>
     public static bool DetectStop(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
-        var s = text.Trim().ToLowerInvariant().TrimEnd('.', '!', '?');
+        var s = Normalize(text);
         if (StopPhraseRx.IsMatch(s)) return true;
 
         // Fuzzy single-token: collapse internal whitespace so "leave me alone" still
@@ -260,10 +266,64 @@ public static class QuickIntent
     public static bool DetectReschedule(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return false;
-        var s = text.Trim().ToLowerInvariant().TrimEnd('.', '!', '?');
+        var s = Normalize(text);
         if (ReschedulePhraseRx.IsMatch(s)) return true;
         var compact = string.Concat(s.Where(c => !char.IsWhiteSpace(c)));
         return compact.Length >= 4 && FuzzyMatch.MatchesAny(compact, RescheduleTokens, 1);
+    }
+
+    // Step2 InProgress hints: "still working", "almost done", "halfway", "not
+    // finished" etc. Kept separate from DetectReschedule so Step1 callers do not
+    // gain Step2-specific matches. DetectReschedule covers "not yet"/"later"/
+    // "tomorrow"/"in a bit" already — those imply the job is not finished but
+    // will be, semantically equivalent to InProgress for Step2.
+    private static readonly string[] InProgressTokens =
+    [
+        "stillworking", "workingonit", "stilldoing", "almostdone", "almostfinished",
+        "halfway", "halfwaydone", "ongoing", "doingitnow", "notdone", "notfinished",
+        "notcomplete"
+    ];
+
+    private static readonly Regex InProgressPhraseRx = new(
+        @"\b(still\s+working|working\s+on\s+(it|that)|still\s+doing|almost\s+(done|finished)|"
+        + @"halfway(\s+done)?|in\s+the\s+middle\s+(of\s+it)?|ongoing|doing\s+it\s+now|"
+        + @"not\s+(done|finished|complete)|"
+        + @"in\s+\d+\s+(hour|hr|minute|min|day)s?)\b",
+        RxOpts);
+
+    /// <summary>True when the text reads as "the job is underway / not finished yet".
+    /// Short-circuits through <see cref="DetectReschedule"/> internally so callers
+    /// need only invoke this detector for full Step2 coverage.</summary>
+    public static bool DetectInProgress(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        if (DetectReschedule(text)) return true;
+        var s = Normalize(text);
+        if (InProgressPhraseRx.IsMatch(s)) return true;
+        var compact = string.Concat(s.Where(c => !char.IsWhiteSpace(c)));
+        return compact.Length >= 4 && FuzzyMatch.MatchesAny(compact, InProgressTokens, 1);
+    }
+
+    private static readonly Regex RelativeEtaRx = new(
+        @"\bin\s+(\d{1,3})\s+(hour|hr|minute|min|day)s?\b",
+        RxOpts);
+
+    /// <summary>Extracts a relative-duration ETA ("in 3 hours", "in 30 minutes") deterministically
+    /// so the layered Step2 parser does not need to round-trip to Ollama for the common case.
+    /// Returns null on no match, non-positive duration, or absolute forms ("tomorrow at 5pm").</summary>
+    public static DateTimeOffset? TryExtractRelativeEta(string? text, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        var m = RelativeEtaRx.Match(text);
+        if (!m.Success) return null;
+        if (!int.TryParse(m.Groups[1].Value, out var n) || n <= 0) return null;
+        return m.Groups[2].Value.ToLowerInvariant() switch
+        {
+            "hour" or "hr" => now.AddHours(n),
+            "minute" or "min" => now.AddMinutes(n),
+            "day" => now.AddDays(n),
+            _ => null
+        };
     }
 
     /// <summary>

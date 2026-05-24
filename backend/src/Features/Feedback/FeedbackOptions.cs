@@ -52,6 +52,11 @@ public sealed class FeedbackOptions
     // scheduled re-fire) collapse to one prompt.
     [Range(typeof(TimeSpan), "00:00:30", "01:00:00")]
     public TimeSpan MinRecheckGap { get; init; } = TimeSpan.FromMinutes(5);
+
+    // Cap on user text persisted into the durable outbox via ExtractStep{1,2}IntentCommand.
+    // Bounds dead-letter row size and PII surface at rest; AI inference re-fences anyway.
+    [Range(64, 4096)]
+    public int OutboxTextMaxChars { get; init; } = 1000;
 }
 
 // Cross-knob validator: Step1MaxRechecks must not exceed the ladder length so
