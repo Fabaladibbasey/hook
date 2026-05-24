@@ -3,6 +3,8 @@ using Hook.Features.Feedback.AggregateStats;
 using Hook.Features.Feedback.Eta;
 using Hook.Features.Feedback.Models;
 using Hook.Features.Feedback.ProviderStatsAggregate;
+using Hook.Features.Feedback.Step1Intent;
+using Hook.Features.Feedback.Step1Prompt;
 using Hook.Features.Matching.MatchAggregate;
 using Hook.Features.Whatsapp.Models;
 using Hook.Features.Whatsapp.Phone;
@@ -76,6 +78,15 @@ public class FeedbackResponseServiceTests
         Assert.Null(FeedbackResponseService.ParseAnswer("   "));
 
     [Theory]
+    [InlineData(30, "30 minutes")]
+    [InlineData(60, "1 hour")]
+    [InlineData(89, "1h 29m")]
+    [InlineData(90, "1h 30m")]
+    [InlineData(360, "6 hours")]
+    public void Humanize_FormatsByGranularity(int totalMinutes, string expected) =>
+        Assert.Equal(expected, FeedbackResponseService.Humanize(TimeSpan.FromMinutes(totalMinutes)));
+
+    [Theory]
     [InlineData("1", 3, 1)]
     [InlineData("  2  ", 3, 2)]
     [InlineData("3.", 3, 3)]
@@ -102,6 +113,7 @@ public class FeedbackResponseServiceTests
     private readonly List<object> _published = [];
     private readonly List<(object Message, TimeSpan Delay)> _scheduled = [];
     private readonly List<ExtractEtaCommand> _extractEtaRequests = [];
+    private readonly List<ExtractStep1IntentCommand> _extractStep1Requests = [];
 
     private readonly Mock<IFeedbackRepository> _feedbackMock = new();
     private readonly Mock<IMatchRepository> _matchesMock = new();
@@ -176,6 +188,10 @@ public class FeedbackResponseServiceTests
         _messageBusMock.Setup(x => x.PublishAsync(It.IsAny<ExtractEtaCommand>(), It.IsAny<Wolverine.DeliveryOptions>()))
             .Callback<object, Wolverine.DeliveryOptions>((msg, _) => _extractEtaRequests.Add((ExtractEtaCommand)msg))
             .Returns(ValueTask.CompletedTask);
+        _messageBusMock.Setup(x => x.PublishAsync(It.IsAny<ExtractStep1IntentCommand>(), It.IsAny<Wolverine.DeliveryOptions>()))
+            .Callback<object, Wolverine.DeliveryOptions>((msg, _) =>
+                _extractStep1Requests.Add((ExtractStep1IntentCommand)msg))
+            .Returns(ValueTask.CompletedTask);
     }
 
     private FeedbackResponseService Build() =>
@@ -238,15 +254,19 @@ public class FeedbackResponseServiceTests
     // -- HandleDidYouFindAsync ------------------------------------------------
 
     [Fact]
-    public async Task DidYouFind_InProgressReply_DoesNotClaimAndAsksRetry()
+    public async Task DidYouFind_AmbiguousReply_DefersToAiExtract()
     {
+        // "in progress" is not Yes/No/Stop/Reschedule; falls through to the AI
+        // extractor (outbox-driven) without claiming or sending inline.
         var pending = SeedPendingForStep(FeedbackStep.DidYouFind);
 
         await Build().HandleAsync(NewInbound("in progress"), pending, CancellationToken.None);
 
         Assert.Empty(_claimed);
-        Assert.Single(_sent);
-        Assert.Contains("YES if you found", _sent[0].Body);
+        Assert.Empty(_sent);
+        Assert.Single(_extractStep1Requests);
+        Assert.Equal(pending.Id, _extractStep1Requests[0].PendingId);
+        Assert.Equal("in progress", _extractStep1Requests[0].Text);
     }
 
     [Fact]
@@ -302,7 +322,7 @@ public class FeedbackResponseServiceTests
     }
 
     [Fact]
-    public async Task DidYouFind_NoReply_ClaimsNoAndAcks()
+    public async Task DidYouFind_NoReply_ClaimsNoAndOpensCaptureNoReasonFollowUp()
     {
         var pending = SeedPendingForStep(FeedbackStep.DidYouFind);
 
@@ -310,9 +330,12 @@ public class FeedbackResponseServiceTests
 
         Assert.Single(_claimed);
         Assert.Equal(FeedbackAnswer.No, _claimed[0].Answer);
+        Assert.Single(_added);
+        Assert.Equal(FeedbackStep.CaptureNoReason, _added[0].Step);
         Assert.Empty(_published);
         Assert.Single(_sent);
-        Assert.Contains("Thanks for letting us know", _sent[0].Body);
+        Assert.Contains("What made it hard", _sent[0].Body);
+        Assert.Contains("SKIP", _sent[0].Body);
     }
 
     [Fact]
@@ -328,15 +351,17 @@ public class FeedbackResponseServiceTests
     }
 
     [Fact]
-    public async Task DidYouFind_GarbageWithinRetryWindow_SendsHint()
+    public async Task DidYouFind_GarbageWithinRetryWindow_PublishesExtractStep1Intent()
     {
+        // Layered parser misses → AI fallback. Inline send happens in ApplyStep1IntentHandler
+        // once the AI returns Unclear (see ApplyStep1IntentAsync_Unclear_WithinWindow_SendsHint).
         var pending = SeedPendingForStep(FeedbackStep.DidYouFind, promptedAt: _clock.GetUtcNow());
 
         await Build().HandleAsync(NewInbound("xyz"), pending, CancellationToken.None);
 
         Assert.Empty(_claimed);
-        Assert.Single(_sent);
-        Assert.Contains("Sorry, didn't catch that", _sent[0].Body);
+        Assert.Empty(_sent);
+        Assert.Single(_extractStep1Requests);
     }
 
     [Fact]
@@ -364,6 +389,185 @@ public class FeedbackResponseServiceTests
         await Build().HandleAsync(NewInbound("yes"), pending, CancellationToken.None);
 
         Assert.Empty(_published);
+    }
+
+    // -- New layered-parser branches: Stop / Reschedule / Apply ---------------
+
+    [Fact]
+    public async Task DidYouFind_StopReply_ClaimsSkippedSendsStopAck_NoExtract()
+    {
+        var pending = SeedPendingForStep(FeedbackStep.DidYouFind);
+
+        await Build().HandleAsync(NewInbound("stop asking me"), pending, CancellationToken.None);
+
+        Assert.Single(_claimed);
+        Assert.Equal(FeedbackAnswer.Skipped, _claimed[0].Answer);
+        Assert.Single(_sent);
+        Assert.Contains("won't ask about this one again", _sent[0].Body);
+        Assert.Empty(_extractStep1Requests);
+    }
+
+    [Fact]
+    public async Task DidYouFind_BareStopToken_RoutesToStopBeforeRejection()
+    {
+        // Without the StopAsking-precedes-Rejection guard, QuickIntent.Detect("stop")
+        // would return Rejection → claim No + send NoReason follow-up.
+        var pending = SeedPendingForStep(FeedbackStep.DidYouFind);
+
+        await Build().HandleAsync(NewInbound("stop"), pending, CancellationToken.None);
+
+        Assert.Single(_claimed);
+        Assert.Equal(FeedbackAnswer.Skipped, _claimed[0].Answer);
+        Assert.Contains("won't ask", _sent[0].Body);
+    }
+
+    [Fact]
+    public async Task DidYouFind_RescheduleReply_BumpsRecheckSchedulesAtFirstRung()
+    {
+        var rescheduledIds = new List<Guid>();
+        _feedbackMock.Setup(x => x.TryRescheduleAsync(
+                It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, DateTimeOffset, CancellationToken>((id, _, _) => rescheduledIds.Add(id))
+            .ReturnsAsync(true);
+
+        var pending = SeedPendingForStep(FeedbackStep.DidYouFind);
+
+        await Build().HandleAsync(NewInbound("still looking"), pending, CancellationToken.None);
+
+        Assert.Equal(pending.Id, rescheduledIds.Single());
+        Assert.Single(_scheduled);
+        var (msg, delay) = _scheduled[0];
+        Assert.IsType<Step1RecheckCommand>(msg);
+        Assert.Equal(((Step1RecheckCommand)msg).MatchId, pending.MatchId);
+        Assert.Equal(_options.Step1RecheckSchedule[0], delay);
+        Assert.Single(_sent);
+        Assert.Contains("check back", _sent[0].Body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task DidYouFind_RescheduleAtLadderCap_ClaimsSkippedSilently()
+    {
+        // Pending row already at the cap; the next ambiguous reschedule must
+        // claim Skipped with no extra prompts.
+        var pending = MatchFeedback.CreatePending(
+            Guid.NewGuid(), Guid.NewGuid(), FeedbackStep.DidYouFind, _clock.GetUtcNow());
+        // Bump RecheckCount to cap via the private setter is not exposed — exercise
+        // through the public Resolve path is also unsuitable. Cheapest: rely on the
+        // service contract (Step1MaxRechecks=4 default; bump four times via Reschedule).
+        // Instead, just override the option to 0 so the very next no-eta reschedule
+        // claims Skipped.
+        var maxedOpts = new FeedbackOptions { Step1MaxRechecks = 0 };
+        var svc = new FeedbackResponseService(
+            _feedbackMock.Object, _matchesMock.Object, _busMock.Object, _messageBusMock.Object,
+            Microsoft.Extensions.Options.Options.Create(maxedOpts),
+            _clock,
+            NullLogger<FeedbackResponseService>.Instance);
+
+        await svc.HandleAsync(NewInbound("still looking"), pending, CancellationToken.None);
+
+        Assert.Single(_claimed);
+        Assert.Equal(FeedbackAnswer.Skipped, _claimed[0].Answer);
+        Assert.Empty(_scheduled);
+        Assert.Empty(_sent);
+    }
+
+    [Fact]
+    public async Task ApplyStep1IntentAsync_RescheduleWithEta_SchedulesAtEtaPlusBuffer()
+    {
+        var pending = SeedPendingForStep(FeedbackStep.DidYouFind);
+        _feedbackMock.Setup(x => x.TryRescheduleAsync(
+                It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var eta = _clock.GetUtcNow().AddHours(3);
+        await Build().ApplyStep1IntentAsync(
+            pending, PhoneNumber.Parse("+2203339999"),
+            Step1ReplyIntent.Reschedule, eta, CancellationToken.None);
+
+        Assert.Single(_scheduled);
+        var (msg, delay) = _scheduled[0];
+        Assert.IsType<Step1RecheckCommand>(msg);
+        // delay ≈ 3h + EtaScheduleBuffer (5m by default).
+        var expected = TimeSpan.FromHours(3) + _options.EtaScheduleBuffer;
+        Assert.True(Math.Abs((delay - expected).TotalMilliseconds) < 5);
+    }
+
+    [Fact]
+    public async Task ApplyStep1IntentAsync_RescheduleWithPastHorizonEta_CapsAtHorizon()
+    {
+        // 10 days out > MaxEtaHorizon (7d default) — we cap rather than StopAsking
+        // so the user who says "ask in a month" still gets one bounded recheck.
+        var pending = SeedPendingForStep(FeedbackStep.DidYouFind);
+        _feedbackMock.Setup(x => x.TryRescheduleAsync(
+                It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        var eta = _clock.GetUtcNow().AddDays(10);
+
+        await Build().ApplyStep1IntentAsync(
+            pending, PhoneNumber.Parse("+2203339999"),
+            Step1ReplyIntent.Reschedule, eta, CancellationToken.None);
+
+        Assert.Empty(_claimed);
+        Assert.Single(_scheduled);
+        var (msg, delay) = _scheduled[0];
+        Assert.IsType<Step1RecheckCommand>(msg);
+        var expected = _options.MaxEtaHorizon + _options.EtaScheduleBuffer;
+        Assert.Equal(expected, delay);
+        Assert.Single(_sent);
+        Assert.Contains("check back", _sent[0].Body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ApplyStep1IntentAsync_Unclear_WithinWindow_SendsRetryHint()
+    {
+        var pending = SeedPendingForStep(FeedbackStep.DidYouFind, promptedAt: _clock.GetUtcNow());
+
+        await Build().ApplyStep1IntentAsync(
+            pending, PhoneNumber.Parse("+2203339999"),
+            Step1ReplyIntent.Unclear, null, CancellationToken.None);
+
+        Assert.Empty(_claimed);
+        Assert.Single(_sent);
+        Assert.Contains("Sorry, didn't catch that", _sent[0].Body);
+    }
+
+    [Fact]
+    public async Task HandleCaptureNoReasonAsync_FreeText_PersistsAndAcks()
+    {
+        var captured = new List<(Guid Id, string? Reason)>();
+        _feedbackMock.Setup(x => x.TryClaimNoReasonAsync(
+                It.IsAny<Guid>(), It.IsAny<string?>(),
+                It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, string?, DateTimeOffset, CancellationToken>((id, reason, _, _) =>
+                captured.Add((id, reason)))
+            .ReturnsAsync(true);
+
+        var pending = SeedPendingForStep(FeedbackStep.CaptureNoReason);
+        await Build().HandleAsync(NewInbound("prices were too high"), pending, CancellationToken.None);
+
+        Assert.Single(captured);
+        Assert.Equal("prices were too high", captured[0].Reason);
+        Assert.Single(_sent);
+        Assert.Contains("that helps us improve", _sent[0].Body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task HandleCaptureNoReasonAsync_Skip_PersistsNullReason()
+    {
+        var captured = new List<(Guid Id, string? Reason)>();
+        _feedbackMock.Setup(x => x.TryClaimNoReasonAsync(
+                It.IsAny<Guid>(), It.IsAny<string?>(),
+                It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, string?, DateTimeOffset, CancellationToken>((id, reason, _, _) =>
+                captured.Add((id, reason)))
+            .ReturnsAsync(true);
+
+        var pending = SeedPendingForStep(FeedbackStep.CaptureNoReason);
+        await Build().HandleAsync(NewInbound("SKIP"), pending, CancellationToken.None);
+
+        Assert.Single(captured);
+        Assert.Null(captured[0].Reason);
+        Assert.Single(_sent);
     }
 
     // -- HandleIdentifyWinnerAsync --------------------------------------------

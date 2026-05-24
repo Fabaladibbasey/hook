@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
+using Hook.Features.Feedback.Step1Intent;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Shouldly;
@@ -149,6 +150,94 @@ public class OllamaConversationAiTests
         var ai = BuildFailingAi();
 
         await Should.ThrowAsync<HttpRequestException>(() => ai.DetectLanguageAsync("hola"));
+    }
+
+    // -- ExtractStep1IntentAsync --
+
+    [Theory]
+    [InlineData("Yes", Step1ReplyIntent.Yes)]
+    [InlineData("yes", Step1ReplyIntent.Yes)]
+    [InlineData("YES", Step1ReplyIntent.Yes)]
+    [InlineData("No", Step1ReplyIntent.No)]
+    [InlineData("reschedule", Step1ReplyIntent.Reschedule)]
+    [InlineData("STOPASKING", Step1ReplyIntent.StopAsking)]
+    [InlineData("garbage", Step1ReplyIntent.Unclear)]
+    [InlineData("", Step1ReplyIntent.Unclear)]
+    public async Task ExtractStep1IntentAsync_CaseInsensitiveIntent_MapsToEnum(string raw, Step1ReplyIntent expected)
+    {
+        var ai = BuildStep1Ai(intent: raw, etaUtc: null);
+
+        var result = await ai.ExtractStep1IntentAsync("anything", DateTimeOffset.UtcNow);
+
+        result.Intent.ShouldBe(expected);
+        result.Eta.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ExtractStep1IntentAsync_RescheduleWithFutureEta_ParsesEta()
+    {
+        var now = DateTimeOffset.Parse("2026-05-24T12:00:00Z");
+        var eta = "2026-05-25T12:00:00Z";
+        var ai = BuildStep1Ai(intent: "Reschedule", etaUtc: eta);
+
+        var result = await ai.ExtractStep1IntentAsync("tomorrow", now);
+
+        result.Intent.ShouldBe(Step1ReplyIntent.Reschedule);
+        result.Eta.ShouldBe(DateTimeOffset.Parse(eta));
+    }
+
+    [Fact]
+    public async Task ExtractStep1IntentAsync_ReschedulePastEta_DropsEta()
+    {
+        var now = DateTimeOffset.Parse("2026-05-24T12:00:00Z");
+        var ai = BuildStep1Ai(intent: "Reschedule", etaUtc: "2026-05-23T12:00:00Z");
+
+        var result = await ai.ExtractStep1IntentAsync("yesterday", now);
+
+        result.Intent.ShouldBe(Step1ReplyIntent.Reschedule);
+        result.Eta.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ExtractStep1IntentAsync_RescheduleUnparseableEta_DropsEta()
+    {
+        var ai = BuildStep1Ai(intent: "Reschedule", etaUtc: "not-a-date");
+
+        var result = await ai.ExtractStep1IntentAsync("soon", DateTimeOffset.UtcNow);
+
+        result.Intent.ShouldBe(Step1ReplyIntent.Reschedule);
+        result.Eta.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ExtractStep1IntentAsync_NonRescheduleWithEta_DiscardsEta()
+    {
+        var ai = BuildStep1Ai(intent: "Yes", etaUtc: "2099-01-01T00:00:00Z");
+
+        var result = await ai.ExtractStep1IntentAsync("yes", DateTimeOffset.UtcNow);
+
+        result.Intent.ShouldBe(Step1ReplyIntent.Yes);
+        result.Eta.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task ExtractStep1IntentAsync_TransportFailure_ReturnsUnclearFallback()
+    {
+        var ai = BuildFailingAi();
+
+        var result = await ai.ExtractStep1IntentAsync("anything", DateTimeOffset.UtcNow);
+
+        result.Intent.ShouldBe(Step1ReplyIntent.Unclear);
+        result.Eta.ShouldBeNull();
+    }
+
+    private static OllamaConversationAi BuildStep1Ai(string intent, string? etaUtc)
+    {
+        // The handler wraps a JSON object inside the Ollama message envelope.
+        var inner = etaUtc is null
+            ? $"{{\"intent\":\"{intent}\",\"etaUtc\":null}}"
+            : $"{{\"intent\":\"{intent}\",\"etaUtc\":\"{etaUtc}\"}}";
+        return BuildAi(inner);
     }
 
     private static OllamaConversationAi BuildAi(string ollamaContent)

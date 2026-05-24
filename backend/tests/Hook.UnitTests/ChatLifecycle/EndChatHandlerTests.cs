@@ -31,12 +31,14 @@ public class EndChatHandlerTests
 
         outcome.Result.ShouldBe(EndChatResult.Ended);
         session.Status.ShouldBe(ChatSessionStatus.Ended);
-        var evt = session.DequeueEvents().Single().ShouldBeOfType<BroadcastChatEvent>();
-        evt.ChatId.ShouldBe(session.Id);
-        evt.EventName.ShouldBe(ChatHubEvents.ChatEnded);
-        var payload = evt.Payload.ShouldBeOfType<ChatEndedPayload>();
+        var events = session.DequeueEvents();
+        var broadcast = events.OfType<BroadcastChatEvent>().Single();
+        broadcast.ChatId.ShouldBe(session.Id);
+        broadcast.EventName.ShouldBe(ChatHubEvents.ChatEnded);
+        var payload = broadcast.Payload.ShouldBeOfType<ChatEndedPayload>();
         payload.Reason.ShouldBe("user");
         payload.EndedBy.ShouldBe("Client");
+        events.OfType<ChatSessionEndedEvent>().Single().Reason.ShouldBe(ChatEndReason.User);
     }
 
     [Fact]

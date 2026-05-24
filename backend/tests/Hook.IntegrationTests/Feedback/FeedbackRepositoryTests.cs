@@ -340,6 +340,126 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
     }
 
     [Fact]
+    public async Task TryRescheduleAsync_HappyPath_BumpsRecheckCountAndRefreshesPromptedAt()
+    {
+        var clientPhone = UniquePhone();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var (_, match) = await SeedMatchAsync(db, clientPhone);
+
+        var entry = MatchFeedback.CreatePending(
+            match.Id, match.RequestId, FeedbackStep.DidYouFind,
+            DateTimeOffset.UtcNow - TimeSpan.FromHours(1));
+        await repo.TryAddPendingAsync(entry);
+
+        var bumpAt = DateTimeOffset.UtcNow;
+        Assert.True(await repo.TryRescheduleAsync(entry.Id, bumpAt));
+
+        await using var verifyScope = _fx.Factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var loaded = await verifyDb.MatchFeedback.AsNoTracking().FirstAsync(f => f.Id == entry.Id);
+        Assert.Equal(1, loaded.Step1RecheckCount);
+        Assert.True(Math.Abs((loaded.PromptedAt - bumpAt).TotalSeconds) < 1);
+    }
+
+    [Fact]
+    public async Task TryRescheduleAsync_AlreadyClaimed_ReturnsFalse()
+    {
+        var clientPhone = UniquePhone();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var (_, match) = await SeedMatchAsync(db, clientPhone);
+
+        var entry = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
+        await repo.TryAddPendingAsync(entry);
+        await repo.TryClaimPendingAsync(entry.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow);
+
+        Assert.False(await repo.TryRescheduleAsync(entry.Id, DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public async Task TryClaimNoReasonAsync_HappyPath_SetsAnswerAndReason()
+    {
+        var clientPhone = UniquePhone();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var (_, match) = await SeedMatchAsync(db, clientPhone);
+
+        var entry = MatchFeedback.CreatePending(
+            match.Id, match.RequestId, FeedbackStep.CaptureNoReason, DateTimeOffset.UtcNow);
+        await repo.TryAddPendingAsync(entry);
+
+        Assert.True(await repo.TryClaimNoReasonAsync(entry.Id, "too expensive", DateTimeOffset.UtcNow));
+
+        await using var verifyScope = _fx.Factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var loaded = await verifyDb.MatchFeedback.AsNoTracking().FirstAsync(f => f.Id == entry.Id);
+        Assert.Equal(FeedbackAnswer.NoReasonCaptured, loaded.Answer);
+        Assert.Equal("too expensive", loaded.NoReason);
+    }
+
+    [Fact]
+    public async Task TryClaimNoReasonAsync_AlreadyClaimed_ReturnsFalse()
+    {
+        var clientPhone = UniquePhone();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var (_, match) = await SeedMatchAsync(db, clientPhone);
+
+        var entry = MatchFeedback.CreatePending(
+            match.Id, match.RequestId, FeedbackStep.CaptureNoReason, DateTimeOffset.UtcNow);
+        await repo.TryAddPendingAsync(entry);
+        await repo.TryClaimNoReasonAsync(entry.Id, "first", DateTimeOffset.UtcNow);
+
+        Assert.False(await repo.TryClaimNoReasonAsync(entry.Id, "second", DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public async Task TryRepromptPendingAsync_GapNotElapsed_ReturnsFalse()
+    {
+        var clientPhone = UniquePhone();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var (_, match) = await SeedMatchAsync(db, clientPhone);
+
+        var entry = MatchFeedback.CreatePending(
+            match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
+        await repo.TryAddPendingAsync(entry);
+
+        // PromptedAt = now, gap = 5min, so "now + 1s" cutoff has not elapsed.
+        Assert.False(await repo.TryRepromptPendingAsync(
+            entry.Id, DateTimeOffset.UtcNow.AddSeconds(1), TimeSpan.FromMinutes(5)));
+    }
+
+    [Fact]
+    public async Task TryRepromptPendingAsync_GapElapsed_RefreshesPromptedAt()
+    {
+        var clientPhone = UniquePhone();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var (_, match) = await SeedMatchAsync(db, clientPhone);
+
+        var oldPrompt = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(30);
+        var entry = MatchFeedback.CreatePending(
+            match.Id, match.RequestId, FeedbackStep.DidYouFind, oldPrompt);
+        await repo.TryAddPendingAsync(entry);
+
+        var now = DateTimeOffset.UtcNow;
+        Assert.True(await repo.TryRepromptPendingAsync(entry.Id, now, TimeSpan.FromMinutes(5)));
+
+        await using var verifyScope = _fx.Factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var loaded = await verifyDb.MatchFeedback.AsNoTracking().FirstAsync(f => f.Id == entry.Id);
+        Assert.True(Math.Abs((loaded.PromptedAt - now).TotalSeconds) < 1);
+    }
+
+    [Fact]
     public async Task TryAddPending_LosingRace_DoesNotPoisonOuterTransaction()
     {
         var clientPhone = UniquePhone();

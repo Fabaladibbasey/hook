@@ -241,4 +241,56 @@ public class QuickIntentTests
     [InlineData("I want to be rich")]                         // post-greeting noise — must stay ambiguous
     public void DetectIntentHint_ReturnsNullForAmbiguousOrUnrelated(string? input)
         => Assert.Null(QuickIntent.DetectIntentHint(input));
+
+    [Theory]
+    [InlineData("stop")]                       // literal fuzzy
+    [InlineData("STOP")]
+    [InlineData("stp")]                        // distance-1 typo
+    [InlineData("stop asking me")]             // phrase
+    [InlineData("stop asking")]
+    [InlineData("don't ask")]
+    [InlineData("dont ask")]
+    [InlineData("do not ask")]
+    [InlineData("leave me alone")]
+    [InlineData("never again")]
+    [InlineData("unsubscribe")]
+    public void DetectStop_PositiveCases(string text) =>
+        Assert.True(QuickIntent.DetectStop(text));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("no")]                          // bare rejection, not stop
+    [InlineData("yes please")]
+    [InlineData("ok")]
+    [InlineData("not yet")]                     // reschedule, not stop
+    [InlineData(null)]
+    public void DetectStop_NegativeCases(string? text) =>
+        Assert.False(QuickIntent.DetectStop(text));
+
+    [Theory]
+    [InlineData("still looking")]
+    [InlineData("not yet")]
+    [InlineData("not now")]
+    [InlineData("give me time")]
+    [InlineData("give me some time")]
+    [InlineData("ask me later")]
+    [InlineData("ask me tomorrow")]
+    [InlineData("check back tomorrow")]
+    [InlineData("in a bit")]
+    [InlineData("in a moment")]
+    [InlineData("need more time")]
+    [InlineData("later")]                       // bare token
+    [InlineData("tomorrow")]
+    public void DetectReschedule_PositiveCases(string text) =>
+        Assert.True(QuickIntent.DetectReschedule(text));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("yes")]
+    [InlineData("no")]
+    [InlineData("stop")]
+    [InlineData(null)]
+    public void DetectReschedule_NegativeCases(string? text) =>
+        Assert.False(QuickIntent.DetectReschedule(text));
 }

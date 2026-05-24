@@ -3,6 +3,7 @@ using System;
 using Hook.Shared.Persistence.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NetTopologySuite.Geometries;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Hook.Shared.Persistence.Data.Migrations
 {
     [DbContext(typeof(HookDbContext))]
-    partial class HookDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260523180913_Step1SmarterParser")]
+    partial class Step1SmarterParser
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -350,10 +353,6 @@ namespace Hook.Shared.Persistence.Data.Migrations
                         .HasColumnType("character varying(80)");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("ChatId")
-                        .HasDatabaseName("ix_matches_chat_id")
-                        .HasFilter("\"ChatId\" IS NOT NULL");
 
                     b.HasIndex("ProviderPhone")
                         .HasDatabaseName("ix_matches_provider_phone");

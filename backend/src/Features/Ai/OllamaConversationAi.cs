@@ -1,9 +1,11 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Hook.Features.Ai.Models;
 using Hook.Features.Ai.Prompts;
+using Hook.Features.Feedback.Step1Intent;
 using Hook.Features.Observability;
 using Microsoft.Extensions.Options;
 
@@ -288,7 +290,7 @@ public sealed class OllamaConversationAi(
         // describe and the model occasionally garbles.
         var referenceUtc = now.UtcDateTime.ToString(
             "yyyy-MM-ddTHH:mm:ssZ",
-            System.Globalization.CultureInfo.InvariantCulture);
+            CultureInfo.InvariantCulture);
         var prompt = $$"""
             referenceUtc: {{referenceUtc}}
             {{PromptSafety.Fence(userMessage, options.Value.MaxUserInputChars)}}
@@ -306,11 +308,11 @@ public sealed class OllamaConversationAi(
 
         var raw = etaProp.GetString();
         if (string.IsNullOrWhiteSpace(raw)) return null;
-        var styles = System.Globalization.DateTimeStyles.AssumeUniversal
-                   | System.Globalization.DateTimeStyles.AdjustToUniversal;
+        var styles = DateTimeStyles.AssumeUniversal
+                   | DateTimeStyles.AdjustToUniversal;
         if (!DateTimeOffset.TryParse(
                 raw,
-                System.Globalization.CultureInfo.InvariantCulture,
+                CultureInfo.InvariantCulture,
                 styles,
                 out var eta))
             return null;
@@ -318,6 +320,80 @@ public sealed class OllamaConversationAi(
         // EtaScheduleBuffer in the caller absorbs the boundary-equality case so
         // `eta == now` is treated as "right now" and still schedules.
         return eta >= now ? eta : null;
+    }
+
+    private static readonly Step1ParseResult Step1Fallback =
+        new(Step1ReplyIntent.Unclear, null);
+
+    // Pre-built schema constrains the LLM to the enum at Ollama's structured-output
+    // layer, so out-of-set strings cannot reach the parser at all.
+    private static readonly object Step1IntentSchema = new
+    {
+        type = "object",
+        properties = new
+        {
+            intent = new { type = "string", @enum = new[] { "Yes", "No", "Reschedule", "StopAsking", "Unclear" } },
+            etaUtc = new { type = new[] { "string", "null" } }
+        },
+        required = new[] { "intent" }
+    };
+
+    public Task<Step1ParseResult> ExtractStep1IntentAsync(
+        string userMessage,
+        DateTimeOffset now,
+        CancellationToken ct = default) =>
+        TryCallAsync(AiStage.ExtractStep1Intent, Step1Fallback,
+            () => ExtractStep1IntentCoreAsync(userMessage, now, ct), ct);
+
+    private async Task<Step1ParseResult> ExtractStep1IntentCoreAsync(
+        string userMessage,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var referenceUtc = now.UtcDateTime.ToString(
+            "yyyy-MM-ddTHH:mm:ssZ",
+            CultureInfo.InvariantCulture);
+        var prompt = $$"""
+            referenceUtc: {{referenceUtc}}
+            {{PromptSafety.Fence(userMessage, options.Value.MaxUserInputChars)}}
+            """;
+
+        using var json = await CallJsonAsync(
+            AiPrompts.Step1IntentSystem,
+            prompt,
+            Step1IntentSchema,
+            options.Value.MaxOutputTokens.Eta,
+            ct);
+        var root = json.RootElement;
+
+        var intentText = root.TryGetProperty("intent", out var i) ? i.GetString() ?? string.Empty : string.Empty;
+        var intent = Enum.TryParse<Step1ReplyIntent>(intentText, ignoreCase: true, out var parsed)
+            ? parsed
+            : Step1ReplyIntent.Unclear;
+
+        DateTimeOffset? eta = null;
+        if (intent == Step1ReplyIntent.Reschedule
+            && root.TryGetProperty("etaUtc", out var etaProp)
+            && etaProp.ValueKind != JsonValueKind.Null)
+        {
+            var raw = etaProp.GetString();
+            if (!string.IsNullOrWhiteSpace(raw))
+            {
+                var styles = DateTimeStyles.AssumeUniversal
+                           | DateTimeStyles.AdjustToUniversal;
+                if (DateTimeOffset.TryParse(
+                        raw,
+                        CultureInfo.InvariantCulture,
+                        styles,
+                        out var parsedEta)
+                    && parsedEta > now)
+                {
+                    eta = parsedEta;
+                }
+            }
+        }
+
+        return new Step1ParseResult(intent, eta);
     }
 
     public async Task<LanguageDetectionResult> DetectLanguageAsync(string userMessage, CancellationToken ct = default)
@@ -343,7 +419,7 @@ public sealed class OllamaConversationAi(
         return new LanguageDetectionResult(lang, conf);
     }
 
-    private enum AiStage { Classify, ExtractServices, JudgeMatch, JudgeParent, ExtractEta }
+    private enum AiStage { Classify, ExtractServices, JudgeMatch, JudgeParent, ExtractEta, ExtractStep1Intent }
 
     private static string TagOf(AiStage stage) => stage switch
     {
@@ -352,6 +428,7 @@ public sealed class OllamaConversationAi(
         AiStage.JudgeMatch => "judge-match",
         AiStage.JudgeParent => "judge-parent",
         AiStage.ExtractEta => "extract-eta",
+        AiStage.ExtractStep1Intent => "extract-step1-intent",
         _ => throw new ArgumentOutOfRangeException(nameof(stage), stage, null)
     };
 

@@ -1,4 +1,5 @@
 using Hook.Features.Ai.Models;
+using Hook.Features.Feedback.Step1Intent;
 
 namespace Hook.Features.Ai;
 
@@ -57,4 +58,14 @@ public interface IConversationAi
     // prompt currently assumes UTC clock-times when parsing absolute references —
     // non-UTC clients may see a wrong-day recheck (tracked separately).
     Task<DateTimeOffset?> ExtractEtaAsync(string userMessage, DateTimeOffset now, CancellationToken ct = default);
+
+    // Classifies the Step1 "did you find a provider?" reply when deterministic
+    // parsers in QuickIntent miss. Absorbs failures and returns
+    // `Step1ParseResult(Step1ReplyIntent.Unclear, null)` so the caller stays
+    // try-catch-free; the absorbed-fallback path increments the
+    // AiOutboundDropped metric with stage="step1_intent".
+    Task<Step1ParseResult> ExtractStep1IntentAsync(
+        string userMessage,
+        DateTimeOffset now,
+        CancellationToken ct = default);
 }

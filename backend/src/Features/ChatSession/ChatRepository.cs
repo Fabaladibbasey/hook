@@ -44,6 +44,48 @@ public sealed class ChatRepository(HookDbContext db) : IChatRepository
         return rows;
     }
 
+    public async Task<(int ClientCount, int ProviderCount)> GetMessageCountByRoleAsync(
+        Guid chatId, CancellationToken ct = default)
+    {
+        // Two grouped counts in one round-trip. AsNoTracking — we never write back
+        // through these projections.
+        var counts = await db.ChatMessages
+            .AsNoTracking()
+            .Where(m => m.ChatId == chatId)
+            .Join(db.ChatParticipants, m => m.ParticipantId, p => p.Id, (_, p) => p.Role)
+            .GroupBy(r => r)
+            .Select(g => new { Role = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+
+        int client = 0, provider = 0;
+        foreach (var c in counts)
+        {
+            if (c.Role == ChatParticipantRole.Client) client = c.Count;
+            else if (c.Role == ChatParticipantRole.Provider) provider = c.Count;
+        }
+        return (client, provider);
+    }
+
+    public Task<ProductiveSilenceSnapshot?> GetProductiveSilenceSnapshotAsync(
+        Guid chatId, CancellationToken ct = default) =>
+        db.ChatSessions
+            .AsNoTracking()
+            .Where(c => c.Id == chatId)
+            .Select(c => new ProductiveSilenceSnapshot(
+                c.Status, c.ProductiveSilenceFiredAt, c.LastActivityAt))
+            .FirstOrDefaultAsync(ct);
+
+    public async Task<bool> TryMarkProductiveSilenceAsync(
+        Guid chatId, DateTimeOffset now, CancellationToken ct = default)
+    {
+        var rows = await db.ChatSessions
+            .Where(c => c.Id == chatId
+                     && c.Status == ChatSessionStatus.Active
+                     && c.ProductiveSilenceFiredAt == null)
+            .ExecuteUpdateAsync(u => u.SetProperty(c => c.ProductiveSilenceFiredAt, now), ct);
+        return rows == 1;
+    }
+
     public async Task AddSessionAsync(SessionAggregate.ChatSession session, CancellationToken ct = default) =>
         await db.ChatSessions.AddAsync(session, ct);
 

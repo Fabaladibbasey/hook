@@ -217,6 +217,55 @@ public static class QuickIntent
         return null;
     }
 
+    // Step1 feedback-specific hints. Kept here so QuickIntent stays the one
+    // place deterministic text classification lives. Returned as bool because
+    // the caller already owns the Step1ReplyIntent record.
+
+    private static readonly string[] StopTokens =
+    [
+        "stop", "never", "unsubscribe", "leavemealone", "dontask", "donotask"
+    ];
+
+    private static readonly string[] RescheduleTokens =
+    [
+        "later", "tomorrow", "tonight", "nextweek", "soon",
+        "stilllooking", "notyet", "givemetime", "checkback"
+    ];
+
+    private static readonly Regex StopPhraseRx = new(
+        @"\b(stop\s+asking|don'?t\s+ask|leave\s+me\s+alone|do\s+not\s+ask|never\s+again|unsubscribe)\b",
+        RxOpts);
+
+    private static readonly Regex ReschedulePhraseRx = new(
+        @"\b(still\s+looking|not\s+yet|give\s+me\s+(time|some\s+time|a\s+(min|moment|sec))|"
+        + @"check\s+back|come\s+back|ask\s+(me\s+)?(later|tomorrow|next\s+week)|"
+        + @"(try|ping|hit\s+me)\s+(again\s+)?(later|tomorrow|next\s+week)|"
+        + @"in\s+(a\s+)?(bit|while|moment)|not\s+(right\s+)?now|need\s+(more\s+)?time)\b",
+        RxOpts);
+
+    /// <summary>True when the text reads as "stop asking me about this".</summary>
+    public static bool DetectStop(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var s = text.Trim().ToLowerInvariant().TrimEnd('.', '!', '?');
+        if (StopPhraseRx.IsMatch(s)) return true;
+
+        // Fuzzy single-token: collapse internal whitespace so "leave me alone" still
+        // checks as a single 12-char token against "leavemealone".
+        var compact = string.Concat(s.Where(c => !char.IsWhiteSpace(c)));
+        return compact.Length >= 3 && FuzzyMatch.MatchesAny(compact, StopTokens, 1);
+    }
+
+    /// <summary>True when the text asks for a later check-in. Eta resolution is the caller's job.</summary>
+    public static bool DetectReschedule(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var s = text.Trim().ToLowerInvariant().TrimEnd('.', '!', '?');
+        if (ReschedulePhraseRx.IsMatch(s)) return true;
+        var compact = string.Concat(s.Where(c => !char.IsWhiteSpace(c)));
+        return compact.Length >= 4 && FuzzyMatch.MatchesAny(compact, RescheduleTokens, 1);
+    }
+
     /// <summary>
     /// Deterministic hint for ServiceRequest vs ProviderRegistration based on regex patterns
     /// that the LLM IntentSystem prompt can miss (problem statements like "my door is broken",

@@ -5,7 +5,8 @@ public enum FeedbackStep
     DidYouFind,
     IdentifyWinner,
     JobCompleted,
-    AwaitingEta
+    AwaitingEta,
+    CaptureNoReason
 }
 
 public enum FeedbackAnswer
@@ -16,5 +17,6 @@ public enum FeedbackAnswer
     InProgress,
     Skipped,
     WinnerSelected,
-    EtaCaptured
+    EtaCaptured,
+    NoReasonCaptured
 }

@@ -62,6 +62,41 @@ public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
         return rows == 1;
     }
 
+    public async Task<bool> TryRescheduleAsync(
+        Guid feedbackId, DateTimeOffset now, CancellationToken ct = default)
+    {
+        var rows = await db.MatchFeedback
+            .Where(f => f.Id == feedbackId && f.Answer == FeedbackAnswer.Pending)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(f => f.Step1RecheckCount, f => f.Step1RecheckCount + 1)
+                .SetProperty(f => f.PromptedAt, now), ct);
+        return rows == 1;
+    }
+
+    public async Task<bool> TryClaimNoReasonAsync(
+        Guid feedbackId, string? noReason, DateTimeOffset now, CancellationToken ct = default)
+    {
+        var rows = await db.MatchFeedback
+            .Where(f => f.Id == feedbackId && f.Answer == FeedbackAnswer.Pending)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(f => f.Answer, FeedbackAnswer.NoReasonCaptured)
+                .SetProperty(f => f.RepliedAt, now)
+                .SetProperty(f => f.NoReason, noReason), ct);
+        return rows == 1;
+    }
+
+    public async Task<bool> TryRepromptPendingAsync(
+        Guid feedbackId, DateTimeOffset now, TimeSpan minGap, CancellationToken ct = default)
+    {
+        var cutoff = now - minGap;
+        var rows = await db.MatchFeedback
+            .Where(f => f.Id == feedbackId
+                     && f.Answer == FeedbackAnswer.Pending
+                     && f.PromptedAt <= cutoff)
+            .ExecuteUpdateAsync(u => u.SetProperty(f => f.PromptedAt, now), ct);
+        return rows == 1;
+    }
+
     public async Task AddAsync(MatchFeedback feedback, CancellationToken ct = default) =>
         await db.MatchFeedback.AddAsync(feedback, ct);
 

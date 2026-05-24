@@ -16,14 +16,19 @@ public class ChatSessionTests
 
         session.End(Now, EndChatReason.Idle);
 
+        // End raises two domain events: BroadcastChatEvent (SignalR pipeline) and
+        // ChatSessionEndedEvent (Feedback slice subscriber).
         var events = session.DequeueEvents();
-        events.Count.ShouldBe(1);
-        var evt = events[0].ShouldBeOfType<BroadcastChatEvent>();
-        evt.ChatId.ShouldBe(session.Id);
-        evt.EventName.ShouldBe(ChatHubEvents.ChatEnded);
-        var payload = evt.Payload.ShouldBeOfType<ChatEndedPayload>();
+        events.Count.ShouldBe(2);
+        var broadcast = events.OfType<BroadcastChatEvent>().Single();
+        broadcast.ChatId.ShouldBe(session.Id);
+        broadcast.EventName.ShouldBe(ChatHubEvents.ChatEnded);
+        var payload = broadcast.Payload.ShouldBeOfType<ChatEndedPayload>();
         payload.Reason.ShouldBe("idle");
         payload.EndedBy.ShouldBeEmpty();
+        var sessionEnded = events.OfType<ChatSessionEndedEvent>().Single();
+        sessionEnded.ChatId.ShouldBe(session.Id);
+        sessionEnded.Reason.ShouldBe(ChatEndReason.Idle);
     }
 
     [Fact]
@@ -33,10 +38,13 @@ public class ChatSessionTests
 
         session.End(Now, EndChatReason.User, "Client");
 
-        var evt = session.DequeueEvents().Single().ShouldBeOfType<BroadcastChatEvent>();
-        var payload = evt.Payload.ShouldBeOfType<ChatEndedPayload>();
+        var events = session.DequeueEvents();
+        events.Count.ShouldBe(2);
+        var broadcast = events.OfType<BroadcastChatEvent>().Single();
+        var payload = broadcast.Payload.ShouldBeOfType<ChatEndedPayload>();
         payload.Reason.ShouldBe("user");
         payload.EndedBy.ShouldBe("Client");
+        events.OfType<ChatSessionEndedEvent>().Single().Reason.ShouldBe(ChatEndReason.User);
     }
 
     [Fact]
@@ -45,7 +53,7 @@ public class ChatSessionTests
         var session = ChatSession.Create(TimeSpan.FromMinutes(30), Now);
         session.End(Now, EndChatReason.Idle);
 
-        session.DequeueEvents().Count.ShouldBe(1);
+        session.DequeueEvents().Count.ShouldBe(2);
         session.DequeueEvents().Count.ShouldBe(0);
     }
 
@@ -69,5 +77,32 @@ public class ChatSessionTests
 
         Should.Throw<InvalidOperationException>(() => session.HardExpire(Now))
             .Message.ShouldContain("cannot be hard-expired");
+    }
+
+    [Fact]
+    public void End_TwiceFromActive_OnlyRaisesEventsOnce()
+    {
+        var session = ChatSession.Create(TimeSpan.FromMinutes(30), Now);
+
+        session.End(Now, EndChatReason.User, "Client");
+        var firstBatch = session.DequeueEvents();
+        firstBatch.Count.ShouldBe(2);
+
+        // Second call must no-op: aggregate is already Ended.
+        session.End(Now, EndChatReason.Idle);
+        session.DequeueEvents().Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public void End_WithUnmappedReason_ThrowsBeforeMutation()
+    {
+        var session = ChatSession.Create(TimeSpan.FromMinutes(30), Now);
+
+        Should.Throw<ArgumentOutOfRangeException>(() =>
+            session.End(Now, EndChatReason.AlreadyEnded));
+
+        // MapEndReason validates upfront, so Status stayed Active and no events queued.
+        session.Status.ShouldBe(ChatSessionStatus.Active);
+        session.DequeueEvents().Count.ShouldBe(0);
     }
 }

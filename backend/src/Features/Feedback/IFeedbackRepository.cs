@@ -20,6 +20,27 @@ public interface IFeedbackRepository
         DateTimeOffset etaUtc,
         DateTimeOffset now,
         CancellationToken ct = default);
+    // Atomic reschedule: bump RecheckCount and refresh PromptedAt so the next
+    // reply window restarts. Row stays Pending so the recheck dispatcher can
+    // find it. Returns false when the row has already been claimed.
+    Task<bool> TryRescheduleAsync(
+        Guid feedbackId,
+        DateTimeOffset now,
+        CancellationToken ct = default);
+    // Atomic claim for the CaptureNoReason follow-up row.
+    Task<bool> TryClaimNoReasonAsync(
+        Guid feedbackId,
+        string? noReason,
+        DateTimeOffset now,
+        CancellationToken ct = default);
+    // Atomic Step1 re-prompt guard: refresh PromptedAt only when the last prompt
+    // is older than `minGap`. Returns false when the gap has not elapsed (caller
+    // skips the re-fire) or the row is no longer Pending.
+    Task<bool> TryRepromptPendingAsync(
+        Guid feedbackId,
+        DateTimeOffset now,
+        TimeSpan minGap,
+        CancellationToken ct = default);
     Task AddAsync(MatchFeedback feedback, CancellationToken ct = default);
     Task<bool> TryAddPendingAsync(MatchFeedback feedback, CancellationToken ct = default);
     Task<bool> DeletePendingAsync(Guid feedbackId, CancellationToken ct = default);

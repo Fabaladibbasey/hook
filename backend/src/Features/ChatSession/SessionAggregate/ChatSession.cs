@@ -11,6 +11,7 @@ public class ChatSession : AggregateRoot
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset ExpiresAt { get; private set; }
     public DateTimeOffset LastActivityAt { get; private set; }
+    public DateTimeOffset? ProductiveSilenceFiredAt { get; private set; }
 
     public static ChatSession Create(TimeSpan ttl, DateTimeOffset now) =>
         Create(Guid.CreateVersion7(), ttl, now);
@@ -31,10 +32,15 @@ public class ChatSession : AggregateRoot
 
     public void End(DateTimeOffset now, EndChatReason reason, string endedBy = "")
     {
+        if (Status != ChatSessionStatus.Active) return;
+        // Validate before any mutation so an unmapped reason cannot leave the
+        // aggregate Ended with only the BroadcastChatEvent queued.
+        var endReason = MapEndReason(reason);
         Status = ChatSessionStatus.Ended;
         ExpiresAt = now;
         RaiseDomainEvent(new BroadcastChatEvent(
             Id, ChatHubEvents.ChatEnded, new ChatEndedPayload(reason.ToWire(), endedBy)));
+        RaiseDomainEvent(new ChatSessionEndedEvent(Id, endReason));
     }
 
     public void HardExpire(DateTimeOffset now)
@@ -45,7 +51,16 @@ public class ChatSession : AggregateRoot
         ExpiresAt = now;
         RaiseDomainEvent(new BroadcastChatEvent(
             Id, ChatHubEvents.ChatExpired, new ChatExpiredPayload("24h-expired")));
+        RaiseDomainEvent(new ChatSessionEndedEvent(Id, ChatEndReason.Expired));
     }
+
+    private static ChatEndReason MapEndReason(EndChatReason reason) => reason switch
+    {
+        EndChatReason.User => ChatEndReason.User,
+        EndChatReason.Idle => ChatEndReason.Idle,
+        // AlreadyEnded is a UI response-state, never passed to End(). Defensive throw.
+        _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, "Cannot map to ChatEndReason")
+    };
 
     // No state mutation: idle reminders can fire repeatedly; dedup lives in IdleReminderHandler.
     public void SendIdleReminder() =>
