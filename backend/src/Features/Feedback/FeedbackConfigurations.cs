@@ -14,7 +14,9 @@ public class MatchFeedbackConfiguration : IEntityTypeConfiguration<MatchFeedback
         builder.ToTable("match_feedback");
         builder.HasKey(f => f.Id);
         builder.PropertyAsStringEnum(f => f.Step, 20);
-        builder.PropertyAsStringEnum(f => f.Answer, 16);
+        builder.PropertyAsStringEnum(f => f.Answer, 20);
+        builder.Property(f => f.Step1RecheckCount).HasDefaultValue(0);
+        builder.Property(f => f.NoReason).HasMaxLength(FeedbackConstants.NoReasonMaxLength);
         builder.HasIndex(f => f.MatchId).HasDatabaseName("ix_match_feedback_match");
         builder.HasIndex(f => f.PromptedAt).HasDatabaseName("ix_match_feedback_prompted_at");
         builder.HasIndex(f => new { f.MatchId, f.Step })

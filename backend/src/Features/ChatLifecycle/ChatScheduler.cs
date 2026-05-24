@@ -1,4 +1,5 @@
 using Hook.Features.ChatLifecycle.Events;
+using Hook.Features.ChatLifecycle.ProductiveSilence;
 using Hook.Features.ChatSession;
 using Microsoft.Extensions.Options;
 using Wolverine;
@@ -19,6 +20,9 @@ public sealed class ChatScheduler(IMessageBus bus, IOptions<ChatOptions> options
         await bus.ScheduleAsync(
             new IdleEndCheck(chatId, lastActivityAt),
             TimeSpan.FromMinutes(opts.IdleEndMinutes));
+        await bus.ScheduleAsync(
+            new ProductiveSilenceCheck(chatId, lastActivityAt),
+            TimeSpan.FromMinutes(opts.ProductiveSilenceMinutes));
     }
 
     public async Task ScheduleHardExpireAsync(Guid chatId, CancellationToken ct = default)

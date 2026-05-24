@@ -9,6 +9,9 @@ public sealed class ContactExchangedHandler(
     IOptions<FeedbackOptions> options,
     ILogger<ContactExchangedHandler> logger)
 {
+    // Direct-contact picks still use wall-clock Step1InitialDelay — chat-routed
+    // picks fire on ChatSessionEndedEvent (ChatSessionEndedHandler) instead, since
+    // there is no chat lifecycle to observe in the contact-share path.
     public async Task Handle(ContactExchangedEvent evt, CancellationToken ct)
     {
         var delay = options.Value.Step1InitialDelay;

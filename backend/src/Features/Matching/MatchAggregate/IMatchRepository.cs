@@ -11,6 +11,8 @@ public interface IMatchRepository
     Task<Match?> GetAsync(Guid id, CancellationToken ct = default);
     Task<IReadOnlyList<Match>> GetForRequestAsync(Guid requestId, CancellationToken ct = default);
     Task<IReadOnlyList<Match>> GetPickedForRequestAsync(Guid requestId, CancellationToken ct = default);
+    // Projection-only — feedback fan-out needs MatchIds, never the full row.
+    Task<IReadOnlyList<Guid>> GetMatchIdsByChatIdAsync(Guid chatId, CancellationToken ct = default);
     Task AddAsync(Match match, CancellationToken ct = default);
     Task AddRangeAsync(IEnumerable<Match> matches, CancellationToken ct = default);
     Task<bool> TryClaimPickAsync(PickClaim claim, CancellationToken ct = default);

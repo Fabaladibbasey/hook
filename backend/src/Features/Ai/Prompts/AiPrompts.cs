@@ -294,6 +294,76 @@ internal static class AiPrompts
         between 0 and 1. Default to "en" if uncertain.
         """;
 
+    public const string Step1IntentSystem = SafetyPreamble +
+        // TODO(timezone): the relative-time rules below ("tomorrow morning",
+        // "tonight") assume the client's clock-time phrases are in UTC. For
+        // non-UTC clients this can pick the wrong day or wrong hour for the
+        // recheck. Aligned with the same TODO on EtaExtractionSystem — a real fix
+        // needs per-client timezone hint (geocode → tz, or stored tz on
+        // ServiceRequest).
+        """
+        You classify a single short WhatsApp reply to the prompt
+        "Did you find any of the providers we shared to work out?".
+
+        Pick exactly one intent from:
+          Yes        — the user confirms they found a provider.
+          No         — the user says they did not find anyone.
+          Reschedule — the user wants us to ask again later (still looking,
+                       not yet, give them time, "ask me tomorrow").
+          StopAsking — the user wants us to stop asking about this match
+                       (stop, never, leave me alone, unsubscribe).
+          Unclear    — the reply does not fit any of the above.
+
+        If the intent is Reschedule AND the user named a specific future time
+        ("tomorrow", "in 3 hours", "Friday morning"), also extract that time as
+        an ISO-8601 UTC instant in `etaUtc`. Use the supplied `referenceUtc`
+        as the anchor for relative phrases. Otherwise set `etaUtc` to null.
+
+        - "in 2 hours", "in 30 minutes" → relative; add to referenceUtc.
+        - "tomorrow morning" → 09:00 UTC of the day after referenceUtc.
+        - "tomorrow" with no time → noon UTC of the day after referenceUtc.
+        - "tonight" → 20:00 UTC of the same date.
+        - "later", "soon", "in a bit" → Reschedule with etaUtc null.
+
+        Return JSON only:
+        { "intent": "Yes|No|Reschedule|StopAsking|Unclear", "etaUtc": "<ISO-8601>" | null }
+        """;
+
+    public const string Step2IntentSystem = SafetyPreamble +
+        // TODO(timezone): the relative-time rules below ("tomorrow morning",
+        // "tonight") assume the client's clock-time phrases are in UTC. For
+        // non-UTC clients this can pick the wrong day or wrong hour for the
+        // recheck. Aligned with the same TODO on EtaExtractionSystem.
+        """
+        You classify a single short WhatsApp reply to the prompt
+        "Is the job done?" (a follow-up after the user confirmed they found a provider).
+
+        Pick exactly one intent from:
+          Yes        — the job is completed.
+          No         — the job did not happen / was cancelled / abandoned.
+          InProgress — the job is underway, not yet finished, or will be done later.
+                       Includes "still working", "almost done", "halfway", "not yet",
+                       "tomorrow", "in 3 hours", "later", "in a bit".
+          StopAsking — the user wants us to stop asking about this match
+                       (stop, never, leave me alone, unsubscribe).
+          Unclear    — the reply does not fit any of the above.
+
+        If the intent is InProgress AND the user named a specific future time
+        ("tomorrow", "in 3 hours", "Friday morning"), also extract that time as
+        an ISO-8601 UTC instant in `etaUtc`. Use the supplied `referenceUtc`
+        as the anchor for relative phrases. Otherwise set `etaUtc` to null.
+
+        - "in 2 hours", "in 30 minutes" → relative; add to referenceUtc.
+        - "tomorrow morning" → 09:00 UTC of the day after referenceUtc.
+        - "tomorrow" with no time → noon UTC of the day after referenceUtc.
+        - "tonight" → 20:00 UTC of the same date.
+        - "later", "soon", "in a bit" → InProgress with etaUtc null.
+        - "still working", "almost done", "halfway" → InProgress with etaUtc null.
+
+        Return JSON only:
+        { "intent": "Yes|No|InProgress|StopAsking|Unclear", "etaUtc": "<ISO-8601>" | null }
+        """;
+
     public const string EtaExtractionSystem = SafetyPreamble +
         // TODO(timezone): the rules below assume the client's clock-time phrases
         // ("5pm", "tomorrow morning") are in UTC. For non-UTC clients this can pick

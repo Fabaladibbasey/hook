@@ -44,6 +44,48 @@ public sealed class MatchRepositoryOrderingTests : PipelineTestBase
     }
 
     [Fact]
+    public async Task GetMatchIdsByChatIdAsync_OnlyReturnsMatchesForGivenChat()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var repo = scope.ServiceProvider.GetRequiredService<IMatchRepository>();
+
+        var request = await SeedRequestAsync(db);
+        var chatId = Guid.NewGuid();
+        var otherChatId = Guid.NewGuid();
+
+        var routed = MatchEntity.Create(
+            request.Id, $"+220{Random.Shared.Next(0, 10_000_000):D7}", "plumbing",
+            distanceKm: 1.0, score: 0.9, now: DateTimeOffset.UtcNow);
+        var orphan = MatchEntity.Create(
+            request.Id, $"+220{Random.Shared.Next(0, 10_000_000):D7}", "plumbing",
+            distanceKm: 1.0, score: 0.8, now: DateTimeOffset.UtcNow);
+        var otherChat = MatchEntity.Create(
+            request.Id, $"+220{Random.Shared.Next(0, 10_000_000):D7}", "plumbing",
+            distanceKm: 1.0, score: 0.7, now: DateTimeOffset.UtcNow);
+        db.Matches.AddRange(routed, orphan, otherChat);
+        await db.SaveChangesAsync();
+        Assert.True(await repo.TryClaimChatRoutingAsync(routed.Id, chatId));
+        Assert.True(await repo.TryClaimChatRoutingAsync(otherChat.Id, otherChatId));
+
+        var ids = await repo.GetMatchIdsByChatIdAsync(chatId);
+
+        Assert.Single(ids);
+        Assert.Equal(routed.Id, ids[0]);
+    }
+
+    [Fact]
+    public async Task GetMatchIdsByChatIdAsync_UnknownChat_ReturnsEmpty()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IMatchRepository>();
+
+        var ids = await repo.GetMatchIdsByChatIdAsync(Guid.NewGuid());
+
+        Assert.Empty(ids);
+    }
+
+    [Fact]
     public async Task GetForRequestAsync_TiedScoreDistanceAndCreatedAt_BreaksById()
     {
         await using var scope = _fx.Factory.Services.CreateAsyncScope();

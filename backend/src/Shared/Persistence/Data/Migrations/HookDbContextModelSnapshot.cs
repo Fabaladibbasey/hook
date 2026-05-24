@@ -163,6 +163,9 @@ namespace Hook.Shared.Persistence.Data.Migrations
                     b.Property<DateTimeOffset>("LastActivityAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTimeOffset?>("ProductiveSilenceFiredAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -187,14 +190,18 @@ namespace Hook.Shared.Persistence.Data.Migrations
 
                     b.Property<string>("Answer")
                         .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
 
                     b.Property<DateTimeOffset?>("EtaUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("MatchId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("NoReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<DateTimeOffset>("PromptedAt")
                         .HasColumnType("timestamp with time zone");
@@ -209,6 +216,11 @@ namespace Hook.Shared.Persistence.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
+
+                    b.Property<int>("Step1RecheckCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
 
                     b.HasKey("Id");
 
@@ -338,6 +350,10 @@ namespace Hook.Shared.Persistence.Data.Migrations
                         .HasColumnType("character varying(80)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ChatId")
+                        .HasDatabaseName("ix_matches_chat_id")
+                        .HasFilter("\"ChatId\" IS NOT NULL");
 
                     b.HasIndex("ProviderPhone")
                         .HasDatabaseName("ix_matches_provider_phone");

@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Microsoft.Extensions.Options;
 
 namespace Hook.Features.Feedback;
 
@@ -30,4 +31,46 @@ public sealed class FeedbackOptions
     // realistic "in progress" job; anything beyond is almost certainly garbage.
     [Range(typeof(TimeSpan), "01:00:00", "30.00:00:00")]
     public TimeSpan MaxEtaHorizon { get; init; } = TimeSpan.FromDays(7);
+
+    // Step1 re-check ladder when the user replies "still looking" with no specific
+    // time. After Step1MaxRechecks consecutive ambiguous replies, claim Skipped
+    // silently. FeedbackOptionsValidator enforces the cross-knob invariant.
+    [Range(1, 10)]
+    public int Step1MaxRechecks { get; init; } = 4;
+
+    // Non-empty + size invariants enforced by FeedbackOptionsValidator.
+    public IReadOnlyList<TimeSpan> Step1RecheckSchedule { get; init; } =
+    [
+        TimeSpan.FromHours(6),
+        TimeSpan.FromHours(12),
+        TimeSpan.FromHours(24),
+        TimeSpan.FromHours(48)
+    ];
+
+    // Floor between any two Step1 prompt sends for the same Pending row. Two
+    // back-to-back rechecks (opportunistic chat-end firing milliseconds after a
+    // scheduled re-fire) collapse to one prompt.
+    [Range(typeof(TimeSpan), "00:00:30", "01:00:00")]
+    public TimeSpan MinRecheckGap { get; init; } = TimeSpan.FromMinutes(5);
+
+    // Cap on user text persisted into the durable outbox via ExtractStep{1,2}IntentCommand.
+    // Bounds dead-letter row size and PII surface at rest; AI inference re-fences anyway.
+    [Range(64, 4096)]
+    public int OutboxTextMaxChars { get; init; } = 1000;
+}
+
+// Cross-knob validator: Step1MaxRechecks must not exceed the ladder length so
+// the dispatcher never has to silently saturate at the last rung.
+internal sealed class FeedbackOptionsValidator : IValidateOptions<FeedbackOptions>
+{
+    public ValidateOptionsResult Validate(string? name, FeedbackOptions options)
+    {
+        if (options.Step1RecheckSchedule.Count == 0)
+            return ValidateOptionsResult.Fail("Step1RecheckSchedule must contain at least one entry.");
+        if (options.Step1MaxRechecks > options.Step1RecheckSchedule.Count)
+            return ValidateOptionsResult.Fail(
+                $"Step1MaxRechecks ({options.Step1MaxRechecks}) must be <= "
+                + $"Step1RecheckSchedule.Count ({options.Step1RecheckSchedule.Count}).");
+        return ValidateOptionsResult.Success;
+    }
 }

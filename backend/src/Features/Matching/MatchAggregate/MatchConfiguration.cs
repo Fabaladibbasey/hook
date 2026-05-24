@@ -23,6 +23,12 @@ public class MatchConfiguration : IEntityTypeConfiguration<Match>
                .HasSentinel(MatchKind.Exact);
         builder.HasIndex(m => m.RequestId).HasDatabaseName("ix_matches_request_id");
         builder.HasIndex(m => m.ProviderPhone).HasDatabaseName("ix_matches_provider_phone");
+        // Partial index on ChatId — most matches never reach chat-routing, so the
+        // filter keeps the index small. Covers ChatSessionEndedHandler fan-out on every
+        // chat-end event.
+        builder.HasIndex(m => m.ChatId)
+               .HasDatabaseName("ix_matches_chat_id")
+               .HasFilter("\"ChatId\" IS NOT NULL");
         builder.HasIndex(m => new { m.RequestId, m.PickedAt }).HasDatabaseName("ix_matches_request_picked_at");
         // Covers MatchRepository.GetForRequestAsync ordering on PICK/NEXT paths.
         builder.HasIndex(m => new { m.RequestId, m.Score, m.DistanceKm, m.CreatedAt, m.Id })

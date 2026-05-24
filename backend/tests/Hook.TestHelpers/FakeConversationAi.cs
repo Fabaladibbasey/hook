@@ -1,6 +1,8 @@
 using System.Text.RegularExpressions;
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
+using Hook.Features.Feedback.Step1Intent;
+using Hook.Features.Feedback.Step2Intent;
 
 namespace Hook.TestHelpers;
 
@@ -10,6 +12,8 @@ public sealed class FakeConversationAi : IConversationAi
 
     public int DetectIntentCalls { get; private set; }
     public int ExtractEtaCalls { get; private set; }
+    public int ExtractStep1IntentCalls { get; private set; }
+    public int ExtractStep2IntentCalls { get; private set; }
 
     /// <summary>Force a specific (intent, confidence) for a given exact input — useful
     /// for integration tests that need to drive low-confidence disambiguation paths.</summary>
@@ -20,8 +24,12 @@ public sealed class FakeConversationAi : IConversationAi
     {
         _intentOverrides.Clear();
         _etaOverrides.Clear();
+        _step1IntentOverrides.Clear();
+        _step2IntentOverrides.Clear();
         DetectIntentCalls = 0;
         ExtractEtaCalls = 0;
+        ExtractStep1IntentCalls = 0;
+        ExtractStep2IntentCalls = 0;
     }
 
     public Task PingAsync(CancellationToken ct = default) => Task.CompletedTask;
@@ -196,6 +204,75 @@ public sealed class FakeConversationAi : IConversationAi
         }
 
         return Task.FromResult<DateTimeOffset?>(null);
+    }
+
+    private readonly Dictionary<string, Step1ParseResult> _step1IntentOverrides =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Force a Step1 intent result for a specific exact input so integration tests
+    /// can drive any branch (Yes / No / Reschedule±eta / StopAsking / Unclear) without
+    /// touching Ollama.</summary>
+    public void OverrideStep1Intent(string userMessage, Step1ParseResult result) =>
+        _step1IntentOverrides[userMessage] = result;
+
+    public Task<Step1ParseResult> ExtractStep1IntentAsync(
+        string userMessage,
+        DateTimeOffset now,
+        CancellationToken ct = default)
+    {
+        ExtractStep1IntentCalls++;
+        if (_step1IntentOverrides.TryGetValue(userMessage, out var overridden))
+            return Task.FromResult(overridden);
+
+        // Heuristic mirrors the prompt so tests that don't pre-seed an override still
+        // get something deterministic. Anything else lands as Unclear so the caller
+        // exercises the retry-hint branch.
+        var lower = Normalize(userMessage);
+        if (Match(lower, "yes", "yeah", "yep", "found", "got one"))
+            return Task.FromResult(new Step1ParseResult(Step1ReplyIntent.Yes, null));
+        if (Match(lower, "no", "nope", "nah", "no one", "nobody"))
+            return Task.FromResult(new Step1ParseResult(Step1ReplyIntent.No, null));
+        if (Match(lower, "stop", "unsubscribe", "leave me alone"))
+            return Task.FromResult(new Step1ParseResult(Step1ReplyIntent.StopAsking, null));
+        if (Match(lower, "still looking", "later", "tomorrow", "not yet", "in a bit", "ask later"))
+            return Task.FromResult(new Step1ParseResult(Step1ReplyIntent.Reschedule, null));
+
+        return Task.FromResult(new Step1ParseResult(Step1ReplyIntent.Unclear, null));
+    }
+
+    private readonly Dictionary<string, Step2ParseResult> _step2IntentOverrides =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Force a Step2 intent result for a specific exact input so integration tests
+    /// can drive any branch (Yes / No / InProgress±eta / StopAsking / Unclear) without
+    /// touching Ollama.</summary>
+    public void OverrideStep2Intent(string userMessage, Step2ParseResult result) =>
+        _step2IntentOverrides[userMessage] = result;
+
+    public Task<Step2ParseResult> ExtractStep2IntentAsync(
+        string userMessage,
+        DateTimeOffset now,
+        CancellationToken ct = default)
+    {
+        ExtractStep2IntentCalls++;
+        if (_step2IntentOverrides.TryGetValue(userMessage, out var overridden))
+            return Task.FromResult(overridden);
+
+        // Heuristic mirrors the prompt so tests that don't pre-seed an override still
+        // get something deterministic. Anything else lands as Unclear so the caller
+        // exercises the retry-hint branch.
+        var lower = Normalize(userMessage);
+        if (Match(lower, "yes", "yeah", "yep", "done", "finished", "completed"))
+            return Task.FromResult(new Step2ParseResult(Step2ReplyIntent.Yes, null));
+        if (Match(lower, "no", "nope", "nah", "didn't happen", "cancelled"))
+            return Task.FromResult(new Step2ParseResult(Step2ReplyIntent.No, null));
+        if (Match(lower, "stop", "unsubscribe", "leave me alone"))
+            return Task.FromResult(new Step2ParseResult(Step2ReplyIntent.StopAsking, null));
+        if (Match(lower, "still working", "almost done", "halfway", "not yet", "tomorrow",
+                "in a bit", "later", "in progress", "ongoing"))
+            return Task.FromResult(new Step2ParseResult(Step2ReplyIntent.InProgress, null));
+
+        return Task.FromResult(new Step2ParseResult(Step2ReplyIntent.Unclear, null));
     }
 
     private static string Normalize(string text) =>

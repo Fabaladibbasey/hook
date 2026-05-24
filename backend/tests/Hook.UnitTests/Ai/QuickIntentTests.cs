@@ -241,4 +241,120 @@ public class QuickIntentTests
     [InlineData("I want to be rich")]                         // post-greeting noise — must stay ambiguous
     public void DetectIntentHint_ReturnsNullForAmbiguousOrUnrelated(string? input)
         => Assert.Null(QuickIntent.DetectIntentHint(input));
+
+    [Theory]
+    [InlineData("stop")]                       // literal fuzzy
+    [InlineData("STOP")]
+    [InlineData("stp")]                        // distance-1 typo
+    [InlineData("stop asking me")]             // phrase
+    [InlineData("stop asking")]
+    [InlineData("don't ask")]
+    [InlineData("dont ask")]
+    [InlineData("do not ask")]
+    [InlineData("leave me alone")]
+    [InlineData("never again")]
+    [InlineData("unsubscribe")]
+    public void DetectStop_PositiveCases(string text) =>
+        Assert.True(QuickIntent.DetectStop(text));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("no")]                          // bare rejection, not stop
+    [InlineData("yes please")]
+    [InlineData("ok")]
+    [InlineData("not yet")]                     // reschedule, not stop
+    [InlineData(null)]
+    public void DetectStop_NegativeCases(string? text) =>
+        Assert.False(QuickIntent.DetectStop(text));
+
+    [Theory]
+    [InlineData("still looking")]
+    [InlineData("not yet")]
+    [InlineData("not now")]
+    [InlineData("give me time")]
+    [InlineData("give me some time")]
+    [InlineData("ask me later")]
+    [InlineData("ask me tomorrow")]
+    [InlineData("check back tomorrow")]
+    [InlineData("in a bit")]
+    [InlineData("in a moment")]
+    [InlineData("need more time")]
+    [InlineData("later")]                       // bare token
+    [InlineData("tomorrow")]
+    public void DetectReschedule_PositiveCases(string text) =>
+        Assert.True(QuickIntent.DetectReschedule(text));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("yes")]
+    [InlineData("no")]
+    [InlineData("stop")]
+    [InlineData(null)]
+    public void DetectReschedule_NegativeCases(string? text) =>
+        Assert.False(QuickIntent.DetectReschedule(text));
+
+    [Theory]
+    // Reschedule subsumption — DetectInProgress superset of DetectReschedule.
+    [InlineData("not yet")]
+    [InlineData("tomorrow")]
+    [InlineData("in 3 hours")]
+    [InlineData("soon")]
+    [InlineData("later")]
+    [InlineData("give me time")]
+    [InlineData("in a bit")]
+    // Step2-specific progress phrases.
+    [InlineData("still working")]
+    [InlineData("still working on it")]
+    [InlineData("working on it")]
+    [InlineData("almost done")]
+    [InlineData("almost finished")]
+    [InlineData("halfway")]
+    [InlineData("halfway done")]
+    [InlineData("ongoing")]
+    [InlineData("doing it now")]
+    [InlineData("not done")]
+    [InlineData("not finished")]
+    [InlineData("in the middle of it")]
+    // Fuzzy compact tokens.
+    [InlineData("stillworking")]
+    [InlineData("almostdone")]
+    public void DetectInProgress_PositiveCases(string text) =>
+        Assert.True(QuickIntent.DetectInProgress(text));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(null)]
+    [InlineData("yes")]
+    [InlineData("no")]
+    [InlineData("done")]
+    [InlineData("finished")]
+    [InlineData("all good")]
+    [InlineData("abcdef")]
+    public void DetectInProgress_NegativeCases(string? text) =>
+        Assert.False(QuickIntent.DetectInProgress(text));
+
+    [Theory]
+    [InlineData("in 3 hours", 3 * 60)]
+    [InlineData("in 30 minutes", 30)]
+    [InlineData("in 2 days", 2 * 24 * 60)]
+    [InlineData("in 1 hr", 60)]
+    [InlineData("in 45 min", 45)]
+    public void TryExtractRelativeEta_RelativeForms_ReturnsExpectedMinutes(string text, int expectedMinutes)
+    {
+        var now = new DateTimeOffset(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        var eta = QuickIntent.TryExtractRelativeEta(text, now);
+        Assert.NotNull(eta);
+        Assert.Equal(expectedMinutes, (int)(eta!.Value - now).TotalMinutes);
+    }
+
+    [Theory]
+    [InlineData("still working")]
+    [InlineData("halfway")]
+    [InlineData("tomorrow")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void TryExtractRelativeEta_NoMatch_ReturnsNull(string? text) =>
+        Assert.Null(QuickIntent.TryExtractRelativeEta(text, DateTimeOffset.UtcNow));
 }

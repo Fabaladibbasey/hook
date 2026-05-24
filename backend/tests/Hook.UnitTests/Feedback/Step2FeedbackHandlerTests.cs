@@ -70,10 +70,17 @@ public class Step2FeedbackHandlerTests
 
     private MatchFeedback CompletedJob(MatchEntity match, FeedbackAnswer answer)
     {
-        var fb = MatchFeedback.CreatePending(
-            match.Id, match.RequestId, FeedbackStep.JobCompleted, _clock.GetUtcNow());
-        fb.Resolve(answer, _clock.GetUtcNow());
-        return fb;
+        var now = _clock.GetUtcNow();
+        return new MatchFeedback
+        {
+            Id = Guid.CreateVersion7(),
+            MatchId = match.Id,
+            RequestId = match.RequestId,
+            Step = FeedbackStep.JobCompleted,
+            PromptedAt = now,
+            Answer = answer,
+            RepliedAt = now,
+        };
     }
 
     [Fact]

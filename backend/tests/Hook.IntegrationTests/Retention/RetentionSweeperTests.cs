@@ -200,14 +200,28 @@ public sealed class RetentionSweeperTests : PipelineTestBase
         var (_, oldMatch2) = await SeedRequestAndMatchAsync(db, fresh);
         var (_, freshMatch) = await SeedRequestAndMatchAsync(db, fresh);
 
-        var oldAnswered = MatchFeedback.CreatePending(
-            oldMatch.Id, oldMatch.RequestId, FeedbackStep.DidYouFind, ancient);
-        oldAnswered.Resolve(FeedbackAnswer.Yes, ancient + TimeSpan.FromHours(2));
+        var oldAnswered = new MatchFeedback
+        {
+            Id = Guid.CreateVersion7(),
+            MatchId = oldMatch.Id,
+            RequestId = oldMatch.RequestId,
+            Step = FeedbackStep.DidYouFind,
+            PromptedAt = ancient,
+            Answer = FeedbackAnswer.Yes,
+            RepliedAt = ancient + TimeSpan.FromHours(2),
+        };
         var oldPending = MatchFeedback.CreatePending(
             oldMatch2.Id, oldMatch2.RequestId, FeedbackStep.DidYouFind, old);
-        var recent = MatchFeedback.CreatePending(
-            freshMatch.Id, freshMatch.RequestId, FeedbackStep.JobCompleted, fresh);
-        recent.Resolve(FeedbackAnswer.Yes, fresh);
+        var recent = new MatchFeedback
+        {
+            Id = Guid.CreateVersion7(),
+            MatchId = freshMatch.Id,
+            RequestId = freshMatch.RequestId,
+            Step = FeedbackStep.JobCompleted,
+            PromptedAt = fresh,
+            Answer = FeedbackAnswer.Yes,
+            RepliedAt = fresh,
+        };
         var phone = UniquePhone();
         var stats = ProviderStats.Initial(phone, ancient);
 
@@ -239,8 +253,16 @@ public sealed class RetentionSweeperTests : PipelineTestBase
             "Banjul", "cascade-test", 5.0, old, false);
         oldRequest.Close();
         var match = Match.Create(oldRequest.Id, UniquePhone(), "plumbing", 0, 0, old);
-        var feedback = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, fresh);
-        feedback.Resolve(FeedbackAnswer.Yes, fresh);
+        var feedback = new MatchFeedback
+        {
+            Id = Guid.CreateVersion7(),
+            MatchId = match.Id,
+            RequestId = match.RequestId,
+            Step = FeedbackStep.DidYouFind,
+            PromptedAt = fresh,
+            Answer = FeedbackAnswer.Yes,
+            RepliedAt = fresh,
+        };
         db.ServiceRequests.Add(oldRequest);
         db.Matches.Add(match);
         db.MatchFeedback.Add(feedback);

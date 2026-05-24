@@ -1,8 +1,10 @@
+using Hook.Features.ChatLifecycle.Events;
 using Hook.Features.Feedback.Models;
 using Hook.Shared.Persistence.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
+using Wolverine;
 
 namespace Hook.IntegrationTests.Feedback;
 
@@ -197,11 +199,13 @@ public sealed class FeedbackDispatchPipelineTests : PipelineTestBase
     }
 
     [Fact]
-    public async Task ChatRoutedMatch_AlsoDispatchesStep1Feedback()
+    public async Task ChatRoutedMatch_DispatchesStep1Feedback_OnChatEnd()
     {
         // Provider #2 (+2203000002) seeds with ShareContact=false, so PICK 2 here
         // routes to chat (publishes RouteMatchToChatCommand instead of ContactExchangedEvent).
-        // ChatRoutingFeedbackScheduler in the Feedback slice must still schedule Step1.
+        // Chat-routed matches no longer use the 30-min wall-clock timer — Step1 fires on
+        // chat-end signals (User click, Idle, hard expiry, productive-silence). We force
+        // hard-expiry here to exercise the chain in a single test.
         const string clientPhone = "+22070007002";
         const string nonConsentingProvider = "+2203000002";
 
@@ -220,15 +224,31 @@ public sealed class FeedbackDispatchPipelineTests : PipelineTestBase
                  m.Body.Contains("chat is ready", StringComparison.OrdinalIgnoreCase),
             since: presented.At);
 
+        // Resolve the chat that was created so we can force-expire it.
+        Guid chatId;
+        await using (var scope = _fx.Factory.Services.CreateAsyncScope())
+        {
+            var ctx = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+            var match = await ctx.Set<Features.Matching.MatchAggregate.Match>()
+                .FirstAsync(m => m.ProviderPhone == nonConsentingProvider && m.ChatId != null);
+            chatId = match.ChatId!.Value;
+        }
+
+        // HardExpireCheck → ChatSession.HardExpire raises ChatSessionEndedEvent →
+        // ChatSessionEndedHandler publishes Step1FeedbackCheck → Step1 prompt sent.
+        await using (var scope = _fx.Factory.Services.CreateAsyncScope())
+        {
+            var bus = scope.ServiceProvider.GetRequiredService<IMessageBus>();
+            await bus.InvokeAsync(new HardExpireCheck(chatId));
+        }
+
         await http.WaitForOutboundAsync(
             clientPhone,
             m => m.Body.Contains("feedback-step-1-did-you-find", StringComparison.OrdinalIgnoreCase),
             since: presented.At);
 
         // Positive proof we actually went chat-route: the chat-routed provider must
-        // NOT have received the bilateral phone-reveal notice. The original
-        // `ShouldNotBeNullOrEmpty` was a tautology over a const string and asserted
-        // nothing about the runtime path.
+        // NOT have received the bilateral phone-reveal notice.
         var outbox = await http.GetOutboxAsync();
         outbox.Where(m => m.At > presented.At &&
                           m.To == nonConsentingProvider &&
