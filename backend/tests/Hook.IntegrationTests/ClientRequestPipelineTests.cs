@@ -311,6 +311,46 @@ public class ClientRequestPipelineTests : PipelineTestBase
         _fx.FakeAi.ExtractConfirmIntentCalls.ShouldBe(0);
     }
 
+    // Stamp-guard producer side: the non-text reprompt branch must persist the
+    // Touch() bump so an in-flight ExtractConfirmIntent envelope from a prior
+    // ambiguous text reply sees the newer UpdatedAt and trips ConfirmDraftStampGuard
+    // on apply. Without the upsert, the late LLM apply would silently advance the
+    // draft despite the newer non-text inbound.
+    [Fact]
+    public async Task ConfirmService_NonTextReprompt_PersistsTouchedDraft()
+    {
+        using var client = _fx.Factory.CreateClient();
+        var phone = "+220700000099";
+
+        await _fx.InjectTextAndAwaitAsync(phone, "I need a plumber");
+
+        DateTimeOffset tPre;
+        using (var scope = _fx.Factory.Services.CreateScope())
+        {
+            var drafts = scope.ServiceProvider.GetRequiredService<IClientRequestDraftRepository>();
+            var pre = await drafts.GetAsync(phone, default);
+            pre.ShouldNotBeNull();
+            pre!.Step.ShouldBe(ClientRequestStep.ConfirmService);
+            tPre = pre.UpdatedAt;
+        }
+
+        await _fx.InjectLocationAndAwaitAsync(phone, 13.4549, -16.5790);
+
+        var reprompt = await client.ExpectOutboundAsync(
+            phone,
+            m => m.Body.Contains("Please reply YES or NO", StringComparison.OrdinalIgnoreCase));
+        reprompt.ShouldNotBeNull();
+
+        using (var scope = _fx.Factory.Services.CreateScope())
+        {
+            var drafts = scope.ServiceProvider.GetRequiredService<IClientRequestDraftRepository>();
+            var post = await drafts.GetAsync(phone, default);
+            post.ShouldNotBeNull();
+            post!.Step.ShouldBe(ClientRequestStep.ConfirmService);
+            post.UpdatedAt.ShouldBeGreaterThan(tPre);
+        }
+    }
+
     [Fact]
     public async Task ServiceRequest_DescriptionStep_AmbiguousReply_TreatedAsSkip()
     {

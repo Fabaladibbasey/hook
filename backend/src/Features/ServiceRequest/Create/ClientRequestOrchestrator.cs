@@ -203,9 +203,13 @@ public sealed class ClientRequestOrchestrator(
         }
         // Non-text inbound (location pin, image, reaction) at ConfirmService has
         // no YES/NO signal — re-prompt deterministically instead of paying a
-        // 60-150s Ollama round-trip on an empty fence.
+        // 60-150s Ollama round-trip on an empty fence. Persist the touched draft
+        // so a same-step ExtractConfirmIntent envelope still in flight from a
+        // prior ambiguous text reply sees the bumped UpdatedAt and fails the
+        // ConfirmDraftStampGuard on apply.
         if (message.Kind != InboundMessageKind.Text || string.IsNullOrWhiteSpace(message.Text))
         {
+            await drafts.UpsertAsync(draft, ct);
             var slugReprompt = draft.DraftServiceSlug.Replace('-', ' ');
             await bus.PublishAsync(new SendWhatsAppTextCommand(phone,
                 $"Please reply YES or NO — YES to confirm {slugReprompt}, NO to choose another service."));
