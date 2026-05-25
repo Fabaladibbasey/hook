@@ -45,14 +45,12 @@ public sealed class IterationCoordinator(
         if (request is null) return;
 
         var opts = options.Value;
-        if (request.CurrentRadiusKm >= opts.MaxRadiusKm)
+        if (!request.ExpandRadius(opts.RadiusExpansionFactor, opts.MaxRadiusKm))
         {
             await bus.PublishAsync(new SendWhatsAppTextCommand(clientPhone,
                 $"No providers found in {opts.MaxRadiusKm}km. Try a different service or check back later."));
             return;
         }
-
-        request.CurrentRadiusKm = Math.Min(request.CurrentRadiusKm * opts.RadiusExpansionFactor, opts.MaxRadiusKm);
 
         var batch = await matching.RunForRequestAsync(request.Id, ct);
         if (batch is null || batch.Scored.Count == 0)
@@ -72,30 +70,26 @@ public sealed class IterationCoordinator(
         CancellationToken ct)
     {
         var opts = options.Value;
-        if (request.CurrentRadiusKm >= opts.MaxRadiusKm)
+        if (request.IsRadiusAtMax(opts.MaxRadiusKm))
         {
             await bus.PublishAsync(new SendWhatsAppTextCommand(clientPhone,
                 $"No providers found in {opts.MaxRadiusKm}km. Try a different service or check back later."));
             return;
         }
 
-        if (!request.AutoExpandedOnce)
+        if (request.TryAutoExpandOnce(opts.RadiusExpansionFactor, opts.MaxRadiusKm))
         {
-            var nextRadius = Math.Min(request.CurrentRadiusKm * opts.RadiusExpansionFactor, opts.MaxRadiusKm);
-            request.CurrentRadiusKm = nextRadius;
-            request.AutoExpandedOnce = true;
-
             var second = await matching.RunForRequestAsync(request.Id, ct);
             if (second is { Scored.Count: > 0 })
             {
                 await bus.PublishAsync(new SendWhatsAppTextCommand(clientPhone,
-                    $"Showing matches within {nextRadius:F0}km (wider range):"));
+                    $"Showing matches within {request.CurrentRadiusKm:F0}km (wider range):"));
                 await presenter.PresentAsync(clientPhone, second, request.ServiceSlug, ct);
                 return;
             }
         }
 
-        var followingRadius = Math.Min(request.CurrentRadiusKm * opts.RadiusExpansionFactor, opts.MaxRadiusKm);
+        var followingRadius = request.NextRadiusAfterExpansion(opts.RadiusExpansionFactor, opts.MaxRadiusKm);
         var exhausted = $"No more in {request.CurrentRadiusKm:F0}km. "
             + $"Reply INCREASE for {followingRadius:F0}km, or NEW for different service.";
         await bus.PublishAsync(new SendWhatsAppTextCommand(clientPhone, exhausted));

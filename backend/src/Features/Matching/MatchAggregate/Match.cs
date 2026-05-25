@@ -5,16 +5,16 @@ namespace Hook.Features.Matching.MatchAggregate;
 
 public class Match : AggregateRoot
 {
-    public Guid Id { get; init; }
-    public required Guid RequestId { get; init; }
-    public required string ProviderPhone { get; init; }
-    public required string ServiceSlug { get; init; }
-    public double DistanceKm { get; init; }
-    public double Score { get; init; }
-    public MatchKind Kind { get; init; } = MatchKind.Exact;
+    public Guid Id { get; private init; }
+    public Guid RequestId { get; private init; }
+    public string ProviderPhone { get; private init; } = string.Empty;
+    public string ServiceSlug { get; private init; } = string.Empty;
+    public double DistanceKm { get; private init; }
+    public double Score { get; private init; }
+    public MatchKind Kind { get; private init; } = MatchKind.Exact;
     public bool ContactShared { get; private set; }
     public Guid? ChatId { get; private set; }
-    public DateTimeOffset CreatedAt { get; init; }
+    public DateTimeOffset CreatedAt { get; private init; }
     public DateTimeOffset? PickedAt { get; private set; }
 
     public static Match Create(
@@ -24,9 +24,23 @@ public class Match : AggregateRoot
         double distanceKm,
         double score,
         DateTimeOffset now,
+        MatchKind kind = MatchKind.Exact) =>
+        CreateWithId(Guid.CreateVersion7(), requestId, providerPhone, serviceSlug, distanceKm, score, now, kind);
+
+    // Deterministic-id factory exposed to tests only (InternalsVisibleTo Hook.IntegrationTests
+    // in Hook.csproj). Production callers must use the public Create overload — the public
+    // surface is one method that auto-generates a Version7 id.
+    internal static Match CreateWithId(
+        Guid id,
+        Guid requestId,
+        string providerPhone,
+        string serviceSlug,
+        double distanceKm,
+        double score,
+        DateTimeOffset now,
         MatchKind kind = MatchKind.Exact) => new()
         {
-            Id = Guid.CreateVersion7(),
+            Id = id,
             RequestId = requestId,
             ProviderPhone = providerPhone,
             ServiceSlug = serviceSlug,

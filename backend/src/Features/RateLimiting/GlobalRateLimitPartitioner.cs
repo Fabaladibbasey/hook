@@ -1,6 +1,5 @@
 using System.Net;
 using System.Threading.RateLimiting;
-using Hook.Features.ChatSession;
 using Hook.Features.Whatsapp.ReceiveWebhook;
 
 namespace Hook.Features.RateLimiting;
@@ -27,11 +26,10 @@ internal static class GlobalRateLimitPartitioner
         {
             var path = ctx.Request.Path;
 
-            // Highest-traffic branches first: Meta webhook + chat hub.
+            // Webhook keeps its bypass — it owns the dedicated webhook-concurrency policy.
+            // ChatHub negotiate runs through the global window like any other HTTP request;
+            // live-socket method invocations are gated by ChatHubMessageLimiter.
             if (path.StartsWithSegments(ReceiveWebhookEndpoint.Path))
-                return RateLimitPartition.GetNoLimiter(BypassPartitionKey);
-
-            if (path.StartsWithSegments(ChatHubConstants.HubPath))
                 return RateLimitPartition.GetNoLimiter(BypassPartitionKey);
 
             // YARP-proxied internal UIs (e.g. Seq): authenticated edge, asset-heavy.

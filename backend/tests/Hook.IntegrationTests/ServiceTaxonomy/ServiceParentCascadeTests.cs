@@ -20,8 +20,8 @@ public sealed class ServiceParentCascadeTests : PipelineTestBase
         var parentSlug = $"parent-{Guid.NewGuid():N}";
         var childSlug = $"child-{Guid.NewGuid():N}";
 
-        var parent = new Service { Slug = parentSlug, CreatedAt = DateTimeOffset.UtcNow };
-        var child = new Service { Slug = childSlug, CreatedAt = DateTimeOffset.UtcNow };
+        var parent = Service.Create(parentSlug, DateTimeOffset.UtcNow);
+        var child = Service.Create(childSlug, DateTimeOffset.UtcNow);
         db.Services.AddRange(parent, child);
         await db.SaveChangesAsync();
 

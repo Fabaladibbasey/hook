@@ -1,3 +1,5 @@
+using Hook.Shared.Domain;
+
 namespace Hook.Features.Whatsapp.ReceiveWebhook;
 
 /// <summary>
@@ -6,11 +8,11 @@ namespace Hook.Features.Whatsapp.ReceiveWebhook;
 /// original message so the next reply ("1" or "2") can replay it into the
 /// chosen orchestrator. Drafts older than the TTL are ignored.
 /// </summary>
-public class AmbiguousIntentDraft
+public class AmbiguousIntentDraft : IAggregateRoot
 {
-    public required string Phone { get; init; }
-    public required string OriginalText { get; set; }
-    public DateTimeOffset CreatedAt { get; init; }
+    public string Phone { get; private init; } = string.Empty;
+    public string OriginalText { get; private set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; private init; }
 
     public static AmbiguousIntentDraft Start(string phone, string originalText, DateTimeOffset now) => new()
     {
@@ -18,4 +20,6 @@ public class AmbiguousIntentDraft
         OriginalText = originalText,
         CreatedAt = now
     };
+
+    public void Refresh(string originalText) => OriginalText = originalText;
 }

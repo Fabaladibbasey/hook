@@ -9,9 +9,9 @@ public class Service : IAggregateRoot
     // or starve the LLM's context budget.
     public const int MaxRawExampleLength = 200;
 
-    public required string Slug { get; init; }
+    public string Slug { get; private init; } = string.Empty;
     public string? ParentSlug { get; private set; }
-    public DateTimeOffset CreatedAt { get; init; }
+    public DateTimeOffset CreatedAt { get; private init; }
     private readonly List<string> _rawExamples = new();
     public IReadOnlyList<string> RawExamples => _rawExamples;
 
@@ -41,12 +41,12 @@ public class Service : IAggregateRoot
         ParentSlug = parent.Slug;
     }
 
-    public static Service Create(string slug, string rawExample = "")
+    public static Service Create(string slug, DateTimeOffset now, string rawExample = "")
     {
         var svc = new Service
         {
             Slug = slug,
-            CreatedAt = DateTimeOffset.UtcNow
+            CreatedAt = now
         };
         if (rawExample.Length > 0) svc.RememberRawExample(rawExample);
         return svc;

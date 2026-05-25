@@ -4,32 +4,42 @@ using Microsoft.Extensions.Options;
 
 namespace Hook.Features.RateLimiting;
 
-public sealed class PerPhoneLimiter : IDisposable
+public interface ISweepableLimiter
 {
-    private readonly PartitionedRateLimiter<string> _burst;
-    private readonly PartitionedRateLimiter<string> _spam;
+    int SweepIdle();
+}
 
-    public PerPhoneLimiter(IOptions<RateLimitOptions> options)
+public sealed class PerPhoneLimiter : IDisposable, ISweepableLimiter
+{
+    private readonly EvictingPartitionedLimiter<string> _burst;
+    private readonly EvictingPartitionedLimiter<string> _spam;
+
+    public PerPhoneLimiter(IOptions<RateLimitOptions> options, TimeProvider clock)
     {
         var opts = options.Value;
+        var idleTtl = TimeSpan.FromMinutes(opts.LimiterIdleEvictionMinutes);
 
-        _burst = PartitionedRateLimiter.Create<string, string>(phone =>
-            RateLimitPartition.GetTokenBucketLimiter(phone, _ => new TokenBucketRateLimiterOptions
+        _burst = new EvictingPartitionedLimiter<string>(
+            () => new TokenBucketRateLimiter(new TokenBucketRateLimiterOptions
             {
                 TokenLimit = opts.BurstTokens,
                 ReplenishmentPeriod = TimeSpan.FromSeconds(opts.BurstWindowSeconds),
                 TokensPerPeriod = opts.BurstTokens,
                 AutoReplenishment = true,
                 QueueLimit = 0
-            }));
+            }),
+            idleTtl,
+            clock);
 
-        _spam = PartitionedRateLimiter.Create<string, string>(phone =>
-            RateLimitPartition.GetFixedWindowLimiter(phone, _ => new FixedWindowRateLimiterOptions
+        _spam = new EvictingPartitionedLimiter<string>(
+            () => new FixedWindowRateLimiter(new FixedWindowRateLimiterOptions
             {
                 PermitLimit = opts.SpamPerHour,
                 Window = TimeSpan.FromHours(1),
                 QueueLimit = 0
-            }));
+            }),
+            idleTtl,
+            clock);
     }
 
     public RateLimitOutcome TryAcquire(string phone)
@@ -50,6 +60,8 @@ public sealed class PerPhoneLimiter : IDisposable
 
         return RateLimitOutcome.Allowed();
     }
+
+    public int SweepIdle() => _burst.Sweep() + _spam.Sweep();
 
     private static TimeSpan GetRetryAfter(RateLimitLease lease)
     {

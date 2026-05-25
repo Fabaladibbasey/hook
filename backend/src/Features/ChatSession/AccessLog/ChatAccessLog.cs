@@ -4,12 +4,12 @@ namespace Hook.Features.ChatSession.AccessLog;
 
 public class ChatAccessLog : IAggregateRoot
 {
-    public Guid Id { get; init; }
-    public required Guid ChatId { get; init; }
-    public required Guid ParticipantId { get; init; }
-    public DateTimeOffset OpenedAt { get; init; }
-    public string IpAddress { get; init; } = string.Empty;
-    public string DeviceInfo { get; init; } = string.Empty;
+    public Guid Id { get; private init; }
+    public Guid ChatId { get; private init; }
+    public Guid ParticipantId { get; private init; }
+    public DateTimeOffset OpenedAt { get; private init; }
+    public string IpAddress { get; private init; } = string.Empty;
+    public string DeviceInfo { get; private init; } = string.Empty;
 
     public static ChatAccessLog Record(
         Guid chatId,

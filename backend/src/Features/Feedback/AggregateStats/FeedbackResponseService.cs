@@ -8,6 +8,7 @@ using Hook.Features.Feedback.Step1Intent;
 using Hook.Features.Feedback.Step1Prompt;
 using Hook.Features.Feedback.Step2Intent;
 using Hook.Features.Matching.MatchAggregate;
+using Hook.Features.ServiceRequest.RequestAggregate;
 using Hook.Features.Whatsapp.Models;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Core;
@@ -20,6 +21,7 @@ namespace Hook.Features.Feedback.AggregateStats;
 public sealed class FeedbackResponseService(
     IFeedbackRepository feedback,
     IMatchRepository matches,
+    IServiceRequestRepository requests,
     IEventBus events,
     IMessageBus bus,
     IOptions<FeedbackOptions> options,
@@ -39,10 +41,21 @@ public sealed class FeedbackResponseService(
         @"\b(today|tomorrow|tonight|morning|afternoon|evening|night|now)\b",
         RegexOptions.CultureInvariant | RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    public Task HandleAsync(
+    public async Task HandleAsync(
         InboundMessage msg,
-        MatchFeedback pending,
-        CancellationToken ct) => pending.Step switch
+        MatchFeedback prefetched,
+        CancellationToken ct)
+    {
+        // Re-load tracked for DECISION freshness: the prefetched arg is router cargo
+        // (drives WHICH inbound path we entered) but a concurrent claim between
+        // prefetch and here could have moved Answer off Pending — the early-return
+        // below would otherwise miss it and EnsurePending would throw. The Version
+        // concurrency token guards the subsequent mutation; this re-load only guards
+        // the branch decision.
+        var pending = await feedback.GetByIdAsync(prefetched.Id, ct);
+        if (pending is null || pending.Answer is not FeedbackAnswer.Pending) return;
+
+        var task = pending.Step switch
         {
             FeedbackStep.DidYouFind => HandleDidYouFindAsync(msg, pending, ct),
             FeedbackStep.IdentifyWinner => HandleIdentifyWinnerAsync(msg, pending, ct),
@@ -51,6 +64,8 @@ public sealed class FeedbackResponseService(
             FeedbackStep.CaptureNoReason => HandleCaptureNoReasonAsync(msg, pending, ct),
             _ => throw new InvalidOperationException($"Unhandled FeedbackStep '{pending.Step}'")
         };
+        await task;
+    }
 
     private async Task HandleDidYouFindAsync(
         InboundMessage msg, MatchFeedback pending, CancellationToken ct)
@@ -107,20 +122,19 @@ public sealed class FeedbackResponseService(
                 return;
 
             case Step1ReplyIntent.No:
-                // Reserve CaptureNoReason first, then publish prompt, then claim Step1.
-                // Reserve-then-publish-then-claim mirrors HandleStep1YesAsync's multi-pick
-                // branch: on a mid-method crash the inbound re-enters, the deterministic
-                // No re-fires, the unique (MatchId, Step) partial index collides cleanly
-                // on the prior CaptureNoReason row, and we exit silently — the prior run
-                // already sent the prompt the user sees.
-                var captureRow = MatchFeedback.CreatePending(
-                    pending.MatchId, pending.RequestId, FeedbackStep.CaptureNoReason, now);
-                if (!await feedback.TryAddPendingAsync(captureRow, ct)) return;
-                await bus.PublishAsync(new SendWhatsAppTextCommand(from, FeedbackCopy.Step1NoAsk));
-                await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.No, now, ct);
+                await ReserveSendClaimAsync(
+                    pending, FeedbackStep.CaptureNoReason, from,
+                    FeedbackCopy.Step1NoAsk, p => p.ClaimNo(now), now, ct);
                 return;
 
             case Step1ReplyIntent.Reschedule:
+                // Load match + request + picked once at schedule time so the recheck
+                // dispatch handler can publish Step1PromptDispatchCommand without
+                // re-loading. The picked-list captured here wins over a later refresh
+                // by design: the recheck re-asks the original Step1 question.
+                var recheckCmd = await BuildRecheckCommandAsync(pending, ct);
+                if (recheckCmd is null) return;
+
                 if (eta is { } etaValue)
                 {
                     // Cap the requested delay at MaxEtaHorizon. The user said
@@ -128,10 +142,10 @@ public sealed class FeedbackResponseService(
                     // intent to stop. We still commit to one bounded recheck.
                     var requestedDelay = etaValue - now;
                     var cappedDelay = requestedDelay > opts.MaxEtaHorizon ? opts.MaxEtaHorizon : requestedDelay;
-                    if (!await feedback.TryRescheduleAsync(pending.Id, now, ct)) return;
+                    if (!await ApplyAsync(pending, p => p.Reschedule(now), ct)) return;
                     var delay = cappedDelay + opts.EtaScheduleBuffer;
                     if (delay < opts.EtaScheduleBuffer) delay = opts.EtaScheduleBuffer;
-                    await events.ScheduleAsync(new Step1RecheckCommand(pending.MatchId), delay, ct);
+                    await events.ScheduleAsync(recheckCmd, delay, ct);
                     await bus.PublishAsync(new SendWhatsAppTextCommand(from,
                         FeedbackCopy.CheckBackIn(Humanize(delay))));
                     return;
@@ -141,12 +155,12 @@ public sealed class FeedbackResponseService(
                 var nextCount = pending.Step1RecheckCount + 1;
                 if (nextCount > opts.Step1MaxRechecks)
                 {
-                    await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct);
+                    await ApplyAsync(pending, p => p.ClaimSkipped(now), ct);
                     return;
                 }
-                if (!await feedback.TryRescheduleAsync(pending.Id, now, ct)) return;
+                if (!await ApplyAsync(pending, p => p.Reschedule(now), ct)) return;
                 var rung = opts.Step1RecheckSchedule[Math.Min(nextCount - 1, opts.Step1RecheckSchedule.Count - 1)];
-                await events.ScheduleAsync(new Step1RecheckCommand(pending.MatchId), rung, ct);
+                await events.ScheduleAsync(recheckCmd, rung, ct);
                 await bus.PublishAsync(new SendWhatsAppTextCommand(from,
                     FeedbackCopy.CheckBackIn(Humanize(rung))));
                 return;
@@ -158,7 +172,7 @@ public sealed class FeedbackResponseService(
             case Step1ReplyIntent.Unclear:
                 if (now - pending.PromptedAt > opts.ParseRetryWindow)
                 {
-                    if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct)) return;
+                    if (!await ApplyAsync(pending, p => p.ClaimSkipped(now), ct)) return;
                     await bus.PublishAsync(new SendWhatsAppTextCommand(from, FeedbackCopy.SkippedAck));
                     return;
                 }
@@ -173,7 +187,7 @@ public sealed class FeedbackResponseService(
     private async Task ClaimStopAndAckAsync(
         MatchFeedback pending, PhoneNumber from, DateTimeOffset now, CancellationToken ct)
     {
-        if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct)) return;
+        if (!await ApplyAsync(pending, p => p.ClaimSkipped(now), ct)) return;
         await bus.PublishAsync(new SendWhatsAppTextCommand(from, FeedbackCopy.StopAck));
     }
 
@@ -186,30 +200,25 @@ public sealed class FeedbackResponseService(
         {
             // Race: anchor's PickedAt was cleared between Step1 schedule and this reply.
             // Claim and exit — no winner to dispatch.
-            await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Yes, now, ct);
+            await ApplyAsync(pending, p => p.ClaimYes(now), ct);
             logger.LogWarning("Step1 Yes for match {MatchId} but no picked siblings", pending.MatchId);
             return;
         }
 
         if (picked.Count == 1)
         {
-            if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Yes, now, ct)) return;
+            if (!await ApplyAsync(pending, p => p.ClaimYes(now), ct)) return;
             await events.PublishAsync(new Step2FeedbackCheck(pending.MatchId), ct);
             return;
         }
 
-        // Multi-pick: reserve IdentifyWinner first, then publish the prompt envelope
-        // and claim Step1. Reserve-then-publish guarantees that on retry the Pending
-        // row is already there and TryAddPendingAsync's unique-collision short-circuits
-        // cleanly.
-        var winner = MatchFeedback.CreatePending(
-            pending.MatchId, pending.RequestId, FeedbackStep.IdentifyWinner, now);
-        if (!await feedback.TryAddPendingAsync(winner, ct)) return;
-
-        await bus.PublishAsync(new SendWhatsAppTextCommand(from,
-            FeedbackCopy.IdentifyWinnerPrompt(PickedMatchListFormatter.Format(picked))));
-
-        await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Yes, now, ct);
+        // Multi-pick: reserve IdentifyWinner, send the bot-owned picked list, then
+        // claim Step1. Reserve-then-publish-then-claim handles the mid-method crash
+        // case via the partial unique index on (MatchId, Step).
+        await ReserveSendClaimAsync(
+            pending, FeedbackStep.IdentifyWinner, from,
+            FeedbackCopy.IdentifyWinnerPrompt(PickedMatchListFormatter.Format(picked)),
+            p => p.ClaimYes(now), now, ct);
     }
 
     private async Task HandleCaptureNoReasonAsync(
@@ -220,7 +229,7 @@ public sealed class FeedbackResponseService(
         {
             // Stale CaptureNoReason row — claim silently so it cannot swallow an
             // unrelated future inbound and persist arbitrary text into NoReason.
-            await feedback.TryClaimNoReasonAsync(pending.Id, null, now, ct);
+            await ApplyAsync(pending, p => p.CaptureNoReason(null, now), ct);
             return;
         }
 
@@ -234,20 +243,26 @@ public sealed class FeedbackResponseService(
                 ? scrubbed[..FeedbackConstants.NoReasonMaxLength]
                 : scrubbed;
 
-        if (!await feedback.TryClaimNoReasonAsync(pending.Id, reason, now, ct)) return;
+        if (!await ApplyAsync(pending, p => p.CaptureNoReason(reason, now), ct)) return;
         await bus.PublishAsync(new SendWhatsAppTextCommand(msg.From, FeedbackCopy.CaptureNoReasonAck));
     }
 
     // Strip E.164-ish phone numbers from free-text fields before persisting so
     // user-shared third-party phones do not accumulate at rest (NoReason rows
-    // + ExtractStep{1,2}IntentCommand envelope bodies).
+    // + ExtractStep{1,2}IntentCommand envelope bodies). Lookbehind/lookahead
+    // suppress matches embedded in alphanumeric IDs ("order ORD12345678") while
+    // still capturing a leading "+" (which a plain \b would skip since "+" is
+    // a non-word char and would not boundary against a preceding space).
     internal static readonly Regex PhoneScrubRx = new(
-        @"\+?\(?\d[\d\s().\-]{7,19}\d", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+        @"(?<!\w)\+?\(?\d[\d\s().\-]{7,19}\d(?!\w)",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     internal static string ScrubForOutbox(string text, int maxChars)
     {
-        var scrubbed = PhoneScrubRx.Replace(text, "[phone]");
-        return scrubbed.Length > maxChars ? scrubbed[..maxChars] : scrubbed;
+        // Truncate before regex run — bounds backtracking on adversarial payloads
+        // and caps the scrub work to a known upper bound.
+        var bounded = text.Length > maxChars ? text[..maxChars] : text;
+        return PhoneScrubRx.Replace(bounded, "[phone]");
     }
 
     // Compact, user-friendly time formatter for the reschedule ack. Truncates
@@ -281,7 +296,7 @@ public sealed class FeedbackResponseService(
             if (now - pending.PromptedAt > opts.ParseRetryWindow)
             {
                 logger.LogWarning("IdentifyWinner parse window expired for match {MatchId}", pending.MatchId);
-                if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct)) return;
+                if (!await ApplyAsync(pending, p => p.ClaimSkipped(now), ct)) return;
                 await bus.PublishAsync(new SendWhatsAppTextCommand(msg.From, FeedbackCopy.SkippedAck));
                 return;
             }
@@ -290,7 +305,7 @@ public sealed class FeedbackResponseService(
             return;
         }
 
-        if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.WinnerSelected, now, ct)) return;
+        if (!await ApplyAsync(pending, p => p.ClaimWinner(now), ct)) return;
 
         var winnerMatch = picked[pickIndex.Value - 1];
         await events.PublishAsync(new Step2FeedbackCheck(winnerMatch.Id), ct);
@@ -339,13 +354,13 @@ public sealed class FeedbackResponseService(
         switch (intent)
         {
             case Step2ReplyIntent.Yes:
-                if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Yes, now, ct)) return;
+                if (!await ApplyAsync(pending, p => p.ClaimYes(now), ct)) return;
                 await bus.PublishAsync(new SendWhatsAppTextCommand(from, FeedbackCopy.Step2YesAck));
                 await RecordOutcomeAsync(pending.MatchId, FeedbackAnswer.Yes, now, ct);
                 return;
 
             case Step2ReplyIntent.No:
-                if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.No, now, ct)) return;
+                if (!await ApplyAsync(pending, p => p.ClaimNo(now), ct)) return;
                 await bus.PublishAsync(new SendWhatsAppTextCommand(from, FeedbackCopy.Step2NoAck));
                 await RecordOutcomeAsync(pending.MatchId, FeedbackAnswer.No, now, ct);
                 return;
@@ -357,8 +372,7 @@ public sealed class FeedbackResponseService(
                     var requestedDelay = etaValue - now;
                     var cappedDelay = requestedDelay > opts.MaxEtaHorizon ? opts.MaxEtaHorizon : requestedDelay;
                     var cappedEta = now + cappedDelay;
-                    if (!await feedback.TryClaimPendingWithEtaAsync(
-                            pending.Id, FeedbackAnswer.EtaCaptured, cappedEta, now, ct)) return;
+                    if (!await ApplyAsync(pending, p => p.ClaimEta(cappedEta, now), ct)) return;
                     var delay = cappedDelay + opts.EtaScheduleBuffer;
                     if (delay < opts.EtaScheduleBuffer) delay = opts.EtaScheduleBuffer;
                     await events.ScheduleAsync(new Step2FeedbackCheck(pending.MatchId), delay, ct);
@@ -367,14 +381,9 @@ public sealed class FeedbackResponseService(
                     return;
                 }
 
-                // No usable eta: reserve AwaitingEta first, send prompt, then claim InProgress.
-                // Reserve-then-publish-then-claim mirrors Step1 No so a mid-method crash re-enters
-                // through the partial unique index instead of double-prompting.
-                var awaitingRow = MatchFeedback.CreatePending(
-                    pending.MatchId, pending.RequestId, FeedbackStep.AwaitingEta, now);
-                if (!await feedback.TryAddPendingAsync(awaitingRow, ct)) return;
-                await bus.PublishAsync(new SendWhatsAppTextCommand(from, FeedbackCopy.Step2AwaitingEtaAsk));
-                await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.InProgress, now, ct);
+                await ReserveSendClaimAsync(
+                    pending, FeedbackStep.AwaitingEta, from,
+                    FeedbackCopy.Step2AwaitingEtaAsk, p => p.ClaimInProgress(now), now, ct);
                 return;
 
             case Step2ReplyIntent.StopAsking:
@@ -384,7 +393,7 @@ public sealed class FeedbackResponseService(
             case Step2ReplyIntent.Unclear:
                 if (now - pending.PromptedAt > opts.ParseRetryWindow)
                 {
-                    if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct)) return;
+                    if (!await ApplyAsync(pending, p => p.ClaimSkipped(now), ct)) return;
                     await bus.PublishAsync(new SendWhatsAppTextCommand(from, FeedbackCopy.SkippedAck));
                     return;
                 }
@@ -428,7 +437,7 @@ public sealed class FeedbackResponseService(
         PhoneNumber from,
         CancellationToken ct)
     {
-        if (!await feedback.TryClaimPendingAsync(pending.Id, FeedbackAnswer.Skipped, now, ct)) return;
+        if (!await ApplyAsync(pending, p => p.ClaimSkipped(now), ct)) return;
         await events.ScheduleAsync(new Step2FeedbackCheck(pending.MatchId), opts.Step2InProgressRecheckDelay, ct);
         await bus.PublishAsync(new SendWhatsAppTextCommand(from, FeedbackCopy.SkippedAck));
         logger.LogInformation(
@@ -489,6 +498,26 @@ public sealed class FeedbackResponseService(
         return await matches.GetPickedForRequestAsync(anchor.RequestId, ct);
     }
 
+    // Denormalised at schedule time so Step1RecheckHandler runs zero reads on the
+    // scheduled-dispatch path. Returns null when any prereq lookup fails — caller
+    // should silently exit (Reschedule on a stale row is a no-op anyway).
+    private async Task<Step1RecheckCommand?> BuildRecheckCommandAsync(
+        MatchFeedback pending, CancellationToken ct)
+    {
+        var match = await matches.GetAsync(pending.MatchId, ct);
+        if (match is null) return null;
+        var request = await requests.GetAsync(match.RequestId, ct);
+        if (request is null) return null;
+        if (!PhoneNumber.TryParse(request.ClientPhone, out var clientPhone)) return null;
+        var picked = await matches.GetPickedForRequestAsync(match.RequestId, ct);
+        var pickedFormatted = picked.Count > 1 ? PickedMatchListFormatter.Format(picked) : string.Empty;
+        return new Step1RecheckCommand(
+            MatchId: match.Id,
+            ClientPhone: clientPhone,
+            ServiceSlug: request.ServiceSlug,
+            PickedFormatted: pickedFormatted);
+    }
+
     private async Task SendRetryHintIfFreshAsync(
         InboundMessage msg,
         MatchFeedback pending,
@@ -519,6 +548,41 @@ public sealed class FeedbackResponseService(
             "Provider {Provider} stats updated: success={Success}",
             maskedProvider,
             answer == FeedbackAnswer.Yes);
+    }
+
+    // Mutate-save helper on the already-tracked aggregate. Returns false when the
+    // row is no longer Pending OR when a concurrent writer claimed it first
+    // (Version concurrency-token loss caught in TrySaveAsync). The single load
+    // is owned by HandleAsync — call sites pass the tracked instance through so
+    // every decision and every mutation in one inbound run on the same fresh row.
+    private async Task<bool> ApplyAsync(
+        MatchFeedback tracked,
+        Action<MatchFeedback> mutation,
+        CancellationToken ct)
+    {
+        if (tracked.Answer is not FeedbackAnswer.Pending) return false;
+        mutation(tracked);
+        return await feedback.TrySaveAsync(tracked, ct);
+    }
+
+    // Reserve a follow-up Pending row, send the prompt copy, then claim the
+    // original. Mirrors the reserve-then-publish-then-claim pattern across three
+    // branches (Step1 No, Step1 Yes multi-pick, Step2 InProgress no-eta) so a
+    // mid-method crash re-enters cleanly through the partial unique index.
+    private async Task ReserveSendClaimAsync(
+        MatchFeedback original,
+        FeedbackStep reservedStep,
+        PhoneNumber from,
+        string promptCopy,
+        Action<MatchFeedback> claim,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var reserved = MatchFeedback.CreatePending(
+            original.MatchId, original.RequestId, reservedStep, now);
+        if (!await feedback.TryAddPendingAsync(reserved, ct)) return;
+        await bus.PublishAsync(new SendWhatsAppTextCommand(from, promptCopy));
+        await ApplyAsync(original, claim, ct);
     }
 }
 

@@ -4,13 +4,13 @@ namespace Hook.Features.ChatSession.SessionAggregate;
 
 public class ChatMessage : IAggregateRoot
 {
-    public Guid Id { get; init; }
-    public required Guid ChatId { get; init; }
-    public required Guid ParticipantId { get; init; }
-    public required byte[] Ciphertext { get; init; }
-    public required byte[] Nonce { get; init; }
-    public required long Sequence { get; init; }
-    public DateTimeOffset CreatedAt { get; init; }
+    public Guid Id { get; private init; }
+    public Guid ChatId { get; private init; }
+    public Guid ParticipantId { get; private init; }
+    public byte[] Ciphertext { get; private init; } = [];
+    public byte[] Nonce { get; private init; } = [];
+    public long Sequence { get; private init; }
+    public DateTimeOffset CreatedAt { get; private init; }
 
     public static ChatMessage Create(
         Guid id,

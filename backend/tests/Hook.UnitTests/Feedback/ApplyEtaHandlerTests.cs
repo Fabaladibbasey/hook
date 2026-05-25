@@ -3,6 +3,7 @@ using Hook.Features.Feedback.AggregateStats;
 using Hook.Features.Feedback.Eta;
 using Hook.Features.Feedback.Models;
 using Hook.Features.Matching.MatchAggregate;
+using Hook.Features.ServiceRequest.RequestAggregate;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Core;
 using Hook.Shared.Pipeline.PostCommitSends;
@@ -22,29 +23,18 @@ public class ApplyEtaHandlerTests
     private readonly Mock<IMessageBus> _busMock = new();
     private readonly FakeTimeProvider _clock = new(DateTimeOffset.UtcNow);
     private readonly FeedbackOptions _options = new();
-    private readonly List<(Guid Id, FeedbackAnswer Answer)> _claimed = [];
-    private readonly List<(Guid Id, FeedbackAnswer Answer, DateTimeOffset Eta)> _claimedWithEta = [];
     private readonly List<(object Msg, TimeSpan Delay)> _scheduled = [];
     private readonly List<SendWhatsAppTextCommand> _sent = [];
 
-    private bool _tryClaimResult = true;
+    private MatchFeedback? _stored;
+    private bool _saveResult = true;
 
     public ApplyEtaHandlerTests()
     {
-        _feedbackMock.Setup(x => x.TryClaimPendingAsync(
-                It.IsAny<Guid>(), It.IsAny<FeedbackAnswer>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid id, FeedbackAnswer answer, DateTimeOffset _, CancellationToken _) =>
-            {
-                if (_tryClaimResult) _claimed.Add((id, answer));
-                return _tryClaimResult;
-            });
-        _feedbackMock.Setup(x => x.TryClaimPendingWithEtaAsync(
-                It.IsAny<Guid>(), It.IsAny<FeedbackAnswer>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid id, FeedbackAnswer answer, DateTimeOffset eta, DateTimeOffset _, CancellationToken _) =>
-            {
-                if (_tryClaimResult) _claimedWithEta.Add((id, answer, eta));
-                return _tryClaimResult;
-            });
+        _feedbackMock.Setup(x => x.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => _stored);
+        _feedbackMock.Setup(x => x.TrySaveAsync(It.IsAny<MatchFeedback>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => _saveResult);
         _eventBusMock.Setup(x => x.ScheduleAsync(It.IsAny<It.IsAnyType>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
             .Callback(new InvocationAction(inv =>
                 _scheduled.Add((inv.Arguments[0], (TimeSpan)inv.Arguments[1]))))
@@ -59,6 +49,7 @@ public class ApplyEtaHandlerTests
         var service = new FeedbackResponseService(
             _feedbackMock.Object,
             new Mock<IMatchRepository>().Object,
+            new Mock<IServiceRequestRepository>().Object,
             _eventBusMock.Object,
             _busMock.Object,
             Options.Create(_options),
@@ -77,15 +68,12 @@ public class ApplyEtaHandlerTests
     [Fact]
     public async Task Handle_PendingNotFound_NoOp()
     {
-        _feedbackMock.Setup(x => x.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((MatchFeedback?)null);
+        _stored = null;
 
         await Build().Handle(
             new ApplyEtaCommand(Guid.NewGuid(), Guid.NewGuid(), _clock.GetUtcNow().AddHours(2), From()),
             _busMock.Object, CancellationToken.None);
 
-        _claimed.ShouldBeEmpty();
-        _claimedWithEta.ShouldBeEmpty();
         _scheduled.ShouldBeEmpty();
         _sent.ShouldBeEmpty();
     }
@@ -93,25 +81,18 @@ public class ApplyEtaHandlerTests
     [Fact]
     public async Task Handle_PendingAlreadyClaimed_NoOp()
     {
-        var now = _clock.GetUtcNow();
-        var pending = new MatchFeedback
-        {
-            Id = Guid.CreateVersion7(),
-            MatchId = Guid.NewGuid(),
-            RequestId = Guid.NewGuid(),
-            Step = FeedbackStep.AwaitingEta,
-            PromptedAt = now,
-            Answer = FeedbackAnswer.EtaCaptured,
-            RepliedAt = now,
-        };
-        _feedbackMock.Setup(x => x.GetByIdAsync(pending.Id, It.IsAny<CancellationToken>())).ReturnsAsync(pending);
+        var pending = Pending();
+        // Drive aggregate into a claimed state via the legitimate transition so the
+        // pre-check in the handler sees Answer != Pending.
+        pending.ClaimEta(_clock.GetUtcNow().AddHours(1), _clock.GetUtcNow());
+        _stored = pending;
 
         await Build().Handle(
             new ApplyEtaCommand(pending.Id, pending.MatchId, _clock.GetUtcNow().AddHours(2), From()),
             _busMock.Object, CancellationToken.None);
 
-        _claimed.ShouldBeEmpty();
-        _claimedWithEta.ShouldBeEmpty();
+        _scheduled.ShouldBeEmpty();
+        _sent.ShouldBeEmpty();
     }
 
     [Fact]
@@ -120,14 +101,13 @@ public class ApplyEtaHandlerTests
         // Cross-step contamination guard: a retry hitting this handler for a DidYouFind row
         // must not touch any state.
         var pending = Pending(step: FeedbackStep.DidYouFind);
-        _feedbackMock.Setup(x => x.GetByIdAsync(pending.Id, It.IsAny<CancellationToken>())).ReturnsAsync(pending);
+        _stored = pending;
 
         await Build().Handle(
             new ApplyEtaCommand(pending.Id, pending.MatchId, _clock.GetUtcNow().AddHours(2), From()),
             _busMock.Object, CancellationToken.None);
 
-        _claimed.ShouldBeEmpty();
-        _claimedWithEta.ShouldBeEmpty();
+        pending.Answer.ShouldBe(FeedbackAnswer.Pending);
         _sent.ShouldBeEmpty();
     }
 
@@ -135,16 +115,15 @@ public class ApplyEtaHandlerTests
     public async Task Handle_ValidFutureEta_ClaimsEtaCapturedAndSchedules()
     {
         var pending = Pending();
-        _feedbackMock.Setup(x => x.GetByIdAsync(pending.Id, It.IsAny<CancellationToken>())).ReturnsAsync(pending);
+        _stored = pending;
         var eta = _clock.GetUtcNow().AddHours(3);
 
         await Build().Handle(
             new ApplyEtaCommand(pending.Id, pending.MatchId, eta, From()),
             _busMock.Object, CancellationToken.None);
 
-        _claimedWithEta.ShouldHaveSingleItem();
-        _claimedWithEta[0].Answer.ShouldBe(FeedbackAnswer.EtaCaptured);
-        _claimedWithEta[0].Eta.ShouldBe(eta);
+        pending.Answer.ShouldBe(FeedbackAnswer.EtaCaptured);
+        pending.EtaUtc.ShouldBe(eta);
         _scheduled.ShouldHaveSingleItem();
         var (msg, delay) = _scheduled[0];
         ((Step2FeedbackCheck)msg).MatchId.ShouldBe(pending.MatchId);
@@ -154,11 +133,11 @@ public class ApplyEtaHandlerTests
     }
 
     [Fact]
-    public async Task Handle_TryClaimWithEtaRaceLost_NoSchedule()
+    public async Task Handle_TrySaveRaceLost_NoSchedule()
     {
         var pending = Pending();
-        _feedbackMock.Setup(x => x.GetByIdAsync(pending.Id, It.IsAny<CancellationToken>())).ReturnsAsync(pending);
-        _tryClaimResult = false;
+        _stored = pending;
+        _saveResult = false;
 
         await Build().Handle(
             new ApplyEtaCommand(pending.Id, pending.MatchId, _clock.GetUtcNow().AddHours(3), From()),
@@ -172,13 +151,13 @@ public class ApplyEtaHandlerTests
     public async Task Handle_AiNullWithinRetryWindow_SendsHint()
     {
         var pending = Pending(promptedAt: _clock.GetUtcNow());
-        _feedbackMock.Setup(x => x.GetByIdAsync(pending.Id, It.IsAny<CancellationToken>())).ReturnsAsync(pending);
+        _stored = pending;
 
         await Build().Handle(
             new ApplyEtaCommand(pending.Id, pending.MatchId, EtaUtc: null, From()),
             _busMock.Object, CancellationToken.None);
 
-        _claimed.ShouldBeEmpty();
+        pending.Answer.ShouldBe(FeedbackAnswer.Pending);
         _sent.ShouldHaveSingleItem();
         _sent[0].Text.ShouldContain("didn't catch");
     }
@@ -187,14 +166,13 @@ public class ApplyEtaHandlerTests
     public async Task Handle_AiNullPastRetryWindow_ClaimsSkippedAndSchedulesFallback()
     {
         var pending = Pending(promptedAt: _clock.GetUtcNow() - TimeSpan.FromHours(2));
-        _feedbackMock.Setup(x => x.GetByIdAsync(pending.Id, It.IsAny<CancellationToken>())).ReturnsAsync(pending);
+        _stored = pending;
 
         await Build().Handle(
             new ApplyEtaCommand(pending.Id, pending.MatchId, EtaUtc: null, From()),
             _busMock.Object, CancellationToken.None);
 
-        _claimed.ShouldHaveSingleItem();
-        _claimed[0].Answer.ShouldBe(FeedbackAnswer.Skipped);
+        pending.Answer.ShouldBe(FeedbackAnswer.Skipped);
         _scheduled.ShouldHaveSingleItem();
         _scheduled[0].Delay.ShouldBe(_options.Step2InProgressRecheckDelay);
         _sent.ShouldHaveSingleItem().Text.ShouldContain("Thanks");
@@ -204,16 +182,15 @@ public class ApplyEtaHandlerTests
     public async Task Handle_EtaBeyondHorizon_FallsBackAsSkipped()
     {
         var pending = Pending();
-        _feedbackMock.Setup(x => x.GetByIdAsync(pending.Id, It.IsAny<CancellationToken>())).ReturnsAsync(pending);
+        _stored = pending;
         var beyondHorizon = _clock.GetUtcNow().Add(_options.MaxEtaHorizon).AddHours(1);
 
         await Build().Handle(
             new ApplyEtaCommand(pending.Id, pending.MatchId, beyondHorizon, From()),
             _busMock.Object, CancellationToken.None);
 
-        _claimedWithEta.ShouldBeEmpty();
-        _claimed.ShouldHaveSingleItem();
-        _claimed[0].Answer.ShouldBe(FeedbackAnswer.Skipped);
+        pending.Answer.ShouldBe(FeedbackAnswer.Skipped);
+        pending.EtaUtc.ShouldBeNull();
         _scheduled.ShouldHaveSingleItem();
         _scheduled[0].Delay.ShouldBe(_options.Step2InProgressRecheckDelay);
         _sent.ShouldHaveSingleItem().Text.ShouldContain("Thanks");
@@ -225,14 +202,15 @@ public class ApplyEtaHandlerTests
         // ETA further in the past than the buffer makes the computed delay negative;
         // the handler clamps to EtaScheduleBuffer so the recheck still fires.
         var pending = Pending();
-        _feedbackMock.Setup(x => x.GetByIdAsync(pending.Id, It.IsAny<CancellationToken>())).ReturnsAsync(pending);
+        _stored = pending;
         var pastEta = _clock.GetUtcNow() - _options.EtaScheduleBuffer - TimeSpan.FromMinutes(1);
 
         await Build().Handle(
             new ApplyEtaCommand(pending.Id, pending.MatchId, pastEta, From()),
             _busMock.Object, CancellationToken.None);
 
-        _claimedWithEta.ShouldHaveSingleItem();
+        pending.Answer.ShouldBe(FeedbackAnswer.EtaCaptured);
+        pending.EtaUtc.ShouldBe(pastEta);
         _scheduled.ShouldHaveSingleItem();
         _scheduled[0].Delay.ShouldBe(_options.EtaScheduleBuffer);
         _sent.ShouldHaveSingleItem().Text.ShouldContain("I'll check back");

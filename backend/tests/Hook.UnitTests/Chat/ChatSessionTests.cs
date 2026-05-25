@@ -80,6 +80,26 @@ public class ChatSessionTests
     }
 
     [Fact]
+    public void HardExpire_FromActive_SetsExpiredAndRaisesEvents()
+    {
+        var session = ChatSession.Create(TimeSpan.FromMinutes(30), Now);
+
+        session.HardExpire(Now);
+
+        session.Status.ShouldBe(ChatSessionStatus.Expired);
+        session.ExpiresAt.ShouldBe(Now);
+        session.CanSendMessage(Now).ShouldBeFalse();
+
+        var events = session.DequeueEvents();
+        events.Count.ShouldBe(2);
+        var broadcast = events.OfType<BroadcastChatEvent>().Single();
+        broadcast.ChatId.ShouldBe(session.Id);
+        broadcast.EventName.ShouldBe(ChatHubEvents.ChatExpired);
+        broadcast.Payload.ShouldBeOfType<ChatExpiredPayload>();
+        events.OfType<ChatSessionEndedEvent>().Single().Reason.ShouldBe(ChatEndReason.Expired);
+    }
+
+    [Fact]
     public void End_TwiceFromActive_OnlyRaisesEventsOnce()
     {
         var session = ChatSession.Create(TimeSpan.FromMinutes(30), Now);

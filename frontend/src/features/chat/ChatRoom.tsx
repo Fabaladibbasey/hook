@@ -15,6 +15,7 @@ type OpenChatResponse = {
   sessionId: string;
   status: "Active" | "Ended" | "Expired";
   expiresAt: string;
+  outboundSequenceCursor: number;
 };
 
 export default function ChatRoom() {
@@ -33,7 +34,8 @@ export default function ChatRoom() {
     open?.chatId ?? "",
     open?.participantId ?? "",
     token ?? "",
-    open?.sessionId ?? ""
+    open?.sessionId ?? "",
+    open?.outboundSequenceCursor ?? -1
   );
   const [ending, setEnding] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);

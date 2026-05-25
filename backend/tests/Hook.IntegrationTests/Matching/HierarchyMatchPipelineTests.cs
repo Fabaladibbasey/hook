@@ -31,7 +31,7 @@ public sealed class HierarchyMatchPipelineTests : PipelineTestBase
         // RootSectorSeeder already populated "software-engineering" at host boot —
         // only seed the child slug here.
         var childSlug = $"net-dev-{Guid.NewGuid():N}";
-        var child = new Service { Slug = childSlug, CreatedAt = DateTimeOffset.UtcNow };
+        var child = Service.Create(childSlug, DateTimeOffset.UtcNow);
         db.Services.Add(child);
         await db.SaveChangesAsync();
         var parent = await db.Services.FindAsync("software-engineering");
@@ -66,7 +66,7 @@ public sealed class HierarchyMatchPipelineTests : PipelineTestBase
 
         // Seed: doctor (root) + cardiology (child of doctor).
         var childSlug = $"cardio-{Guid.NewGuid():N}";
-        db.Services.Add(new Service { Slug = childSlug, CreatedAt = DateTimeOffset.UtcNow });
+        db.Services.Add(Service.Create(childSlug, DateTimeOffset.UtcNow));
         await db.SaveChangesAsync();
         var child = await db.Services.FindAsync(childSlug);
         var parent = await db.Services.FindAsync("doctor");

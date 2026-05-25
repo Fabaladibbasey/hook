@@ -1,4 +1,5 @@
 using Hook.Features.Geocoding.GeocodeCache;
+using Hook.Features.Geocoding.Models;
 using Hook.Features.MetaTemplates;
 using Hook.Shared.Persistence.Data;
 using Microsoft.EntityFrameworkCore;
@@ -19,16 +20,11 @@ public sealed class DevPipelineFixture_SelfTests : PipelineTestBase
         await using (var scope = _fx.Factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-            db.WhatsappContacts.Add(new WhatsappContact { Phone = "+22030099999", LastInboundAt = DateTimeOffset.UtcNow });
-            db.GeocodeCache.Add(new GeocodeCacheEntry
-            {
-                Key = "self-test-key",
-                Latitude = 13.4549,
-                Longitude = -16.5790,
-                FormattedAddress = "x",
-                Provider = "test",
-                FetchedAt = DateTimeOffset.UtcNow
-            });
+            db.WhatsappContacts.Add(WhatsappContact.Recorded("+22030099999", DateTimeOffset.UtcNow));
+            db.GeocodeCache.Add(GeocodeCacheEntry.Capture(
+                "self-test-key",
+                new GeocodeResult(new Location(13.4549, -16.5790), "x", "test", FromCache: false),
+                DateTimeOffset.UtcNow));
             await db.SaveChangesAsync();
         }
 

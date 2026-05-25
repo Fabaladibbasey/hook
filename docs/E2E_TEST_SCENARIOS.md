@@ -703,7 +703,7 @@ Both finalize the request and publish `ServiceRequestCreatedEvent`.
 
 ### CH-007 — Replayed sequence rejected  [P1] [dev]
 
-**Preconditions:** keys exchanged; `participant.NextSequence=5`.
+**Preconditions:** keys exchanged; `participant.LastInboundSequence=5`.
 **Expected:** SendMessage with `Sequence=4` → log `"Replayed or out-of-order sequence rejected"`. No row written. No broadcast.
 **Dev exec:** scripted client.
 **Non-dev exec:** N/A.
@@ -725,7 +725,7 @@ Both finalize the request and publish `ServiceRequestCreatedEvent`.
 ### CH-010 — Re-open chat URL revokes prior session  [P0] [both]
 
 **Preconditions:** participant connected via session A.
-**Expected:** participant opens same `/c/.../<token>` URL again → `RotateSession()` issues new sessionId. Old hub connection receives `SessionRevoked` and is aborted by `Context.Abort()`. Frontend RevokedToast shown on old tab.
+**Expected:** participant opens same `/c/.../<token>` URL again → `RotateSession()` issues new sessionId. Old hub connection receives `SessionRevoked` and is aborted by `Context.Abort()`. Frontend RevokedToast shown on old tab. The new `/api/chat/open` response includes `outboundSequenceCursor` matching the prior session's `LastInboundSequence`; the new tab seeds its send counter from this value and sends `cursor + 1`.
 **Dev exec:** open chat in Node SignalR client A; call `/api/chat/open` again; reconnect as session B. Verify A receives `SessionRevoked`.
 **Non-dev exec:** open in two tabs of same browser using same link; second open revokes first.
 

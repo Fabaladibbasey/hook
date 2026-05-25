@@ -97,26 +97,12 @@ public sealed class MatchRepositoryOrderingTests : PipelineTestBase
         var lowerId = Guid.Parse("00000000-0000-0000-0000-000000000001");
         var higherId = Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff");
 
-        var higher = new MatchEntity
-        {
-            Id = higherId,
-            RequestId = request.Id,
-            ProviderPhone = $"+220{Random.Shared.Next(0, 10_000_000):D7}",
-            ServiceSlug = "plumbing",
-            DistanceKm = 1.0,
-            Score = 0.9,
-            CreatedAt = sameTime
-        };
-        var lower = new MatchEntity
-        {
-            Id = lowerId,
-            RequestId = request.Id,
-            ProviderPhone = $"+220{Random.Shared.Next(0, 10_000_000):D7}",
-            ServiceSlug = "plumbing",
-            DistanceKm = 1.0,
-            Score = 0.9,
-            CreatedAt = sameTime
-        };
+        var higher = MatchEntity.CreateWithId(
+            higherId, request.Id, $"+220{Random.Shared.Next(0, 10_000_000):D7}", "plumbing",
+            distanceKm: 1.0, score: 0.9, now: sameTime);
+        var lower = MatchEntity.CreateWithId(
+            lowerId, request.Id, $"+220{Random.Shared.Next(0, 10_000_000):D7}", "plumbing",
+            distanceKm: 1.0, score: 0.9, now: sameTime);
 
         db.Matches.AddRange(higher, lower);
         await db.SaveChangesAsync();

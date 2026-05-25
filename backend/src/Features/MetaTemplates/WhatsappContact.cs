@@ -1,7 +1,15 @@
+using Hook.Shared.Domain;
+
 namespace Hook.Features.MetaTemplates;
 
-public class WhatsappContact
+public class WhatsappContact : IAggregateRoot
 {
-    public required string Phone { get; init; }
-    public DateTimeOffset LastInboundAt { get; set; }
+    public string Phone { get; private init; } = string.Empty;
+    public DateTimeOffset LastInboundAt { get; private set; }
+
+    public static WhatsappContact Recorded(string phone, DateTimeOffset at) => new()
+    {
+        Phone = phone,
+        LastInboundAt = at
+    };
 }
