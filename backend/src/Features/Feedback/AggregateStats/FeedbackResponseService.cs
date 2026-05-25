@@ -46,10 +46,12 @@ public sealed class FeedbackResponseService(
         MatchFeedback prefetched,
         CancellationToken ct)
     {
-        // Re-load tracked so all decisions AND mutations run on the same fresh
-        // instance. The prefetched arg is router cargo — it drives WHICH inbound
-        // path we entered, but a concurrent Reschedule between prefetch and here
-        // would otherwise produce stale Step1RecheckCount rung calculations.
+        // Re-load tracked for DECISION freshness: the prefetched arg is router cargo
+        // (drives WHICH inbound path we entered) but a concurrent claim between
+        // prefetch and here could have moved Answer off Pending — the early-return
+        // below would otherwise miss it and EnsurePending would throw. The Version
+        // concurrency token guards the subsequent mutation; this re-load only guards
+        // the branch decision.
         var pending = await feedback.GetByIdAsync(prefetched.Id, ct);
         if (pending is null || pending.Answer is not FeedbackAnswer.Pending) return;
 

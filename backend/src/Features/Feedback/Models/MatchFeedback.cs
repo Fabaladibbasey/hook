@@ -51,31 +51,25 @@ public class MatchFeedback : IAggregateRoot
     public void ClaimWinner(DateTimeOffset now) => Claim(FeedbackAnswer.WinnerSelected, now);
     public void ClaimInProgress(DateTimeOffset now) => Claim(FeedbackAnswer.InProgress, now);
 
-    public void ClaimEta(DateTimeOffset etaUtc, DateTimeOffset now)
+    public void ClaimEta(DateTimeOffset etaUtc, DateTimeOffset now) => Mutate(() =>
     {
-        EnsurePending();
         EtaUtc = etaUtc;
         Answer = FeedbackAnswer.EtaCaptured;
         RepliedAt = now;
-        Version += 1;
-    }
+    });
 
-    public void Reschedule(DateTimeOffset now)
+    public void Reschedule(DateTimeOffset now) => Mutate(() =>
     {
-        EnsurePending();
         Step1RecheckCount += 1;
         PromptedAt = now;
-        Version += 1;
-    }
+    });
 
-    public void CaptureNoReason(string? reason, DateTimeOffset now)
+    public void CaptureNoReason(string? reason, DateTimeOffset now) => Mutate(() =>
     {
-        EnsurePending();
         NoReason = reason;
         Answer = FeedbackAnswer.NoReasonCaptured;
         RepliedAt = now;
-        Version += 1;
-    }
+    });
 
     // Returns false when the minGap has not yet elapsed since the last prompt — caller
     // skips the re-fire. Throws if the row is no longer Pending (state machine bug).
@@ -88,11 +82,19 @@ public class MatchFeedback : IAggregateRoot
         return true;
     }
 
-    private void Claim(FeedbackAnswer answer, DateTimeOffset now)
+    private void Claim(FeedbackAnswer answer, DateTimeOffset now) => Mutate(() =>
     {
-        EnsurePending();
         Answer = answer;
         RepliedAt = now;
+    });
+
+    // Funnels every state-changing transition through EnsurePending + Version bump so
+    // a new mutator cannot forget the concurrency token bump (silent loss of the
+    // optimistic-lock guarantee).
+    private void Mutate(Action body)
+    {
+        EnsurePending();
+        body();
         Version += 1;
     }
 

@@ -10,5 +10,8 @@ public enum PublishParticipantKeyResult
 
 public sealed record PublishParticipantKeyResponse(
     PublishParticipantKeyResult Result,
+    PublishParticipantKeyData? Data);
+
+public sealed record PublishParticipantKeyData(
     byte[] PeerPublicKey,
     Guid PeerParticipantId);

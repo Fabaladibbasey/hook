@@ -341,6 +341,102 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
     }
 
     [Fact]
+    public async Task TrySaveAsync_ConcurrencyLoss_DoesNotResurrectAtOuterSave()
+    {
+        // After the swallowed DbUpdateConcurrencyException, the losing entry must be
+        // detached (State -> Unchanged via ReloadAsync) so the outer Wolverine
+        // AutoApplyTransactions commit does NOT re-issue the losing UPDATE and throw
+        // again. Without the fix, dbA.SaveChangesAsync below throws.
+        var clientPhone = UniquePhone();
+        await using var seedScope = _fx.Factory.Services.CreateAsyncScope();
+        var seedDb = seedScope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var seedRepo = seedScope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var (_, match) = await SeedMatchAsync(seedDb, clientPhone);
+        var entry = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
+        await seedRepo.TryAddPendingAsync(entry);
+
+        await using var scopeA = _fx.Factory.Services.CreateAsyncScope();
+        await using var scopeB = _fx.Factory.Services.CreateAsyncScope();
+        var repoA = scopeA.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var repoB = scopeB.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var dbA = scopeA.ServiceProvider.GetRequiredService<HookDbContext>();
+        var dbB = scopeB.ServiceProvider.GetRequiredService<HookDbContext>();
+
+        var loadedA = await repoA.GetByIdAsync(entry.Id);
+        var loadedB = await repoB.GetByIdAsync(entry.Id);
+        Assert.NotNull(loadedA);
+        Assert.NotNull(loadedB);
+
+        // Winner commits first.
+        loadedB!.ClaimYes(DateTimeOffset.UtcNow);
+        Assert.True(await repoB.TrySaveAsync(loadedB));
+
+        // Loser stages mutation, TrySaveAsync swallows concurrency loss.
+        loadedA!.ClaimNo(DateTimeOffset.UtcNow);
+        Assert.False(await repoA.TrySaveAsync(loadedA));
+
+        // Without the ReloadAsync detach this throws DbUpdateConcurrencyException.
+        await dbA.SaveChangesAsync();
+
+        await using var verifyScope = _fx.Factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var persisted = await verifyDb.MatchFeedback.AsNoTracking().FirstAsync(f => f.Id == entry.Id);
+        Assert.Equal(FeedbackAnswer.Yes, persisted.Answer);
+    }
+
+    [Fact]
+    public async Task TrySaveAsync_ConcurrencyLoss_DoesNotDropSiblingProviderStatsEdit()
+    {
+        // The scoped-swallow contract: a concurrency loss on MatchFeedback must
+        // NOT discard a sibling ProviderStats edit staged on the same context.
+        // ReloadAsync targets only the conflicting entry — unlike ChangeTracker.Clear,
+        // which would drop the staged ProviderStats mutation along with the loser.
+        var clientPhone = UniquePhone();
+        var providerPhone = UniquePhone();
+
+        // Seed both MatchFeedback Pending and a ProviderStats row.
+        await using var seedScope = _fx.Factory.Services.CreateAsyncScope();
+        var seedDb = seedScope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var seedRepo = seedScope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var (_, match) = await SeedMatchAsync(seedDb, clientPhone);
+        var entry = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
+        await seedRepo.TryAddPendingAsync(entry);
+        await seedRepo.UpsertStatsAsync(ProviderStats.Initial(providerPhone, DateTimeOffset.UtcNow));
+        await seedDb.SaveChangesAsync();
+
+        await using var scopeA = _fx.Factory.Services.CreateAsyncScope();
+        await using var scopeB = _fx.Factory.Services.CreateAsyncScope();
+        var repoA = scopeA.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var repoB = scopeB.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var dbA = scopeA.ServiceProvider.GetRequiredService<HookDbContext>();
+
+        var loadedA = await repoA.GetByIdAsync(entry.Id);
+        var loadedB = await repoB.GetByIdAsync(entry.Id);
+        var statsA = await repoA.GetStatsAsync(providerPhone);
+        Assert.NotNull(loadedA);
+        Assert.NotNull(loadedB);
+        Assert.NotNull(statsA);
+
+        // Winner B commits MatchFeedback first.
+        loadedB!.ClaimYes(DateTimeOffset.UtcNow);
+        Assert.True(await repoB.TrySaveAsync(loadedB));
+
+        // Scope A: stage Modified on ProviderStats sibling, mutate the losing MatchFeedback.
+        statsA!.RecordOutcome(success: true, DateTimeOffset.UtcNow);
+        loadedA!.ClaimNo(DateTimeOffset.UtcNow);
+        Assert.False(await repoA.TrySaveAsync(loadedA));
+
+        // Sibling edit must persist on the next SaveChangesAsync.
+        await dbA.SaveChangesAsync();
+
+        await using var verifyScope = _fx.Factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var persistedStats = await verifyDb.ProviderStats.AsNoTracking()
+            .FirstAsync(s => s.ProviderPhone == providerPhone);
+        Assert.Equal(1, persistedStats.CompletedCount);
+    }
+
+    [Fact]
     public async Task TryAddPending_LosingRace_DoesNotPoisonOuterTransaction()
     {
         var clientPhone = UniquePhone();

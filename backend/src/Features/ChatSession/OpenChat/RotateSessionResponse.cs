@@ -8,6 +8,9 @@ public enum RotateSessionResult
 
 public sealed record RotateSessionResponse(
     RotateSessionResult Result,
+    RotateSessionData? Data);
+
+public sealed record RotateSessionData(
     Guid ChatId,
     Guid ParticipantId,
     string Role,

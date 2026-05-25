@@ -14,6 +14,8 @@ public static class ChatServiceCollectionExtensions
 
         services.AddSingleton<ChatHubExceptionFilter>();
         services.AddSingleton<ChatHubMessageLimiter>();
+        services.AddSingleton<Hook.Features.RateLimiting.ISweepableLimiter>(
+            sp => sp.GetRequiredService<ChatHubMessageLimiter>());
 
         services.AddSignalR(options =>
         {

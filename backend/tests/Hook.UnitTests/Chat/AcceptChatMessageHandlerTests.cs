@@ -21,7 +21,6 @@ public class AcceptChatMessageHandlerTests
     private readonly ChatParticipant _participant;
 
     private bool _txCommitted;
-    private bool _txRolledBack;
 
     public AcceptChatMessageHandlerTests()
     {
@@ -41,8 +40,6 @@ public class AcceptChatMessageHandlerTests
 
         _tx.Setup(x => x.CommitAsync(It.IsAny<CancellationToken>()))
             .Callback(() => _txCommitted = true).Returns(Task.CompletedTask);
-        _tx.Setup(x => x.RollbackAsync(It.IsAny<CancellationToken>()))
-            .Callback(() => _txRolledBack = true).Returns(Task.CompletedTask);
     }
 
     private AcceptChatMessageHandler Build() => new(_chats.Object, _clock);
@@ -121,6 +118,26 @@ public class AcceptChatMessageHandlerTests
     }
 
     [Fact]
+    public async Task SequenceExactlyAtCap_ReturnsAccepted()
+    {
+        // Pin the `>` boundary in AcceptChatMessageHandler: LastInbound + MaxJump is
+        // the highest accepted sequence; off-by-one regressions flip this to Replay.
+        var resp = await Build().Handle(BuildCmd(sequence: ChatHubConstants.MaxSequenceJump), CancellationToken.None);
+
+        resp.Result.ShouldBe(AcceptChatMessageResult.Accepted);
+    }
+
+    [Fact]
+    public async Task SequenceJustOverCap_ReturnsReplay()
+    {
+        var resp = await Build().Handle(
+            BuildCmd(sequence: ChatHubConstants.MaxSequenceJump + 1),
+            CancellationToken.None);
+
+        resp.Result.ShouldBe(AcceptChatMessageResult.Replay);
+    }
+
+    [Fact]
     public async Task DuplicateMessageId_ReturnsDuplicate_AndNoSequenceAdvance()
     {
         // Pin advance-after-insert invariant: when TryAddMessageAsync hits 23505,
@@ -132,7 +149,8 @@ public class AcceptChatMessageHandlerTests
 
         resp.Result.ShouldBe(AcceptChatMessageResult.Duplicate);
         _participant.LastInboundSequence.ShouldBe(0);
-        _txRolledBack.ShouldBeTrue();
+        // `await using var tx` rolls back on dispose when CommitAsync is not called —
+        // assert the invariant by proving no commit reached the tx.
         _txCommitted.ShouldBeFalse();
     }
 
@@ -148,20 +166,19 @@ public class AcceptChatMessageHandlerTests
         _participant.LastInboundSequence.ShouldBe(3);
         _session.LastActivityAt.ShouldBeGreaterThan(beforeTouch);
         _txCommitted.ShouldBeTrue();
-        _txRolledBack.ShouldBeFalse();
     }
 
     [Fact]
-    public async Task EndBetweenCheckAndCommit_ReturnsSessionEnded_AndRollsBack()
+    public async Task EndBetweenCheckAndCommit_ReturnsSessionEnded_AndDoesNotCommit()
     {
         // TryCommitAsync returns false → simulates a concurrent End/HardExpire bumping
-        // ChatSession.Version between this scope's load and commit.
+        // ChatSession.Version between this scope's load and commit. `await using`
+        // disposes the unconmitted tx, rolling back the insert savepoint.
         _chats.Setup(x => x.TryCommitAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
         var resp = await Build().Handle(BuildCmd(), CancellationToken.None);
 
         resp.Result.ShouldBe(AcceptChatMessageResult.SessionEnded);
-        _txRolledBack.ShouldBeTrue();
         _txCommitted.ShouldBeFalse();
     }
 

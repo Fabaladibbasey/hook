@@ -24,18 +24,20 @@ public static class OpenChatEndpoint
             var response = await bus.InvokeAsync<RotateSessionResponse>(
                 new RotateSessionCommand(token, ip, ua), ct);
 
-            if (response.Result == RotateSessionResult.NotFound) return Results.NotFound();
+            if (response.Result == RotateSessionResult.NotFound || response.Data is null)
+                return Results.NotFound();
 
+            var data = response.Data;
             logger.LogInformation("Chat link opened: chatId={ChatId} participantId={ParticipantId}",
-                response.ChatId, response.ParticipantId);
+                data.ChatId, data.ParticipantId);
 
             return Results.Ok(new OpenChatResponse(
-                response.ChatId,
-                response.ParticipantId,
-                response.Role,
-                response.SessionId,
-                response.Status,
-                response.ExpiresAt));
+                data.ChatId,
+                data.ParticipantId,
+                data.Role,
+                data.SessionId,
+                data.Status,
+                data.ExpiresAt));
         });
 
         return routes;

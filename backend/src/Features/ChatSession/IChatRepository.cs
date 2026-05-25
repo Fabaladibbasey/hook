@@ -15,6 +15,10 @@ public interface IChatRepository
     Task<SessionAggregate.ChatSession?> GetSessionAsync(Guid chatId, CancellationToken ct = default);
     Task<ChatParticipant?> GetByTokenAsync(string token, CancellationToken ct = default);
     Task<ChatParticipant?> GetParticipantAsync(Guid participantId, CancellationToken ct = default);
+    // Single-column existence probe — `SELECT 1 ... WHERE Id=@pid AND CurrentSessionId=@sid`.
+    // Used by ChatHub.EndChat to validate the live SignalR session against the row
+    // without re-fetching the full ChatParticipant projection.
+    Task<bool> IsCurrentSessionAsync(Guid participantId, Guid sessionId, CancellationToken ct = default);
     Task<ChatParticipant?> GetPeerAsync(Guid chatId, Guid exceptParticipantId, CancellationToken ct = default);
     Task<IReadOnlyList<ChatParticipant>> GetParticipantsAsync(Guid chatId, CancellationToken ct = default);
     Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(Guid chatId, int take, CancellationToken ct = default);
@@ -44,14 +48,22 @@ public interface IChatRepository
     /// row between this scope's load and commit). Callers surface the loss as
     /// <c>SessionRevoked</c>/<c>SessionEnded</c> so the racing tab is asked to refresh
     /// rather than overwriting fresh state with stale.
+    /// On loss the implementation clears the EF change tracker wholesale, so callers
+    /// MUST NOT hold tracked writes on sibling entities (other aggregates loaded in
+    /// the same scope) — those mutations would silently drop with the conflicting one.
     /// </summary>
     Task<bool> TryCommitAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Opens an explicit EF transaction. Used by <c>AcceptChatMessageHandler</c>
-    /// (which is <c>[NonTransactional]</c>) so the insert + sequence advance + touch
-    /// commit atomically and a concurrency-token loss on the post-insert mutations
-    /// rolls back the savepoint-protected message insert too.
+    /// Opens an explicit EF transaction. Call this ONLY when the handler is
+    /// <c>[NonTransactional]</c> (AutoApplyTransactions is off) AND the happy path
+    /// stages 2+ mutations that must roll back together on conflict — i.e. an
+    /// insert + sequence advance + touch where a concurrency-token loss on the
+    /// post-insert state must also undo the savepoint-protected insert.
+    /// Handlers with a single mutation and no reject-path BEGIN/COMMIT cost should
+    /// stay on the default AutoApplyTransactions path + <see cref="TryCommitAsync"/>
+    /// (see <c>PublishParticipantKeyHandler</c>) — opening an explicit tx there
+    /// just doubles up on EF's transaction handling.
     /// </summary>
     Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken ct = default);
 }

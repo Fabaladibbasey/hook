@@ -42,5 +42,11 @@ public class RateLimitOptions
     [Range(1, 600)]
     public int ChatHubBurstWindowSeconds { get; init; } = 5;
 
+    // Idle-key eviction cadence for EvictingPartitionedLimiter (ChatHubMessageLimiter,
+    // PerPhoneLimiter). Keys untouched past this TTL are released so the partition
+    // map stays bounded by active cardinality rather than ever-seen cardinality.
+    [Range(1, 1440)]
+    public int LimiterIdleEvictionMinutes { get; init; } = 30;
+
     public string[] BypassHosts { get; init; } = [];
 }

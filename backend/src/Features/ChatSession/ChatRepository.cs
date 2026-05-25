@@ -19,6 +19,11 @@ public sealed class ChatRepository(HookDbContext db) : IChatRepository
     public Task<ChatParticipant?> GetParticipantAsync(Guid participantId, CancellationToken ct = default) =>
         db.ChatParticipants.FirstOrDefaultAsync(p => p.Id == participantId, ct);
 
+    public Task<bool> IsCurrentSessionAsync(Guid participantId, Guid sessionId, CancellationToken ct = default) =>
+        db.ChatParticipants
+            .AsNoTracking()
+            .AnyAsync(p => p.Id == participantId && p.CurrentSessionId == sessionId, ct);
+
     public Task<ChatParticipant?> GetPeerAsync(Guid chatId, Guid exceptParticipantId, CancellationToken ct = default) =>
         db.ChatParticipants.FirstOrDefaultAsync(
             p => p.ChatId == chatId && p.Id != exceptParticipantId, ct);

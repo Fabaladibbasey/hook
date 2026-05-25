@@ -1,5 +1,6 @@
 using Hook.Features.RateLimiting;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 
 namespace Hook.UnitTests.RateLimiting;
@@ -14,7 +15,7 @@ public class PerPhoneLimiterTests
             BurstTokens = 3,
             BurstWindowSeconds = 5,
             SpamPerHour = 1000
-        }));
+        }), new FakeTimeProvider());
 
         var phone = "+22070000123";
 
@@ -36,7 +37,7 @@ public class PerPhoneLimiterTests
             BurstTokens = 1,
             BurstWindowSeconds = 60,
             SpamPerHour = 100
-        }));
+        }), new FakeTimeProvider());
 
         limiter.TryAcquire("+22070000001").IsAllowed.ShouldBeTrue();
         limiter.TryAcquire("+22070000001").IsAllowed.ShouldBeFalse();

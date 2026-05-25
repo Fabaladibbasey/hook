@@ -7,23 +7,26 @@ namespace Hook.Features.ChatSession;
 
 // Live-socket hub gate. Method invocations don't traverse the HTTP middleware
 // pipeline, so the global rate limiter on negotiate doesn't cover them — this
-// token-bucket fills that gap, partitioned by participant id.
-public sealed class ChatHubMessageLimiter : IDisposable
+// token-bucket fills that gap, partitioned by participant id. Backed by
+// EvictingPartitionedLimiter so the per-participant map drops idle keys.
+public sealed class ChatHubMessageLimiter : IDisposable, ISweepableLimiter
 {
-    private readonly PartitionedRateLimiter<string> _burst;
+    private readonly EvictingPartitionedLimiter<string> _burst;
 
-    public ChatHubMessageLimiter(IOptions<RateLimitOptions> options)
+    public ChatHubMessageLimiter(IOptions<RateLimitOptions> options, TimeProvider clock)
     {
         var opts = options.Value;
-        _burst = PartitionedRateLimiter.Create<string, string>(key =>
-            RateLimitPartition.GetTokenBucketLimiter(key, _ => new TokenBucketRateLimiterOptions
+        _burst = new EvictingPartitionedLimiter<string>(
+            () => new TokenBucketRateLimiter(new TokenBucketRateLimiterOptions
             {
                 TokenLimit = opts.ChatHubBurstTokens,
                 ReplenishmentPeriod = TimeSpan.FromSeconds(opts.ChatHubBurstWindowSeconds),
                 TokensPerPeriod = opts.ChatHubBurstTokens,
                 AutoReplenishment = true,
                 QueueLimit = 0
-            }));
+            }),
+            TimeSpan.FromMinutes(opts.LimiterIdleEvictionMinutes),
+            clock);
     }
 
     public RateLimitOutcome TryAcquire(string participantKey)
@@ -37,6 +40,8 @@ public sealed class ChatHubMessageLimiter : IDisposable
             : TimeSpan.FromSeconds(5);
         return RateLimitOutcome.Burst(retry);
     }
+
+    public int SweepIdle() => _burst.Sweep();
 
     public void Dispose() => _burst.Dispose();
 }

@@ -17,12 +17,16 @@ public class AggregateRulesTests
                         && typeof(IAggregateRoot).IsAssignableFrom(t))
             .ToList();
 
+    // Hard pin — bumps require an explicit ack here when a new aggregate joins,
+    // and a deletion of N aggregates fails immediately instead of slipping under
+    // a soft floor. Single-assembly scope is correct: every aggregate currently
+    // lives in Hook.csproj (none in Hook.Shared.*).
+    private const int ExpectedAggregateCount = 15;
+
     [Fact]
-    public void AggregateTypes_NotEmpty()
+    public void AggregateTypes_MatchesExpectedCount()
     {
-        // Hard floor — every other test below silently passes on an empty set.
-        // Catches a future reflection refactor that breaks the discovery query.
-        AggregateTypes().Count.ShouldBeGreaterThanOrEqualTo(10);
+        AggregateTypes().Count.ShouldBe(ExpectedAggregateCount);
     }
 
     [Fact]

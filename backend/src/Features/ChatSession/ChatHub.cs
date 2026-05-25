@@ -102,12 +102,14 @@ public sealed class ChatHub(
         // Caller-side notification stays inline — the response payload carries the
         // PEER's key for this caller. Broadcast to other group members is owned by
         // the outbox-driven BroadcastChatEvent raised by ChatParticipant.SetPublicKey.
-        if (response.PeerPublicKey.Length > 0)
+        // Only the Accepted branch reaches here so Data is always non-null.
+        var data = response.Data!;
+        if (data.PeerPublicKey.Length > 0)
         {
             await Clients.Caller.SendAsync(ChatHubConstants.Events.PeerKeyAvailable, new
             {
-                peerParticipantId = response.PeerParticipantId,
-                peerPublicKeyB64 = Convert.ToBase64String(response.PeerPublicKey)
+                peerParticipantId = data.PeerParticipantId,
+                peerPublicKeyB64 = Convert.ToBase64String(data.PeerPublicKey)
             });
         }
 
@@ -186,18 +188,23 @@ public sealed class ChatHub(
     public async Task EndChat()
     {
         if (Context.Items[ChatHubConstants.Items.ChatId] is not Guid chatId
-            || Context.Items[ChatHubConstants.Items.SessionId] is not Guid sessionId)
+            || Context.Items[ChatHubConstants.Items.SessionId] is not Guid sessionId
+            || Context.Items[ChatHubConstants.Items.ParticipantId] is not Guid participantId
+            || Context.Items[ChatHubConstants.Items.Role] is not string role)
         {
             Context.Abort();
             return;
         }
 
-        var participant = await EnsureCurrentSessionAsync(sessionId);
-        if (participant is null) return;
-        var role = (Context.Items[ChatHubConstants.Items.Role] as string) ?? participant.Role.ToString();
+        if (!await chats.IsCurrentSessionAsync(participantId, sessionId))
+        {
+            await Clients.Caller.SendAsync(ChatHubConstants.Events.SessionRevoked);
+            Context.Abort();
+            return;
+        }
 
         var response = await bus.InvokeAsync<EndChatResponse>(
-            new EndChatCommand(chatId, EndChatReason.User, role, participant.Id));
+            new EndChatCommand(chatId, EndChatReason.User, role, participantId));
         if (response.Result == EndChatResult.AlreadyEnded)
             await Clients.Caller.SendAsync(
                 ChatHubConstants.Events.ChatEnded,
@@ -207,25 +214,12 @@ public sealed class ChatHub(
             // Defence in depth — hub guard above resolved this participant by token,
             // so a Unauthorized here implies tampering or stale connection.
             logger.LogWarning(
-                "EndChat unauthorized for chat={ChatId} participant={ParticipantId}", chatId, participant.Id);
+                "EndChat unauthorized for chat={ChatId} participant={ParticipantId}", chatId, participantId);
             await Clients.Caller.SendAsync(ChatHubConstants.Events.SessionRevoked);
             Context.Abort();
         }
         else if (response.Result == EndChatResult.Ended)
-            logger.LogInformation("Chat {ChatId} ended by {Role} ({ParticipantId})", chatId, role, participant.Id);
-    }
-
-    private async Task<ChatParticipant?> EnsureCurrentSessionAsync(Guid sessionId)
-    {
-        var token = Context.GetHttpContext()?.Request.Query["token"].ToString() ?? string.Empty;
-        var participant = await chats.GetByTokenAsync(token);
-        if (participant is null || !participant.IsCurrentSession(sessionId))
-        {
-            await Clients.Caller.SendAsync(ChatHubConstants.Events.SessionRevoked);
-            Context.Abort();
-            return null;
-        }
-        return participant;
+            logger.LogInformation("Chat {ChatId} ended by {Role} ({ParticipantId})", chatId, role, participantId);
     }
 
     private Task RejectAsync(Guid messageId, ChatMessageRejectReason reason) =>

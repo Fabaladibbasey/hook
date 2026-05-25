@@ -11,6 +11,8 @@ public static class RateLimitingServiceCollectionExtensions
         services.AddValidatedOptions<RateLimitOptions>(configuration);
 
         services.AddSingleton<PerPhoneLimiter>();
+        services.AddSingleton<ISweepableLimiter>(sp => sp.GetRequiredService<PerPhoneLimiter>());
+        services.AddHostedService<LimiterEvictionHostedService>();
         return services;
     }
 

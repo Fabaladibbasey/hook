@@ -82,8 +82,9 @@ public class PublishParticipantKeyHandlerTests
         var resp = await Build().Handle(BuildCmd(), CancellationToken.None);
 
         resp.Result.ShouldBe(PublishParticipantKeyResult.Accepted);
-        resp.PeerParticipantId.ShouldBe(_peer.Id);
-        resp.PeerPublicKey.ShouldBe(peerSpki);
+        resp.Data.ShouldNotBeNull();
+        resp.Data!.PeerParticipantId.ShouldBe(_peer.Id);
+        resp.Data.PeerPublicKey.ShouldBe(peerSpki);
     }
 
     [Fact]
@@ -94,7 +95,24 @@ public class PublishParticipantKeyHandlerTests
         var resp = await Build().Handle(BuildCmd(), CancellationToken.None);
 
         resp.Result.ShouldBe(PublishParticipantKeyResult.Accepted);
-        resp.PeerPublicKey.ShouldBeEmpty();
+        resp.Data.ShouldNotBeNull();
+        resp.Data!.PeerPublicKey.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task ValidP384Spki_ReturnsInvalidKey()
+    {
+        // Well-formed SPKI but wrong curve — peer's WebCrypto P-256 import would
+        // reject, griefing the matched user off chat. Server must filter at publish
+        // time. Pin the curve enforcement so a regression flipping ECDiffieHellman.Create()
+        // back to platform-default trips CI.
+        using var ecdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP384);
+        var p384Spki = ecdh.ExportSubjectPublicKeyInfo();
+
+        var resp = await Build().Handle(BuildCmd(spki: p384Spki), CancellationToken.None);
+
+        resp.Result.ShouldBe(PublishParticipantKeyResult.InvalidKey);
+        _self.PublicKey.ShouldBeNull();
     }
 
     [Fact]

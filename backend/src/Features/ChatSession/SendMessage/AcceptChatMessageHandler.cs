@@ -17,6 +17,9 @@ public sealed class AcceptChatMessageHandler(IChatRepository chats, TimeProvider
         if (participant is null || !participant.IsCurrentSession(cmd.SessionId))
             return new(AcceptChatMessageResult.SessionRevoked, null, now);
 
+        // PERF: candidate for join-collapse with the GetParticipantAsync call above
+        // (single SELECT joining chat_participants + chat_sessions on ChatId). Hottest
+        // path in the system; deferred pending a real metric. See PR 18 review.
         var session = await chats.GetSessionAsync(cmd.ChatId, ct);
         if (session is null || !session.CanSendMessage(now))
             return new(AcceptChatMessageResult.SessionEnded, null, now);
@@ -39,26 +42,21 @@ public sealed class AcceptChatMessageHandler(IChatRepository chats, TimeProvider
             nonce: cmd.Nonce,
             now: now);
 
-        // Explicit tx ONLY on the insert path. Rollback covers both
-        // 23505-as-Duplicate (savepoint-released insert needs full rollback when
-        // we cannot continue) and the concurrency-token loss path where a
-        // RotateSession/End raced between the pre-check and commit.
+        // Explicit tx ONLY on the insert path. `await using` rolls back on dispose
+        // if CommitAsync is not called, so reject branches just return — the dispose
+        // covers both 23505-as-Duplicate (savepoint-released insert needs full
+        // rollback when we cannot continue) and the concurrency-token loss path
+        // where a RotateSession/End raced between the pre-check and commit.
         await using var tx = await chats.BeginTransactionAsync(ct);
 
         if (!await chats.TryAddMessageAsync(msg, ct))
-        {
-            await tx.RollbackAsync(ct);
             return new(AcceptChatMessageResult.Duplicate, null, now);
-        }
 
         participant.TryAdvanceSequence(cmd.Sequence);
         session.Touch(now);
 
         if (!await chats.TryCommitAsync(ct))
-        {
-            await tx.RollbackAsync(ct);
             return new(AcceptChatMessageResult.SessionEnded, null, now);
-        }
 
         await tx.CommitAsync(ct);
         return new(AcceptChatMessageResult.Accepted, msg, now);

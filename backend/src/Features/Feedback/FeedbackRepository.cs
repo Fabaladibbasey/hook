@@ -39,7 +39,13 @@ public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
             // is real data loss, not a feedback race — rethrow so the outer tx
             // rolls back and the message retries.
             foreach (var entry in ex.Entries)
+            {
                 if (!ReferenceEquals(entry.Entity, aggregate)) throw;
+                // Detach the losing UPDATE: ReloadAsync re-fetches the winner row
+                // and resets State = Unchanged so AutoApplyTransactions does not
+                // retry this same WHERE Version = @prev predicate at outer commit.
+                await entry.ReloadAsync(ct);
+            }
             return false;
         }
     }

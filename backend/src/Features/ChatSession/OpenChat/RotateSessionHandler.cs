@@ -7,10 +7,10 @@ public sealed class RotateSessionHandler(IChatRepository chats, TimeProvider clo
     public async Task<RotateSessionResponse> Handle(RotateSessionCommand cmd, CancellationToken ct)
     {
         var participant = await chats.GetByTokenAsync(cmd.Token, ct);
-        if (participant is null) return Empty(RotateSessionResult.NotFound);
+        if (participant is null) return new RotateSessionResponse(RotateSessionResult.NotFound, null);
 
         var session = await chats.GetSessionAsync(participant.ChatId, ct);
-        if (session is null) return Empty(RotateSessionResult.NotFound);
+        if (session is null) return new RotateSessionResponse(RotateSessionResult.NotFound, null);
 
         var newSessionId = participant.RotateSession();
         await chats.AddAccessLogAsync(
@@ -25,15 +25,13 @@ public sealed class RotateSessionHandler(IChatRepository chats, TimeProvider clo
         // insert in the same commit as any post-commit envelopes.
 
         return new RotateSessionResponse(
-            Result: RotateSessionResult.Rotated,
-            ChatId: participant.ChatId,
-            ParticipantId: participant.Id,
-            Role: participant.Role.ToString(),
-            SessionId: newSessionId,
-            Status: session.Status.ToString(),
-            ExpiresAt: session.ExpiresAt);
+            RotateSessionResult.Rotated,
+            new RotateSessionData(
+                ChatId: participant.ChatId,
+                ParticipantId: participant.Id,
+                Role: participant.Role.ToString(),
+                SessionId: newSessionId,
+                Status: session.Status.ToString(),
+                ExpiresAt: session.ExpiresAt));
     }
-
-    private static RotateSessionResponse Empty(RotateSessionResult result) =>
-        new(result, Guid.Empty, Guid.Empty, string.Empty, Guid.Empty, string.Empty, default);
 }

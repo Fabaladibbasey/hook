@@ -1086,4 +1086,19 @@ public class FeedbackResponseServiceTests
         Assert.Single(_sent);
         Assert.Equal(FeedbackCopy.SkippedAck, _sent[0].Body);
     }
+
+    [Fact]
+    public void ScrubForOutbox_PathologicalInput_CompletesUnder100ms()
+    {
+        // Adversarial payload: many repeating phone-like fragments. Truncate-before-regex
+        // is what bounds backtracking — strip it and this test catches the regression.
+        var hostile = string.Concat(Enumerable.Repeat("+220 1234567 ", 5000));
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        var result = FeedbackResponseService.ScrubForOutbox(hostile, maxChars: 1000);
+
+        sw.Stop();
+        Assert.True(sw.ElapsedMilliseconds < 100, $"took {sw.ElapsedMilliseconds}ms");
+        Assert.True(result.Length <= 1000);
+    }
 }
