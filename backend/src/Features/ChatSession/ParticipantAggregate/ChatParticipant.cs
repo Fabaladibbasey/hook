@@ -36,18 +36,33 @@ public class ChatParticipant : AggregateRoot
 
     /// <summary>
     /// Rotates the SignalR session marker. Discards the prior session's encryption key
-    /// and replay window so the next device must publish a fresh public key before peer
-    /// can decrypt. Browser-side keypair caching (frontend/src/features/chat/chatCrypto.ts) is unaffected.
+    /// so the next device must publish a fresh public key before peer can decrypt.
+    /// Browser-side keypair caching (frontend/src/features/chat/chatCrypto.ts) is unaffected.
     /// Concurrent SignalR connections still bound to the prior <see cref="CurrentSessionId"/>
     /// are revoked on their next hub interaction (<c>OnConnectedAsync</c>/<c>SendMessage</c>/
     /// <c>PublishKey</c> all surface <c>SessionRevoked</c> via the <see cref="IsCurrentSession"/>
     /// check).
+    ///
+    /// <see cref="LastInboundSequence"/> is intentionally NOT reset — it tracks the
+    /// participant-wide high-water mark for inbound (server-accepted) sequences,
+    /// backed by the <c>ux_chat_messages_chat_participant_sequence</c> unique index on
+    /// <c>(ChatId, ParticipantId, Sequence)</c>. Resetting it would let a freshly
+    /// rotated client re-send seq=1 which still collides with the pre-rotation row,
+    /// surfacing as <c>ChatMessageRejectReason.Duplicate</c>. The new device picks up
+    /// the last accepted sequence via <see cref="OpenChat.RotateSessionHandler"/>'s
+    /// <c>OutboundSequenceCursor</c> response field and sends <c>cursor + 1</c>.
+    ///
+    /// Residual race: between the rotation commit and the prior tab's next hub
+    /// interaction, a revoked tab can attempt sends at <c>LastInboundSequence + 1..1000</c>.
+    /// <c>AcceptChatMessageHandler</c> rejects these via the <see cref="IsCurrentSession"/>
+    /// check before <c>TryAdvanceSequence</c> runs — the new device's first send is
+    /// therefore not preemptively consumed by a stale tab. The window is bounded
+    /// by the time between commit and the next hub interaction on the prior connection.
     /// </summary>
     public Guid RotateSession()
     {
         CurrentSessionId = Guid.CreateVersion7();
         PublicKey = null;
-        LastInboundSequence = 0;
         Version += 1;
         return CurrentSessionId;
     }

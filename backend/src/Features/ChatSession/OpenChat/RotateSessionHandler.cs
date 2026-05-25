@@ -1,4 +1,5 @@
 using Hook.Features.ChatSession.AccessLog;
+using Hook.Features.ChatSession.SessionAggregate;
 
 namespace Hook.Features.ChatSession.OpenChat;
 
@@ -11,8 +12,11 @@ public sealed class RotateSessionHandler(IChatRepository chats, TimeProvider clo
 
         var session = await chats.GetSessionAsync(participant.ChatId, ct);
         if (session is null) return new RotateSessionResponse(RotateSessionResult.NotFound, null);
+        if (session.Status != ChatSessionStatus.Active)
+            return new RotateSessionResponse(RotateSessionResult.NotFound, null);
 
         var newSessionId = participant.RotateSession();
+
         await chats.AddAccessLogAsync(
             ChatAccessLog.Record(
                 chatId: participant.ChatId,
@@ -21,17 +25,22 @@ public sealed class RotateSessionHandler(IChatRepository chats, TimeProvider clo
                 deviceInfo: cmd.DeviceInfo,
                 now: clock.GetUtcNow()),
             ct);
-        // AutoApplyTransactions flushes the RotateSession Version bump + access log
-        // insert in the same commit as any post-commit envelopes.
+
+        // Flush now so a concurrent rotate landing between GetByTokenAsync and commit
+        // surfaces as Conflict (retriable) rather than DbUpdateConcurrencyException
+        // bubbling through AutoApplyTransactions as 500.
+        if (!await chats.TryCommitAsync(ct))
+            return new RotateSessionResponse(RotateSessionResult.Conflict, null);
 
         return new RotateSessionResponse(
             RotateSessionResult.Rotated,
-            new RotateSessionData(
+            new OpenChatResponse(
                 ChatId: participant.ChatId,
                 ParticipantId: participant.Id,
                 Role: participant.Role.ToString(),
                 SessionId: newSessionId,
                 Status: session.Status.ToString(),
-                ExpiresAt: session.ExpiresAt));
+                ExpiresAt: session.ExpiresAt,
+                OutboundSequenceCursor: participant.LastInboundSequence));
     }
 }

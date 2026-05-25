@@ -38,7 +38,8 @@ export function useChatHub(
   chatId: string,
   participantId: string,
   token: string,
-  sessionId: string
+  sessionId: string,
+  outboundSequenceCursor: number
 ) {
   const [state, setState] = useState<ChatState>({ kind: "connecting" });
   const connRef = useRef<HubConnection | null>(null);
@@ -50,11 +51,12 @@ export function useChatHub(
   const pendingWireRef = useRef<WireMessage[]>([]);
 
   useEffect(() => {
-    if (!chatId || !participantId || !token || !sessionId) return;
+    if (!chatId || !participantId || !token || !sessionId || outboundSequenceCursor < 0) return;
 
     let cancelled = false;
     sharedKeyRef.current = null;
     peerParticipantIdRef.current = null;
+    seqOutRef.current = outboundSequenceCursor;
     messagesRef.current = [];
     pendingWireRef.current = [];
 
@@ -98,10 +100,6 @@ export function useChatHub(
       if (!cancelled) setState({ kind: "ready", messages: messagesRef.current });
     };
 
-    const updateOutSeq = (incoming: number) => {
-      if (incoming > seqOutRef.current) seqOutRef.current = incoming;
-    };
-
     const pushPending = (m: WireMessage) => {
       if (pendingWireRef.current.length >= MAX_PENDING_WIRE) pendingWireRef.current.shift();
       pendingWireRef.current.push(m);
@@ -121,13 +119,20 @@ export function useChatHub(
     });
 
     conn.on("HistoryLoaded", async (history: WireMessage[]) => {
-      history.sort((a, b) => a.sequence - b.sequence);
-      for (const m of history) updateOutSeq(m.sequence);
+      // Dedup by messageId: a peer SendMessage committing between OnConnectedAsync's
+      // AddToGroupAsync and SendAsync(HistoryLoaded) lands in BOTH the snapshot AND
+      // the live MessageReceived broadcast.
+      const seen = new Set<string>(
+        messagesRef.current.map(m => m.id)
+          .concat(pendingWireRef.current.map(m => m.id))
+      );
+      const fresh = history.filter(m => !seen.has(m.id));
+
       if (sharedKeyRef.current) {
-        const decrypted = await Promise.all(history.map(decryptOne));
-        messagesRef.current = [...messagesRef.current, ...decrypted];
+        const decrypted = await Promise.all(fresh.map(decryptOne));
+        messagesRef.current = [...decrypted, ...messagesRef.current];
       } else {
-        for (const m of history) pushPending(m);
+        pendingWireRef.current = [...fresh, ...pendingWireRef.current].slice(0, MAX_PENDING_WIRE);
       }
       if (!cancelled) {
         setState(sharedKeyRef.current
@@ -137,7 +142,6 @@ export function useChatHub(
     });
 
     conn.on("MessageReceived", async (msg: WireMessage) => {
-      updateOutSeq(msg.sequence);
       if (!sharedKeyRef.current) {
         pushPending(msg);
         return;
@@ -154,6 +158,13 @@ export function useChatHub(
       updated[idx] = { ...updated[idx], plaintext: `[failed: ${dto.reason}]` };
       messagesRef.current = updated;
       if (!cancelled) setState({ kind: "ready", messages: messagesRef.current });
+
+      // Replay/Duplicate => server's LastInboundSequence is ahead of our local ref
+      // (e.g. lost ack). Jump seqOutRef forward so next send doesn't keep colliding.
+      // Bounded by server-side MaxSequenceJump.
+      if (dto.reason === "Replay" || dto.reason === "Duplicate") {
+        seqOutRef.current = seqOutRef.current + 1;
+      }
     });
 
     conn.on("SessionRevoked", () => {
@@ -211,7 +222,10 @@ export function useChatHub(
     const peerParticipantId = peerParticipantIdRef.current;
     if (!sharedKey || !peerParticipantId) return;
 
-    const seq = Math.max(Date.now(), seqOutRef.current + 1);
+    // Server-seeded via OpenChatResponse.outboundSequenceCursor; +1 per send.
+    // Server enforces strict monotonicity + MaxSequenceJump; lost-ack recovery is
+    // the MessageSendRejected handler bumping seqOutRef on Replay/Duplicate.
+    const seq = seqOutRef.current + 1;
     seqOutRef.current = seq;
 
     const messageId = globalThis.crypto.randomUUID();

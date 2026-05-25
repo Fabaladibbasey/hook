@@ -183,6 +183,21 @@ public class AcceptChatMessageHandlerTests
     }
 
     [Fact]
+    public async Task AfterAdvanceTo5_Send6_Accepted_And_Send5_RejectedAsReplay()
+    {
+        // Legacy participant carrying LastInboundSequence > 0 across a rotation:
+        // a fresh send at cursor + 1 must still be accepted; replay at the cursor
+        // value must still be rejected.
+        _participant.TryAdvanceSequence(5).ShouldBeTrue();
+
+        var accepted = await Build().Handle(BuildCmd(sequence: 6), CancellationToken.None);
+        accepted.Result.ShouldBe(AcceptChatMessageResult.Accepted);
+
+        var replayed = await Build().Handle(BuildCmd(sequence: 5), CancellationToken.None);
+        replayed.Result.ShouldBe(AcceptChatMessageResult.Replay);
+    }
+
+    [Fact]
     public async Task NoTransactionOpened_OnRejectPaths()
     {
         // SessionRevoked/SessionEnded/Replay must not pay BEGIN/COMMIT cost.

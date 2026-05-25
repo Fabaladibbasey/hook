@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using Hook.Features.ChatSession;
+using Hook.Features.ChatSession.OpenChat;
 using Hook.Features.ChatSession.ParticipantAggregate;
 using Hook.Features.ChatSession.SessionAggregate;
 using Hook.Shared.Persistence.Data;
@@ -20,12 +21,10 @@ public sealed class ChatHubTests : PipelineTestBase
 
     public ChatHubTests(DevPipelineFixture fx) : base(fx) { }
 
-    private sealed record OpenResponse(Guid ChatId, Guid ParticipantId, string Role, Guid SessionId, string Status);
-
     private sealed record ChatHandle(
         Guid ChatId,
-        OpenResponse Client,
-        OpenResponse Provider,
+        OpenChatResponse Client,
+        OpenChatResponse Provider,
         string ClientToken,
         string ProviderToken);
 
@@ -52,9 +51,9 @@ public sealed class ChatHubTests : PipelineTestBase
         return new ChatHandle(clientP.ChatId, clientOpen, providerOpen, clientP.Token, providerP.Token);
     }
 
-    private static async Task<OpenResponse> OpenAsync(HttpClient http, string token)
+    private static async Task<OpenChatResponse> OpenAsync(HttpClient http, string token)
     {
-        var resp = await http.GetFromJsonAsync<OpenResponse>($"/api/chat/open?token={Uri.EscapeDataString(token)}");
+        var resp = await http.GetFromJsonAsync<OpenChatResponse>($"/api/chat/open?token={Uri.EscapeDataString(token)}");
         resp.ShouldNotBeNull();
         return resp;
     }
@@ -104,6 +103,74 @@ public sealed class ChatHubTests : PipelineTestBase
         var winner = await Task.WhenAny(tcs.Task, Task.Delay(Timeout));
         if (winner != tcs.Task) throw new TimeoutException($"Timed out waiting for {typeof(T).Name}");
         return await tcs.Task;
+    }
+
+    [Fact]
+    public async Task OpenChat_ReturnsOutboundSequenceCursor_ZeroForFreshParticipant()
+    {
+        var chat = await SeedChatAsync();
+
+        chat.Client.OutboundSequenceCursor.ShouldBe(0L);
+        chat.Provider.OutboundSequenceCursor.ShouldBe(0L);
+    }
+
+    [Fact]
+    public async Task RotateMidSession_NewTabContinuesFromCursor_NoCollision()
+    {
+        var chat = await SeedChatAsync();
+        await using var clientConn = BuildHub(chat.ClientToken, chat.Client.SessionId);
+        await using var providerConn = BuildHub(chat.ProviderToken, chat.Provider.SessionId);
+
+        var providerReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        providerConn.On<object>(ChatHubConstants.Events.HistoryLoaded, _ => providerReady.TrySetResult());
+
+        await clientConn.StartAsync();
+        await providerConn.StartAsync();
+        (await Task.WhenAny(providerReady.Task, Task.Delay(Timeout))).ShouldBe(providerReady.Task);
+
+        // Tab 1: send two messages so LastInboundSequence advances to 2.
+        await clientConn.InvokeAsync("SendMessage",
+            new EncryptedChatMessage(Guid.NewGuid(), Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 1));
+        await clientConn.InvokeAsync("SendMessage",
+            new EncryptedChatMessage(Guid.NewGuid(), Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: 2));
+
+        await WhatsappPipelineHelpers.WaitForConditionAsync(
+            async () =>
+            {
+                await using var scope = _fx.Factory.Services.CreateAsyncScope();
+                var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+                return await db.ChatMessages.AsNoTracking().CountAsync(m => m.ChatId == chat.ChatId) == 2;
+            },
+            timeout: TimeSpan.FromSeconds(3),
+            description: "first two messages persisted");
+
+        // Re-open chat URL — server rotates session AND publishes the LastInbound cursor.
+        var http = _fx.Factory.CreateClient();
+        var newOpen = await OpenAsync(http, chat.ClientToken);
+        newOpen.SessionId.ShouldNotBe(chat.Client.SessionId);
+        newOpen.OutboundSequenceCursor.ShouldBe(2L);
+
+        // Tab 2: connect on rotated session, send from cursor + 1 — must be Accepted.
+        await using var tab2 = BuildHub(chat.ClientToken, newOpen.SessionId);
+        var rejects = new List<ChatMessageRejected>();
+        tab2.On<ChatMessageRejected>(ChatHubConstants.Events.MessageSendRejected, dto => { lock (rejects) rejects.Add(dto); });
+        await tab2.StartAsync();
+
+        var nextSeq = newOpen.OutboundSequenceCursor + 1;
+        await tab2.InvokeAsync("SendMessage",
+            new EncryptedChatMessage(Guid.NewGuid(), Convert.ToBase64String(NewBytes(20)), Convert.ToBase64String(NewBytes(12)), Sequence: nextSeq));
+
+        await WhatsappPipelineHelpers.WaitForConditionAsync(
+            async () =>
+            {
+                await using var scope = _fx.Factory.Services.CreateAsyncScope();
+                var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+                return await db.ChatMessages.AsNoTracking().CountAsync(m => m.ChatId == chat.ChatId) == 3;
+            },
+            timeout: TimeSpan.FromSeconds(3),
+            description: "post-rotation send landed");
+
+        lock (rejects) rejects.ShouldBeEmpty();
     }
 
     [Fact]

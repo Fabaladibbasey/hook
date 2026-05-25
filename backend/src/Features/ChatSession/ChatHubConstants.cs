@@ -11,6 +11,13 @@ internal static class ChatHubConstants
     // Without this a malicious or buggy client can advance the participant's
     // sequence to long.MaxValue and self-DoS — every later legitimate message
     // is rejected as Replay because seq <= LastInboundSequence.
+    //
+    // Client contract: send monotone deltas starting at
+    // OpenChatResponse.OutboundSequenceCursor + 1, +1 per message. The cursor
+    // is the participant's lifetime high-water mark from chat_messages — it is
+    // NOT reset by RotateSession. A new device receives the cursor over
+    // /api/chat/open and continues the participant-scoped unique index
+    // ux_chat_messages_chat_participant_sequence without colliding on seq=1.
     public const long MaxSequenceJump = 1000;
     public const string ChatMessagesPrimaryKey = "PK_chat_messages";
     public const string SequenceUniqueIndexName = "ux_chat_messages_chat_participant_sequence";

@@ -26,6 +26,8 @@ public class RotateSessionHandlerTests
             .ReturnsAsync(_participant);
         _chats.Setup(x => x.GetSessionAsync(_session.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(_session);
+        _chats.Setup(x => x.TryCommitAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
     }
 
     private RotateSessionHandler Build() => new(_chats.Object, _clock);
@@ -72,7 +74,17 @@ public class RotateSessionHandlerTests
         resp.Data.Role.ShouldBe(_participant.Role.ToString());
         resp.Data.Status.ShouldBe(_session.Status.ToString());
         resp.Data.ExpiresAt.ShouldBe(_session.ExpiresAt);
-        _participant.Version.ShouldBeGreaterThan(priorVersion);
+        _participant.Version.ShouldBe(priorVersion + 1);
+    }
+
+    [Fact]
+    public async Task Rotated_PublishesCurrentLastInbound_AsCursor()
+    {
+        var resp = await Build().Handle(BuildCmd(), CancellationToken.None);
+
+        resp.Result.ShouldBe(RotateSessionResult.Rotated);
+        resp.Data.ShouldNotBeNull();
+        resp.Data!.OutboundSequenceCursor.ShouldBe(0);
     }
 
     [Fact]
@@ -90,6 +102,7 @@ public class RotateSessionHandlerTests
         captured.ParticipantId.ShouldBe(_participant.Id);
         captured.IpAddress.ShouldBe("1.2.3.4");
         captured.DeviceInfo.ShouldBe("ua/1");
+        captured.OpenedAt.ShouldBe(_clock.GetUtcNow());
     }
 
     [Fact]
@@ -100,5 +113,32 @@ public class RotateSessionHandlerTests
         await Build().Handle(BuildCmd(), CancellationToken.None);
 
         _participant.IsCurrentSession(priorSessionId).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ConcurrencyLoss_OnCommit_ReturnsConflict_WithNullData()
+    {
+        _chats.Setup(x => x.TryCommitAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var resp = await Build().Handle(BuildCmd(), CancellationToken.None);
+
+        resp.Result.ShouldBe(RotateSessionResult.Conflict);
+        resp.Data.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task SessionEnded_ReturnsNotFound_WithoutMutatingParticipant()
+    {
+        _session.End(_clock.GetUtcNow(), Hook.Features.ChatLifecycle.EndChat.EndChatReason.User);
+
+        var priorSessionId = _participant.CurrentSessionId;
+        var priorVersion = _participant.Version;
+
+        var resp = await Build().Handle(BuildCmd(), CancellationToken.None);
+
+        resp.Result.ShouldBe(RotateSessionResult.NotFound);
+        _participant.CurrentSessionId.ShouldBe(priorSessionId);
+        _participant.Version.ShouldBe(priorVersion);
     }
 }

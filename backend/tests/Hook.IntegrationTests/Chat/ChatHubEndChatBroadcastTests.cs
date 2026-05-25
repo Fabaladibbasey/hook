@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using Hook.Features.ChatSession;
+using Hook.Features.ChatSession.OpenChat;
 using Hook.Features.ChatSession.ParticipantAggregate;
 using Hook.Features.ChatSession.SessionAggregate;
 using Hook.Shared.Persistence.Data;
@@ -18,11 +19,10 @@ public sealed class ChatHubEndChatBroadcastTests : PipelineTestBase
 
     public ChatHubEndChatBroadcastTests(DevPipelineFixture fx) : base(fx) { }
 
-    private sealed record OpenResponse(Guid ChatId, Guid ParticipantId, string Role, Guid SessionId, string Status);
     private sealed record ChatHandle(
         Guid ChatId,
-        OpenResponse Client,
-        OpenResponse Provider,
+        OpenChatResponse Client,
+        OpenChatResponse Provider,
         string ClientToken,
         string ProviderToken);
     private sealed record ChatEndedDto(string Reason, string EndedBy);
@@ -142,9 +142,9 @@ public sealed class ChatHubEndChatBroadcastTests : PipelineTestBase
         return new ChatHandle(clientP.ChatId, clientOpen, providerOpen, clientP.Token, providerP.Token);
     }
 
-    private static async Task<OpenResponse> OpenAsync(HttpClient http, string token)
+    private static async Task<OpenChatResponse> OpenAsync(HttpClient http, string token)
     {
-        var resp = await http.GetFromJsonAsync<OpenResponse>($"/api/chat/open?token={Uri.EscapeDataString(token)}");
+        var resp = await http.GetFromJsonAsync<OpenChatResponse>($"/api/chat/open?token={Uri.EscapeDataString(token)}");
         resp.ShouldNotBeNull();
         return resp;
     }

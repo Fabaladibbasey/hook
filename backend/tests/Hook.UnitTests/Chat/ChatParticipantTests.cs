@@ -63,7 +63,7 @@ public class ChatParticipantTests
     }
 
     [Fact]
-    public void RotateSession_ClearsPublicKeyAndResetsSequence()
+    public void RotateSession_ClearsPublicKey_AndPreservesSequenceHighWaterMark()
     {
         var p = New();
         p.SetPublicKey([0xAA]);
@@ -74,8 +74,24 @@ public class ChatParticipantTests
 
         next.ShouldNotBe(prior);
         p.PublicKey.ShouldBeNull();
-        p.LastInboundSequence.ShouldBe(0);
+        // LastInboundSequence MUST survive rotation — it backs the participant-scoped
+        // unique index (ChatId, ParticipantId, Sequence) which is NOT session-scoped.
+        // Resetting it would let the rotated client re-send seq=1 and collide with
+        // the pre-rotation row, surfacing as Duplicate.
+        p.LastInboundSequence.ShouldBe(50);
         p.IsCurrentSession(next).ShouldBeTrue();
         p.IsCurrentSession(prior).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void RotateSession_AloneDoesNotMutateLastInboundSequence()
+    {
+        var p = New();
+        p.TryAdvanceSequence(42).ShouldBeTrue();
+        var prior = p.LastInboundSequence;
+
+        p.RotateSession();
+
+        p.LastInboundSequence.ShouldBe(prior);
     }
 }

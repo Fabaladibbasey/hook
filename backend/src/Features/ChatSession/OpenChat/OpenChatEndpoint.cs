@@ -26,18 +26,14 @@ public static class OpenChatEndpoint
 
             if (response.Result == RotateSessionResult.NotFound || response.Data is null)
                 return Results.NotFound();
+            if (response.Result == RotateSessionResult.Conflict)
+                return Results.StatusCode(StatusCodes.Status409Conflict);
 
             var data = response.Data;
             logger.LogInformation("Chat link opened: chatId={ChatId} participantId={ParticipantId}",
                 data.ChatId, data.ParticipantId);
 
-            return Results.Ok(new OpenChatResponse(
-                data.ChatId,
-                data.ParticipantId,
-                data.Role,
-                data.SessionId,
-                data.Status,
-                data.ExpiresAt));
+            return Results.Ok(data);
         });
 
         return routes;
