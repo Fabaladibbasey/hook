@@ -96,10 +96,15 @@ public sealed class ChatHubEndChatBroadcastTests : PipelineTestBase
 
         var providerReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var providerEnded = new TaskCompletionSource<ChatEndedDto>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var alreadyEnded = new TaskCompletionSource<ChatEndedDto>(TaskCreationOptions.RunContinuationsAsynchronously);
         var clientEchoes = new System.Collections.Concurrent.ConcurrentBag<ChatEndedDto>();
         providerConn.On<object>(ChatHubConstants.Events.HistoryLoaded, _ => providerReady.TrySetResult());
         providerConn.On<ChatEndedDto>(ChatHubConstants.Events.ChatEnded, dto => providerEnded.TrySetResult(dto));
-        clientConn.On<ChatEndedDto>(ChatHubConstants.Events.ChatEnded, dto => clientEchoes.Add(dto));
+        clientConn.On<ChatEndedDto>(ChatHubConstants.Events.ChatEnded, dto =>
+        {
+            clientEchoes.Add(dto);
+            if (dto.Reason == "already-ended") alreadyEnded.TrySetResult(dto);
+        });
 
         await clientConn.StartAsync();
         await providerConn.StartAsync();
@@ -111,8 +116,7 @@ public sealed class ChatHubEndChatBroadcastTests : PipelineTestBase
         var providerBroadcastsBefore = providerEnded.Task.IsCompletedSuccessfully ? 1 : 0;
         await clientConn.InvokeAsync("EndChat");
 
-        // Allow the already-ended echo to land.
-        await Task.Delay(TimeSpan.FromMilliseconds(500));
+        (await Task.WhenAny(alreadyEnded.Task, Task.Delay(Timeout))).ShouldBe(alreadyEnded.Task);
 
         clientEchoes.ShouldContain(d => d.Reason == "already-ended");
         // Provider must still have seen exactly one ChatEnded — second EndChat is caller-only.

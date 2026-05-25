@@ -44,11 +44,12 @@ public class ChatHubMessageLimiterTests
     }
 
     [Fact]
-    public void TryAcquire_Refills_AfterReplenishmentPeriod_AllowsAcquireAgain()
+    public async Task TryAcquire_Refills_AfterReplenishmentPeriod_AllowsAcquireAgain()
     {
         // Token bucket replenishment is wall-clock driven by the underlying limiter
         // (not the injected TimeProvider — RateLimiting was built before .NET 8 TimeProvider).
-        // Use a short window + Task.Delay to verify the refill path executes.
+        // AutoReplenishment is timer-wheel driven; on busy CI runners the tick can lag the
+        // configured period, so poll past the window rather than asserting on a fixed sleep.
         using var limiter = new ChatHubMessageLimiter(Options.Create(new RateLimitOptions
         {
             ChatHubBurstTokens = 1,
@@ -59,7 +60,12 @@ public class ChatHubMessageLimiterTests
         limiter.TryAcquire(key).IsAllowed.ShouldBeTrue();
         limiter.TryAcquire(key).IsAllowed.ShouldBeFalse();
 
-        Thread.Sleep(TimeSpan.FromSeconds(1.5));
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(250));
+            if (limiter.TryAcquire(key).IsAllowed) return;
+        }
 
         limiter.TryAcquire(key).IsAllowed.ShouldBeTrue();
     }
