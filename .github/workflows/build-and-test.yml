@@ -53,6 +53,8 @@ jobs:
 
       - name: Build frontend (bake wwwroot for smoke publish)
         working-directory: frontend
+        env:
+          VITE_SUPPORT_WHATSAPP: ${{ vars.VITE_SUPPORT_WHATSAPP }}
         run: |
           npm ci
           npm run build

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Serilog;
 
 namespace Hook.Shared.Core;
 
@@ -14,7 +15,7 @@ internal static class FrontendBootstrapper
         var frontendDir = Path.GetFullPath(Path.Combine(env.ContentRootPath, "..", "..", "frontend"));
         if (!File.Exists(Path.Combine(frontendDir, "package.json"))) return;
 
-        Console.WriteLine($"[frontend] wwwroot empty — building in {frontendDir}");
+        Log.Information("[frontend] wwwroot empty — building in {FrontendDir}", frontendDir);
         Run(frontendDir, "ci");
         Run(frontendDir, "run", "build");
     }
@@ -39,9 +40,9 @@ internal static class FrontendBootstrapper
         foreach (var a in args) psi.ArgumentList.Add(a);
 
         using var proc = Process.Start(psi)
-            ?? throw new InvalidOperationException($"Failed to start `npm {string.Join(' ', args)}`.");
+            ?? throw new InvalidOperationException($"Failed to start `npm {string.Join(' ', args)}` in '{cwd}'.");
         proc.WaitForExit();
         if (proc.ExitCode != 0)
-            throw new InvalidOperationException($"`npm {string.Join(' ', args)}` exited {proc.ExitCode}.");
+            throw new InvalidOperationException($"`npm {string.Join(' ', args)}` in '{cwd}' exited {proc.ExitCode}.");
     }
 }
