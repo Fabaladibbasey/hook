@@ -30,10 +30,10 @@ public class ConfirmIntentPipelineTests : PipelineTestBase
     {
         using var client = _fx.Factory.CreateClient();
         var phone = "+220700000202";
-        _fx.FakeAi.OverrideConfirmIntent("nah I meant something else", ConfirmReplyIntent.No);
+        _fx.FakeAi.OverrideConfirmIntent("that's not what I meant", ConfirmReplyIntent.No);
 
         await _fx.InjectTextAndAwaitAsync(phone, "I need a plumber");
-        await _fx.InjectTextAndAwaitAsync(phone, "nah I meant something else");
+        await _fx.InjectTextAndAwaitAsync(phone, "that's not what I meant");
 
         var reply = await client.ExpectOutboundAsync(
             phone,
