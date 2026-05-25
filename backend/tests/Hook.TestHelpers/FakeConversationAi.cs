@@ -3,6 +3,7 @@ using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
 using Hook.Features.Feedback.Step1Intent;
 using Hook.Features.Feedback.Step2Intent;
+using Hook.Features.ServiceRequest.Create.ConfirmIntent;
 
 namespace Hook.TestHelpers;
 
@@ -14,6 +15,7 @@ public sealed class FakeConversationAi : IConversationAi
     public int ExtractEtaCalls { get; private set; }
     public int ExtractStep1IntentCalls { get; private set; }
     public int ExtractStep2IntentCalls { get; private set; }
+    public int ExtractConfirmIntentCalls { get; private set; }
 
     /// <summary>Force a specific (intent, confidence) for a given exact input — useful
     /// for integration tests that need to drive low-confidence disambiguation paths.</summary>
@@ -26,10 +28,12 @@ public sealed class FakeConversationAi : IConversationAi
         _etaOverrides.Clear();
         _step1IntentOverrides.Clear();
         _step2IntentOverrides.Clear();
+        _confirmIntentOverrides.Clear();
         DetectIntentCalls = 0;
         ExtractEtaCalls = 0;
         ExtractStep1IntentCalls = 0;
         ExtractStep2IntentCalls = 0;
+        ExtractConfirmIntentCalls = 0;
     }
 
     public Task PingAsync(CancellationToken ct = default) => Task.CompletedTask;
@@ -273,6 +277,34 @@ public sealed class FakeConversationAi : IConversationAi
             return Task.FromResult(new Step2ParseResult(Step2ReplyIntent.InProgress, null));
 
         return Task.FromResult(new Step2ParseResult(Step2ReplyIntent.Unclear, null));
+    }
+
+    private readonly Dictionary<string, ConfirmReplyIntent> _confirmIntentOverrides =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Force a ConfirmReplyIntent verdict for a specific exact input so integration
+    /// tests can drive any branch (Yes / No / Unsure) without touching Ollama.</summary>
+    public void OverrideConfirmIntent(string text, ConfirmReplyIntent intent) =>
+        _confirmIntentOverrides[text] = intent;
+
+    public Task<ConfirmReplyIntent> ExtractConfirmIntentAsync(
+        string slugAsked,
+        string text,
+        CancellationToken ct = default)
+    {
+        ExtractConfirmIntentCalls++;
+        if (_confirmIntentOverrides.TryGetValue(text, out var overridden))
+            return Task.FromResult(overridden);
+
+        var lower = Normalize(text);
+        // Negation takes precedence so "that's not right" doesn't collide with
+        // the "that's right" affirmative match.
+        if (Match(lower, "no", "nope", "nah", "wrong", "not that", "not right"))
+            return Task.FromResult(ConfirmReplyIntent.No);
+        if (Match(lower, "yes", "yeah", "yep", "correct", "exactly", "sure", "that's right"))
+            return Task.FromResult(ConfirmReplyIntent.Yes);
+
+        return Task.FromResult(ConfirmReplyIntent.Unsure);
     }
 
     private static string Normalize(string text) =>

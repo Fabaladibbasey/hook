@@ -364,6 +364,27 @@ internal static class AiPrompts
         { "intent": "Yes|No|InProgress|StopAsking|Unclear", "etaUtc": "<ISO-8601>" | null }
         """;
 
+    public const string ConfirmIntentSystem = SafetyPreamble +
+        """
+        You judge a single short WhatsApp reply to a YES/NO question.
+
+        The bot asked the user whether they need a specific service. You are
+        given the slug (as `slug: <value>` on its own line) and the user's
+        reply (fenced as <user_input>...</user_input>).
+
+        Pick exactly one intent from:
+          Yes    — the user confirms (e.g. "yes", "yeah that's it", "correct",
+                   "that's what I need", "exactly", "sure go ahead").
+          No     — the user rejects the proposed service (e.g. "no", "wrong",
+                   "not that", "I meant something else").
+          Unsure — the reply does not clearly confirm or reject (off-topic,
+                   ambiguous, a question back, OR a new service mention — the
+                   caller decides how to route those separately).
+
+        Return JSON only:
+        { "intent": "Yes|No|Unsure" }
+        """;
+
     public const string EtaExtractionSystem = SafetyPreamble +
         // TODO(timezone): the rules below assume the client's clock-time phrases
         // ("5pm", "tomorrow morning") are in UTC. For non-UTC clients this can pick

@@ -1,9 +1,12 @@
 using System.Text.RegularExpressions;
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
+using Hook.Features.Feedback;
+using Hook.Features.Feedback.AggregateStats;
 using Hook.Features.Geocoding.Geocode;
 using Hook.Features.Matching;
 using Hook.Features.ProviderAvailability.AvailabilityAggregate;
+using Hook.Features.ServiceRequest.Create.ConfirmIntent;
 using Hook.Features.ServiceRequest.Create.ExtractServices;
 using Hook.Features.ServiceRequest.RequestAggregate;
 using Hook.Features.Whatsapp.Models;
@@ -21,6 +24,7 @@ public sealed class ClientRequestOrchestrator(
     IProviderAvailabilityRepository availability,
     IMessageBus bus,
     IOptions<MatchingOptions> matchingOptions,
+    IOptions<FeedbackOptions> feedbackOptions,
     TimeProvider clock,
     ILogger<ClientRequestOrchestrator> logger)
 {
@@ -158,8 +162,13 @@ public sealed class ClientRequestOrchestrator(
             }
         }
 
-        // QuickIntent's regex covers YES/NO/OK/etc. at confirm steps; the LLM fallback
-        // here was a 60-150s tax for negligible UX gain, so we re-prompt instead.
+        // QuickIntent covers YES/NO/OK/phrase variants deterministically; natural-
+        // language affirmations that miss its literal+phrase+fuzzy tiers hand off to
+        // the LLM via the durable outbox (see ConfirmIntent slice). Previously this
+        // branch synchronously re-prompted — the new outbox route is safe to take
+        // because (a) [NonTransactional] on the AI stage releases the Npgsql
+        // connection during the 60-150s Ollama window, and (b) ApplyConfirmIntent's
+        // stamp guard discards envelopes whose draft moved during inference.
         var intentKind = QuickIntent.Detect(message.Text);
         if (intentKind == IntentKind.Confirmation)
         {
@@ -192,11 +201,37 @@ public sealed class ClientRequestOrchestrator(
                 "What service do you need? Or reply REGISTER if you're offering services instead."));
             return;
         }
-        var slug = draft.DraftServiceSlug.Replace('-', ' ');
-        var prompt =
-            $"Please reply YES or NO — YES to confirm {slug}, " +
-            "NO to choose another service.";
-        await bus.PublishAsync(new SendWhatsAppTextCommand(phone, prompt));
+        // Non-text inbound (location pin, image, reaction) at ConfirmService has
+        // no YES/NO signal — re-prompt deterministically instead of paying a
+        // 60-150s Ollama round-trip on an empty fence. Persist the touched draft
+        // so a same-step ExtractConfirmIntent envelope still in flight from a
+        // prior ambiguous text reply sees the bumped UpdatedAt and fails the
+        // ConfirmDraftStampGuard on apply.
+        if (message.Kind != InboundMessageKind.Text || string.IsNullOrWhiteSpace(message.Text))
+        {
+            await drafts.UpsertAsync(draft, ct);
+            var slugReprompt = draft.DraftServiceSlug.Replace('-', ' ');
+            await bus.PublishAsync(new SendWhatsAppTextCommand(phone,
+                $"Please reply YES or NO — YES to confirm {slugReprompt}, NO to choose another service."));
+            return;
+        }
+
+        // Persist the touched draft so DraftStampedAt is meaningful, then hand off to
+        // the LLM. The race we ARE guarding: a SECOND ambiguous reply lands while the
+        // AI is still running. The Step guard alone catches user-advance and CANCEL
+        // (draft.Step != ConfirmService); the stamp guard catches a same-step second
+        // Touch. Uses ConfirmDraftStampGuard tick-tolerance to absorb Postgres
+        // timestamptz microsecond truncation.
+        await bus.PublishAsync(new SendWhatsAppTextCommand(phone, "One moment — checking your reply…"));
+        await drafts.UpsertAsync(draft, ct);
+        var scrubbed = FeedbackResponseService.ScrubForOutbox(
+            message.Text ?? string.Empty,
+            feedbackOptions.Value.OutboxTextMaxChars);
+        await bus.PublishAsync(new ExtractConfirmIntentCommand(
+            phone.Value,
+            draft.DraftServiceSlug,
+            scrubbed,
+            DraftStampedAt: draft.UpdatedAt));
     }
 
     private async Task CollectLocationAsync(

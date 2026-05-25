@@ -9,6 +9,7 @@ using Hook.Features.Ai.Prompts;
 using Hook.Features.Feedback.Step1Intent;
 using Hook.Features.Feedback.Step2Intent;
 using Hook.Features.Observability;
+using Hook.Features.ServiceRequest.Create.ConfirmIntent;
 using Microsoft.Extensions.Options;
 
 namespace Hook.Features.Ai;
@@ -451,6 +452,56 @@ public sealed class OllamaConversationAi(
         return new Step2ParseResult(intent, eta);
     }
 
+    private static readonly object ConfirmIntentSchema = new
+    {
+        type = "object",
+        properties = new
+        {
+            intent = new { type = "string", @enum = new[] { "Yes", "No", "Unsure" } }
+        },
+        required = new[] { "intent" }
+    };
+
+    public Task<ConfirmReplyIntent> ExtractConfirmIntentAsync(
+        string slugAsked,
+        string text,
+        CancellationToken ct = default) =>
+        TryCallAsync(AiStage.ExtractConfirmIntent, ConfirmReplyIntent.Unsure,
+            () => ExtractConfirmIntentCoreAsync(slugAsked, text, ct), ct);
+
+    private async Task<ConfirmReplyIntent> ExtractConfirmIntentCoreAsync(
+        string slugAsked,
+        string text,
+        CancellationToken ct)
+    {
+        // Defence-in-depth: SlugResolver.Normalize already bounds slugs to
+        // [a-z0-9-]{1,64}, but the slug is interpolated outside the user-input
+        // fence below — a future regression in slug normalization would widen
+        // the prompt-injection surface. Reject up-front; absorb-on-failure
+        // wraps this in TryCallAsync and returns ConfirmReplyIntent.Unsure.
+        if (!PromptSafety.LooksLikeSlug(slugAsked))
+            throw new ArgumentException("slug failed validation", nameof(slugAsked));
+
+        var prompt = $$"""
+            slug: {{slugAsked}}
+            {{PromptSafety.Fence(text, options.Value.MaxUserInputChars)}}
+            """;
+
+        using var json = await CallJsonAsync(
+            AiPrompts.ConfirmIntentSystem,
+            prompt,
+            ConfirmIntentSchema,
+            options.Value.MaxOutputTokens.Intent,
+            ct);
+
+        var intentText = json.RootElement.TryGetProperty("intent", out var i)
+            ? i.GetString() ?? string.Empty
+            : string.Empty;
+        return Enum.TryParse<ConfirmReplyIntent>(intentText, ignoreCase: true, out var parsed)
+            ? parsed
+            : ConfirmReplyIntent.Unsure;
+    }
+
     public async Task<LanguageDetectionResult> DetectLanguageAsync(string userMessage, CancellationToken ct = default)
     {
         var schema = new
@@ -474,7 +525,7 @@ public sealed class OllamaConversationAi(
         return new LanguageDetectionResult(lang, conf);
     }
 
-    private enum AiStage { Classify, ExtractServices, JudgeMatch, JudgeParent, ExtractEta, ExtractStep1Intent, ExtractStep2Intent }
+    private enum AiStage { Classify, ExtractServices, JudgeMatch, JudgeParent, ExtractEta, ExtractStep1Intent, ExtractStep2Intent, ExtractConfirmIntent }
 
     private static string TagOf(AiStage stage) => stage switch
     {
@@ -485,6 +536,7 @@ public sealed class OllamaConversationAi(
         AiStage.ExtractEta => "extract-eta",
         AiStage.ExtractStep1Intent => "extract-step1-intent",
         AiStage.ExtractStep2Intent => "extract-step2-intent",
+        AiStage.ExtractConfirmIntent => "extract-confirm-intent",
         _ => throw new ArgumentOutOfRangeException(nameof(stage), stage, null)
     };
 

@@ -1,12 +1,14 @@
 using Hook.Features.Ai.Models;
 using Hook.Features.Feedback.Step1Intent;
 using Hook.Features.Feedback.Step2Intent;
+using Hook.Features.ServiceRequest.Create.ConfirmIntent;
 
 namespace Hook.Features.Ai;
 
 // AI-stage methods (DetectIntent / ExtractServices / JudgeServiceMatch /
-// JudgeParentSlug / ExtractEta) absorb transport + parsing failures inside the
-// adapter and return a documented neutral fallback so callers stay try-catch-free.
+// JudgeParentSlug / ExtractEta / ExtractStep1Intent / ExtractStep2Intent /
+// ExtractConfirmIntent) absorb transport + parsing failures inside the adapter
+// and return a documented neutral fallback so callers stay try-catch-free.
 // Outer-token cancellation rethrows so Wolverine's shutdown OCE policy can
 // discard cleanly. The remaining methods (GenerateReply, DetectLanguage) keep
 // the original throw-on-failure contract; their callers route through their
@@ -78,5 +80,15 @@ public interface IConversationAi
     Task<Step2ParseResult> ExtractStep2IntentAsync(
         string userMessage,
         DateTimeOffset now,
+        CancellationToken ct = default);
+
+    // Classifies a YES/NO reply to "Do you need <slug>?" when QuickIntent.Detect
+    // misses (natural language affirmations / rejections that don't sit in the
+    // literal/phrase tables). Absorbs failures and returns ConfirmReplyIntent.Unsure
+    // so the caller stays try-catch-free; the absorbed-fallback path increments
+    // the AiOutboundDropped metric with stage="extract-confirm-intent".
+    Task<ConfirmReplyIntent> ExtractConfirmIntentAsync(
+        string slugAsked,
+        string text,
         CancellationToken ct = default);
 }

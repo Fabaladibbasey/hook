@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
+using Hook.Features.ServiceRequest.Create.ConfirmIntent;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Shouldly;
@@ -11,6 +12,17 @@ namespace Hook.UnitTests.Ai;
 
 public class OllamaConversationAiValidationTests
 {
+    [Fact]
+    public async Task ExtractConfirmIntent_malformed_slug_absorbs_to_Unsure()
+    {
+        // Slug fails PromptSafety.LooksLikeSlug — guard throws ArgumentException,
+        // TryCallAsync absorbs it and returns the neutral Unsure fallback so the
+        // caller stays try-catch-free per the absorb-on-failure contract.
+        var ai = BuildAi(rawModelContent: """{"intent":"Yes"}""");
+        var result = await ai.ExtractConfirmIntentAsync("Has Space", "yes", CancellationToken.None);
+        result.ShouldBe(ConfirmReplyIntent.Unsure);
+    }
+
     [Fact]
     public async Task DetectIntent_returns_Unknown_when_LLM_emits_unknown_label()
     {

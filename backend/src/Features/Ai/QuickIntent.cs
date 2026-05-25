@@ -150,10 +150,12 @@ public static class QuickIntent
         ("want to proceed",   IntentKind.Confirmation),
         ("i want details",    IntentKind.Confirmation),
         ("want details",      IntentKind.Confirmation),
-        ("that's right",  IntentKind.Confirmation),
-        ("thats right",   IntentKind.Confirmation),
-        ("you're right",  IntentKind.Confirmation),
-        ("youre right",   IntentKind.Confirmation),
+        ("that's right",   IntentKind.Confirmation),
+        ("thats right",    IntentKind.Confirmation),
+        ("that's correct", IntentKind.Confirmation),
+        ("thats correct",  IntentKind.Confirmation),
+        ("you're right",   IntentKind.Confirmation),
+        ("youre right",    IntentKind.Confirmation),
         ("you got it",    IntentKind.Confirmation),
         ("got it",        IntentKind.Confirmation),
         ("sounds good",   IntentKind.Confirmation),
@@ -184,7 +186,8 @@ public static class QuickIntent
             .Replace('’', '\'')
             .Replace('‘', '\'')
             .Replace('“', '"')
-            .Replace('”', '"');
+            .Replace('”', '"')
+            .TrimEnd('.', '!', '?', ',');
         if (string.IsNullOrEmpty(s)) return null;
 
         // 1. Literal exact match (fast path; preserves all existing behaviour)
@@ -246,8 +249,10 @@ public static class QuickIntent
     // Lowercase + trim + strip trailing punctuation. Single allocation site reused
     // across Step1/Step2 deterministic detectors so a multi-call inbound (e.g. Step2
     // → DetectInProgress → DetectReschedule) does not re-normalise the same text.
+    // Trim set MUST match QuickIntent.Detect's trailing-punctuation strip so
+    // detectors that route through Normalize see the same canonical form.
     internal static string Normalize(string text) =>
-        text.Trim().ToLowerInvariant().TrimEnd('.', '!', '?');
+        text.Trim().ToLowerInvariant().TrimEnd('.', '!', '?', ',');
 
     /// <summary>True when the text reads as "stop asking me about this".</summary>
     public static bool DetectStop(string? text)
