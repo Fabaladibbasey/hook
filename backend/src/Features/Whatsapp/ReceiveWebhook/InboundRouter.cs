@@ -166,10 +166,7 @@ public sealed class InboundRouterHandler(
         // also listed providers (would mis-route to the heartbeat path).
         if (activeRequest is not null && QuickIntent.Detect(text) is IntentKind.NewRequest)
         {
-            if (activeRequest.Status != ServiceRequestStatus.Closed)
-            {
-                activeRequest.Close();
-            }
+            activeRequest.Close();
             logger.LogDebug("Route → NewRequest (closed {RequestId}, prompting) for {Phone}",
                 activeRequest.Id, masked);
             await bus.PublishAsync(new SendWhatsAppTextCommand(msg.From,
@@ -237,11 +234,8 @@ public sealed class InboundRouterHandler(
             case IntentKind.ServiceRequest when activeRequest is not null:
                 // Silent supersede: close the existing request and start a fresh client
                 // funnel from the captured text. Replaces the older END/KEEP detour.
-                if (activeRequest.Status != ServiceRequestStatus.Closed)
-                {
-                    activeRequest.Close();
-                    logger.LogDebug("Silent supersede: closed {RequestId} for {Phone}", activeRequest.Id, masked);
-                }
+                activeRequest.Close();
+                logger.LogDebug("Silent supersede: closed {RequestId} for {Phone}", activeRequest.Id, masked);
                 await clientOrchestrator.HandleAsync(msg, ct);
                 return;
             case IntentKind.ServiceRequest:

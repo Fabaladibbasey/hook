@@ -170,7 +170,8 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
 
         var entry = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
         Assert.True(await repo.TryAddPendingAsync(entry));
-        Assert.True(await repo.TryClaimPendingAsync(entry.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow));
+        entry.ClaimYes(DateTimeOffset.UtcNow);
+        Assert.True(await repo.TrySaveAsync(entry));
 
         await using var scope2 = _fx.Factory.Services.CreateAsyncScope();
         var repo2 = scope2.ServiceProvider.GetRequiredService<IFeedbackRepository>();
@@ -180,19 +181,43 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
     }
 
     [Fact]
-    public async Task TryClaimPendingAsync_SecondCall_ReturnsFalse()
+    public async Task TrySaveAsync_ConcurrentClaim_SecondLoses()
     {
+        // Two scopes load the same Pending row (same xmin), both mutate, save A → ok,
+        // save B → DbUpdateConcurrencyException is caught and returns false.
         var clientPhone = UniquePhone();
-        await using var scope = _fx.Factory.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
-        var (_, match) = await SeedMatchAsync(db, clientPhone);
-
+        await using var seedScope = _fx.Factory.Services.CreateAsyncScope();
+        var seedDb = seedScope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var seedRepo = seedScope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var (_, match) = await SeedMatchAsync(seedDb, clientPhone);
         var entry = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
-        await repo.TryAddPendingAsync(entry);
+        await seedRepo.TryAddPendingAsync(entry);
 
-        Assert.True(await repo.TryClaimPendingAsync(entry.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow));
-        Assert.False(await repo.TryClaimPendingAsync(entry.Id, FeedbackAnswer.No, DateTimeOffset.UtcNow));
+        await using var scopeA = _fx.Factory.Services.CreateAsyncScope();
+        await using var scopeB = _fx.Factory.Services.CreateAsyncScope();
+        var repoA = scopeA.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var repoB = scopeB.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+
+        var loadedA = await repoA.GetByIdAsync(entry.Id);
+        var loadedB = await repoB.GetByIdAsync(entry.Id);
+        Assert.NotNull(loadedA);
+        Assert.NotNull(loadedB);
+
+        loadedA!.ClaimYes(DateTimeOffset.UtcNow);
+        Assert.True(await repoA.TrySaveAsync(loadedA));
+
+        loadedB!.ClaimNo(DateTimeOffset.UtcNow);
+        Assert.False(await repoB.TrySaveAsync(loadedB));
+
+        // Pin winner-side persistence: scopeA's ClaimYes survived; the loser
+        // did not overwrite with ClaimNo.
+        await using var verifyScope = _fx.Factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var persisted = await verifyDb.MatchFeedback
+            .AsNoTracking()
+            .FirstOrDefaultAsync(f => f.Id == entry.Id);
+        Assert.NotNull(persisted);
+        Assert.Equal(FeedbackAnswer.Yes, persisted!.Answer);
     }
 
     [Fact]
@@ -211,7 +236,8 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         // Re-create + claim, then DeletePendingAsync should NOT remove the now-answered row.
         var answered = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
         await repo.TryAddPendingAsync(answered);
-        await repo.TryClaimPendingAsync(answered.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow);
+        answered.ClaimYes(DateTimeOffset.UtcNow);
+        await repo.TrySaveAsync(answered);
         Assert.False(await repo.DeletePendingAsync(answered.Id));
 
         await using var verifyScope = _fx.Factory.Services.CreateAsyncScope();
@@ -257,7 +283,8 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         var firstEntry = MatchFeedback.CreatePending(
             firstMatch.Id, firstMatch.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
         Assert.True(await repo.TryAddPendingAsync(firstEntry));
-        Assert.True(await repo.TryClaimPendingAsync(firstEntry.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow));
+        firstEntry.ClaimYes(DateTimeOffset.UtcNow);
+        Assert.True(await repo.TrySaveAsync(firstEntry));
 
         // Late sibling for the same request — broader partial unique includes answered rows.
         var sibling = MatchFeedback.CreatePending(
@@ -266,7 +293,7 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
     }
 
     [Fact]
-    public async Task TryRescheduleAsync_HappyPath_BumpsRecheckCountAndRefreshesPromptedAt()
+    public async Task Reschedule_HappyPath_BumpsRecheckCountAndRefreshesPromptedAt()
     {
         var clientPhone = UniquePhone();
         await using var scope = _fx.Factory.Services.CreateAsyncScope();
@@ -280,7 +307,8 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         await repo.TryAddPendingAsync(entry);
 
         var bumpAt = DateTimeOffset.UtcNow;
-        Assert.True(await repo.TryRescheduleAsync(entry.Id, bumpAt));
+        entry.Reschedule(bumpAt);
+        Assert.True(await repo.TrySaveAsync(entry));
 
         await using var verifyScope = _fx.Factory.Services.CreateAsyncScope();
         var verifyDb = verifyScope.ServiceProvider.GetRequiredService<HookDbContext>();
@@ -290,23 +318,7 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
     }
 
     [Fact]
-    public async Task TryRescheduleAsync_AlreadyClaimed_ReturnsFalse()
-    {
-        var clientPhone = UniquePhone();
-        await using var scope = _fx.Factory.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
-        var (_, match) = await SeedMatchAsync(db, clientPhone);
-
-        var entry = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
-        await repo.TryAddPendingAsync(entry);
-        await repo.TryClaimPendingAsync(entry.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow);
-
-        Assert.False(await repo.TryRescheduleAsync(entry.Id, DateTimeOffset.UtcNow));
-    }
-
-    [Fact]
-    public async Task TryClaimNoReasonAsync_HappyPath_SetsAnswerAndReason()
+    public async Task CaptureNoReason_HappyPath_SetsAnswerAndReason()
     {
         var clientPhone = UniquePhone();
         await using var scope = _fx.Factory.Services.CreateAsyncScope();
@@ -318,7 +330,8 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
             match.Id, match.RequestId, FeedbackStep.CaptureNoReason, DateTimeOffset.UtcNow);
         await repo.TryAddPendingAsync(entry);
 
-        Assert.True(await repo.TryClaimNoReasonAsync(entry.Id, "too expensive", DateTimeOffset.UtcNow));
+        entry.CaptureNoReason("too expensive", DateTimeOffset.UtcNow);
+        Assert.True(await repo.TrySaveAsync(entry));
 
         await using var verifyScope = _fx.Factory.Services.CreateAsyncScope();
         var verifyDb = verifyScope.ServiceProvider.GetRequiredService<HookDbContext>();
@@ -328,61 +341,99 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
     }
 
     [Fact]
-    public async Task TryClaimNoReasonAsync_AlreadyClaimed_ReturnsFalse()
+    public async Task TrySaveAsync_ConcurrencyLoss_DoesNotResurrectAtOuterSave()
     {
+        // After the swallowed DbUpdateConcurrencyException, the losing entry must be
+        // detached (State -> Unchanged via ReloadAsync) so the outer Wolverine
+        // AutoApplyTransactions commit does NOT re-issue the losing UPDATE and throw
+        // again. Without the fix, dbA.SaveChangesAsync below throws.
         var clientPhone = UniquePhone();
-        await using var scope = _fx.Factory.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
-        var (_, match) = await SeedMatchAsync(db, clientPhone);
+        await using var seedScope = _fx.Factory.Services.CreateAsyncScope();
+        var seedDb = seedScope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var seedRepo = seedScope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var (_, match) = await SeedMatchAsync(seedDb, clientPhone);
+        var entry = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
+        await seedRepo.TryAddPendingAsync(entry);
 
-        var entry = MatchFeedback.CreatePending(
-            match.Id, match.RequestId, FeedbackStep.CaptureNoReason, DateTimeOffset.UtcNow);
-        await repo.TryAddPendingAsync(entry);
-        await repo.TryClaimNoReasonAsync(entry.Id, "first", DateTimeOffset.UtcNow);
+        await using var scopeA = _fx.Factory.Services.CreateAsyncScope();
+        await using var scopeB = _fx.Factory.Services.CreateAsyncScope();
+        var repoA = scopeA.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var repoB = scopeB.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var dbA = scopeA.ServiceProvider.GetRequiredService<HookDbContext>();
+        var dbB = scopeB.ServiceProvider.GetRequiredService<HookDbContext>();
 
-        Assert.False(await repo.TryClaimNoReasonAsync(entry.Id, "second", DateTimeOffset.UtcNow));
-    }
+        var loadedA = await repoA.GetByIdAsync(entry.Id);
+        var loadedB = await repoB.GetByIdAsync(entry.Id);
+        Assert.NotNull(loadedA);
+        Assert.NotNull(loadedB);
 
-    [Fact]
-    public async Task TryRepromptPendingAsync_GapNotElapsed_ReturnsFalse()
-    {
-        var clientPhone = UniquePhone();
-        await using var scope = _fx.Factory.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
-        var (_, match) = await SeedMatchAsync(db, clientPhone);
+        // Winner commits first.
+        loadedB!.ClaimYes(DateTimeOffset.UtcNow);
+        Assert.True(await repoB.TrySaveAsync(loadedB));
 
-        var entry = MatchFeedback.CreatePending(
-            match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
-        await repo.TryAddPendingAsync(entry);
+        // Loser stages mutation, TrySaveAsync swallows concurrency loss.
+        loadedA!.ClaimNo(DateTimeOffset.UtcNow);
+        Assert.False(await repoA.TrySaveAsync(loadedA));
 
-        // PromptedAt = now, gap = 5min, so "now + 1s" cutoff has not elapsed.
-        Assert.False(await repo.TryRepromptPendingAsync(
-            entry.Id, DateTimeOffset.UtcNow.AddSeconds(1), TimeSpan.FromMinutes(5)));
-    }
-
-    [Fact]
-    public async Task TryRepromptPendingAsync_GapElapsed_RefreshesPromptedAt()
-    {
-        var clientPhone = UniquePhone();
-        await using var scope = _fx.Factory.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
-        var (_, match) = await SeedMatchAsync(db, clientPhone);
-
-        var oldPrompt = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(30);
-        var entry = MatchFeedback.CreatePending(
-            match.Id, match.RequestId, FeedbackStep.DidYouFind, oldPrompt);
-        await repo.TryAddPendingAsync(entry);
-
-        var now = DateTimeOffset.UtcNow;
-        Assert.True(await repo.TryRepromptPendingAsync(entry.Id, now, TimeSpan.FromMinutes(5)));
+        // Without the ReloadAsync detach this throws DbUpdateConcurrencyException.
+        await dbA.SaveChangesAsync();
 
         await using var verifyScope = _fx.Factory.Services.CreateAsyncScope();
         var verifyDb = verifyScope.ServiceProvider.GetRequiredService<HookDbContext>();
-        var loaded = await verifyDb.MatchFeedback.AsNoTracking().FirstAsync(f => f.Id == entry.Id);
-        Assert.True(Math.Abs((loaded.PromptedAt - now).TotalSeconds) < 1);
+        var persisted = await verifyDb.MatchFeedback.AsNoTracking().FirstAsync(f => f.Id == entry.Id);
+        Assert.Equal(FeedbackAnswer.Yes, persisted.Answer);
+    }
+
+    [Fact]
+    public async Task TrySaveAsync_ConcurrencyLoss_DoesNotDropSiblingProviderStatsEdit()
+    {
+        // The scoped-swallow contract: a concurrency loss on MatchFeedback must
+        // NOT discard a sibling ProviderStats edit staged on the same context.
+        // ReloadAsync targets only the conflicting entry — unlike ChangeTracker.Clear,
+        // which would drop the staged ProviderStats mutation along with the loser.
+        var clientPhone = UniquePhone();
+        var providerPhone = UniquePhone();
+
+        // Seed both MatchFeedback Pending and a ProviderStats row.
+        await using var seedScope = _fx.Factory.Services.CreateAsyncScope();
+        var seedDb = seedScope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var seedRepo = seedScope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var (_, match) = await SeedMatchAsync(seedDb, clientPhone);
+        var entry = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
+        await seedRepo.TryAddPendingAsync(entry);
+        await seedRepo.UpsertStatsAsync(ProviderStats.Initial(providerPhone, DateTimeOffset.UtcNow));
+        await seedDb.SaveChangesAsync();
+
+        await using var scopeA = _fx.Factory.Services.CreateAsyncScope();
+        await using var scopeB = _fx.Factory.Services.CreateAsyncScope();
+        var repoA = scopeA.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var repoB = scopeB.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var dbA = scopeA.ServiceProvider.GetRequiredService<HookDbContext>();
+
+        var loadedA = await repoA.GetByIdAsync(entry.Id);
+        var loadedB = await repoB.GetByIdAsync(entry.Id);
+        var statsA = await repoA.GetStatsAsync(providerPhone);
+        Assert.NotNull(loadedA);
+        Assert.NotNull(loadedB);
+        Assert.NotNull(statsA);
+
+        // Winner B commits MatchFeedback first.
+        loadedB!.ClaimYes(DateTimeOffset.UtcNow);
+        Assert.True(await repoB.TrySaveAsync(loadedB));
+
+        // Scope A: stage Modified on ProviderStats sibling, mutate the losing MatchFeedback.
+        statsA!.RecordOutcome(success: true, DateTimeOffset.UtcNow);
+        loadedA!.ClaimNo(DateTimeOffset.UtcNow);
+        Assert.False(await repoA.TrySaveAsync(loadedA));
+
+        // Sibling edit must persist on the next SaveChangesAsync.
+        await dbA.SaveChangesAsync();
+
+        await using var verifyScope = _fx.Factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var persistedStats = await verifyDb.ProviderStats.AsNoTracking()
+            .FirstAsync(s => s.ProviderPhone == providerPhone);
+        Assert.Equal(1, persistedStats.CompletedCount);
     }
 
     [Fact]

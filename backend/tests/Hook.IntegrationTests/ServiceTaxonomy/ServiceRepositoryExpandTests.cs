@@ -32,9 +32,9 @@ public sealed class ServiceRepositoryExpandTests : PipelineTestBase
         var rootSlug = $"root-{Guid.NewGuid():N}";
         var childASlug = $"child-a-{Guid.NewGuid():N}";
         var childBSlug = $"child-b-{Guid.NewGuid():N}";
-        var root = new Service { Slug = rootSlug, CreatedAt = DateTimeOffset.UtcNow };
-        var childA = new Service { Slug = childASlug, CreatedAt = DateTimeOffset.UtcNow };
-        var childB = new Service { Slug = childBSlug, CreatedAt = DateTimeOffset.UtcNow };
+        var root = Service.Create(rootSlug, DateTimeOffset.UtcNow);
+        var childA = Service.Create(childASlug, DateTimeOffset.UtcNow);
+        var childB = Service.Create(childBSlug, DateTimeOffset.UtcNow);
         db.Services.AddRange(root, childA, childB);
         await db.SaveChangesAsync();
         childA.AssignParent(root);
@@ -58,8 +58,8 @@ public sealed class ServiceRepositoryExpandTests : PipelineTestBase
 
         var rootSlug = $"root-{Guid.NewGuid():N}";
         var childSlug = $"leaf-{Guid.NewGuid():N}";
-        var root = new Service { Slug = rootSlug, CreatedAt = DateTimeOffset.UtcNow };
-        var leaf = new Service { Slug = childSlug, CreatedAt = DateTimeOffset.UtcNow };
+        var root = Service.Create(rootSlug, DateTimeOffset.UtcNow);
+        var leaf = Service.Create(childSlug, DateTimeOffset.UtcNow);
         db.Services.AddRange(root, leaf);
         await db.SaveChangesAsync();
         leaf.AssignParent(root);
@@ -87,10 +87,10 @@ public sealed class ServiceRepositoryExpandTests : PipelineTestBase
         var childSlug = $"child-{Guid.NewGuid():N}";
         var otherRootSlug = $"other-{Guid.NewGuid():N}";
         var otherChildSlug = $"other-child-{Guid.NewGuid():N}";
-        var root = new Service { Slug = rootSlug, CreatedAt = DateTimeOffset.UtcNow };
-        var child = new Service { Slug = childSlug, CreatedAt = DateTimeOffset.UtcNow };
-        var otherRoot = new Service { Slug = otherRootSlug, CreatedAt = DateTimeOffset.UtcNow };
-        var otherChild = new Service { Slug = otherChildSlug, CreatedAt = DateTimeOffset.UtcNow };
+        var root = Service.Create(rootSlug, DateTimeOffset.UtcNow);
+        var child = Service.Create(childSlug, DateTimeOffset.UtcNow);
+        var otherRoot = Service.Create(otherRootSlug, DateTimeOffset.UtcNow);
+        var otherChild = Service.Create(otherChildSlug, DateTimeOffset.UtcNow);
         db.Services.AddRange(root, child, otherRoot, otherChild);
         await db.SaveChangesAsync();
         child.AssignParent(root);

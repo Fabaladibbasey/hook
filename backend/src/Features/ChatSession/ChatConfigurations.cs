@@ -14,6 +14,9 @@ public class ChatSessionConfiguration : IEntityTypeConfiguration<SessionAggregat
         builder.ToTable("chat_sessions");
         builder.HasKey(c => c.Id);
         builder.PropertyAsStringEnum(c => c.Status, 16);
+        // Optimistic-concurrency token: prevents TOCTOU lost updates between
+        // CanSendMessage check + insert/touch and a concurrent End/HardExpire.
+        builder.Property(c => c.Version).IsConcurrencyToken();
         builder.HasIndex(c => c.ExpiresAt).HasDatabaseName("ix_chat_sessions_expires_at");
         builder.HasIndex(c => c.Status).HasDatabaseName("ix_chat_sessions_status");
     }
@@ -30,6 +33,10 @@ public class ChatParticipantConfiguration : IEntityTypeConfiguration<ChatPartici
         builder.Property(p => p.Phone).HasMaxLength(20).IsRequired().HasDefaultValue("");
         builder.Property(p => p.PublicKey).HasMaxLength(200);
         builder.Property(p => p.LastInboundSequence).IsRequired();
+        // Optimistic-concurrency token: a concurrent RotateSession between the
+        // IsCurrentSession check and SetPublicKey flush would otherwise persist
+        // the old SPKI under the new session id.
+        builder.Property(p => p.Version).IsConcurrencyToken();
         builder.HasIndex(p => p.Token).IsUnique().HasDatabaseName("ux_chat_participants_token");
         builder.HasIndex(p => p.ChatId).HasDatabaseName("ix_chat_participants_chat_id");
         builder.HasOne<SessionAggregate.ChatSession>()

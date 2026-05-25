@@ -18,8 +18,8 @@ public class AssignServiceParentHandlerTests
     [Fact]
     public async Task Handle_AssignsParent_OnRootSvc()
     {
-        var svc = Service.Create("cardiology");
-        var doctor = Service.Create("doctor");
+        var svc = Service.Create("cardiology", DateTimeOffset.UtcNow);
+        var doctor = Service.Create("doctor", DateTimeOffset.UtcNow);
         var repo = Repo(svc, doctor);
 
         await new AssignServiceParentHandler(repo.Object)
@@ -33,9 +33,9 @@ public class AssignServiceParentHandlerTests
     {
         // Handler short-circuits on !IsRoot — defense-in-depth before the
         // aggregate-level re-parent guard (Service.AssignParent throws).
-        var svc = Service.Create("cardiology");
-        svc.AssignParent(Service.Create("doctor"));
-        var lawyer = Service.Create("lawyer");
+        var svc = Service.Create("cardiology", DateTimeOffset.UtcNow);
+        svc.AssignParent(Service.Create("doctor", DateTimeOffset.UtcNow));
+        var lawyer = Service.Create("lawyer", DateTimeOffset.UtcNow);
         var repo = Repo(svc, lawyer);
 
         await new AssignServiceParentHandler(repo.Object)
@@ -57,7 +57,7 @@ public class AssignServiceParentHandlerTests
     [Fact]
     public async Task Handle_NoOp_WhenParentMissing()
     {
-        var svc = Service.Create("cardiology");
+        var svc = Service.Create("cardiology", DateTimeOffset.UtcNow);
         var repo = Repo(svc);
         repo.Setup(r => r.GetBySlugAsync("ghost", It.IsAny<CancellationToken>())).ReturnsAsync((Service?)null);
 
@@ -70,9 +70,9 @@ public class AssignServiceParentHandlerTests
     [Fact]
     public async Task Handle_NoOp_WhenParentNonRoot()
     {
-        var svc = Service.Create("cardiology");
-        var mid = Service.Create("internal-medicine");
-        mid.AssignParent(Service.Create("doctor"));
+        var svc = Service.Create("cardiology", DateTimeOffset.UtcNow);
+        var mid = Service.Create("internal-medicine", DateTimeOffset.UtcNow);
+        mid.AssignParent(Service.Create("doctor", DateTimeOffset.UtcNow));
         var repo = Repo(svc, mid);
 
         await new AssignServiceParentHandler(repo.Object)
@@ -84,7 +84,7 @@ public class AssignServiceParentHandlerTests
     [Fact]
     public async Task Handle_NoOp_WhenSelfParent()
     {
-        var svc = Service.Create("cardiology");
+        var svc = Service.Create("cardiology", DateTimeOffset.UtcNow);
         var repo = Repo(svc);
 
         await new AssignServiceParentHandler(repo.Object)

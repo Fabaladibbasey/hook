@@ -15,7 +15,8 @@ public class OpenChatResponseTests
             "Client",
             Guid.NewGuid(),
             "Active",
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            0);
 
         var json = JsonSerializer.Serialize(response);
         using var doc = JsonDocument.Parse(json);
@@ -27,5 +28,7 @@ public class OpenChatResponseTests
         root.GetProperty("sessionId").GetGuid().ShouldBe(response.SessionId);
         root.GetProperty("status").GetString().ShouldBe(response.Status);
         root.GetProperty("expiresAt").GetDateTimeOffset().ShouldBe(response.ExpiresAt);
+        root.GetProperty("outboundSequenceCursor").ValueKind.ShouldBe(JsonValueKind.Number);
+        root.GetProperty("outboundSequenceCursor").GetInt64().ShouldBe(response.OutboundSequenceCursor);
     }
 }

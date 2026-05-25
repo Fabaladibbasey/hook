@@ -13,6 +13,10 @@ public class MatchFeedbackConfiguration : IEntityTypeConfiguration<MatchFeedback
     {
         builder.ToTable("match_feedback");
         builder.HasKey(f => f.Id);
+        // Explicit concurrency token — bumped by every aggregate mutation so the
+        // second of two racing scopes hits DbUpdateConcurrencyException, which
+        // TrySaveAsync catches and surfaces as a false return.
+        builder.Property(f => f.Version).IsConcurrencyToken();
         builder.PropertyAsStringEnum(f => f.Step, 20);
         builder.PropertyAsStringEnum(f => f.Answer, 20);
         builder.Property(f => f.Step1RecheckCount).HasDefaultValue(0);

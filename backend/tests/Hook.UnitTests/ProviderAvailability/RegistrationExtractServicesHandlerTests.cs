@@ -32,6 +32,7 @@ public class RegistrationExtractServicesHandlerTests
             _aiMock.Object,
             _busMock.Object,
             Options.Create(new ServiceTaxonomyOptions()),
+            TimeProvider.System,
             NullLogger<SlugResolver>.Instance,
             null!)
         { CallBase = false };

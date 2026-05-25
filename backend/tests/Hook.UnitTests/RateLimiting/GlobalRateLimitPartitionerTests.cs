@@ -32,10 +32,10 @@ public class GlobalRateLimitPartitionerTests
     }
 
     [Fact]
-    public void ChatHubPath_Bypassed()
+    public void ChatHubNegotiate_GoesThroughGlobalLimiter()
     {
-        var part = Partition(CtxFor("/hubs/chat/negotiate", host: "hook.drop.africa"));
-        part.PartitionKey.ShouldBe(GlobalRateLimitPartitioner.BypassPartitionKey);
+        var part = Partition(CtxFor("/hubs/chat/negotiate", host: "hook.drop.africa", token: "tok-1"));
+        part.PartitionKey.ShouldBe("t:tok-1");
     }
 
     [Fact]

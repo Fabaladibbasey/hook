@@ -24,69 +24,30 @@ public sealed class FeedbackRepository(HookDbContext db) : IFeedbackRepository
             .OrderByDescending(f => f.PromptedAt)
             .FirstOrDefaultAsync(ct);
 
-    public async Task<bool> TryClaimPendingAsync(
-        Guid feedbackId, FeedbackAnswer answer, DateTimeOffset now, CancellationToken ct = default)
+    public async Task<bool> TrySaveAsync(MatchFeedback aggregate, CancellationToken ct = default)
     {
-        var rows = await db.MatchFeedback
-            .Where(f => f.Id == feedbackId && f.Answer == FeedbackAnswer.Pending)
-            .ExecuteUpdateAsync(u => u
-                .SetProperty(f => f.Answer, answer)
-                .SetProperty(f => f.RepliedAt, now), ct);
-        return rows == 1;
-    }
-
-    // Atomic claim variant for AwaitingEta — keeps the captured ETA on the same row
-    // and the same UPDATE so a concurrent fire can't see the answer flip without the
-    // ETA, or vice-versa.
-    public async Task<bool> TryClaimPendingWithEtaAsync(
-        Guid feedbackId,
-        FeedbackAnswer answer,
-        DateTimeOffset etaUtc,
-        DateTimeOffset now,
-        CancellationToken ct = default)
-    {
-        var rows = await db.MatchFeedback
-            .Where(f => f.Id == feedbackId && f.Answer == FeedbackAnswer.Pending)
-            .ExecuteUpdateAsync(u => u
-                .SetProperty(f => f.Answer, answer)
-                .SetProperty(f => f.RepliedAt, now)
-                .SetProperty(f => f.EtaUtc, etaUtc), ct);
-        return rows == 1;
-    }
-
-    public async Task<bool> TryRescheduleAsync(
-        Guid feedbackId, DateTimeOffset now, CancellationToken ct = default)
-    {
-        var rows = await db.MatchFeedback
-            .Where(f => f.Id == feedbackId && f.Answer == FeedbackAnswer.Pending)
-            .ExecuteUpdateAsync(u => u
-                .SetProperty(f => f.Step1RecheckCount, f => f.Step1RecheckCount + 1)
-                .SetProperty(f => f.PromptedAt, now), ct);
-        return rows == 1;
-    }
-
-    public async Task<bool> TryClaimNoReasonAsync(
-        Guid feedbackId, string? noReason, DateTimeOffset now, CancellationToken ct = default)
-    {
-        var rows = await db.MatchFeedback
-            .Where(f => f.Id == feedbackId && f.Answer == FeedbackAnswer.Pending)
-            .ExecuteUpdateAsync(u => u
-                .SetProperty(f => f.Answer, FeedbackAnswer.NoReasonCaptured)
-                .SetProperty(f => f.RepliedAt, now)
-                .SetProperty(f => f.NoReason, noReason), ct);
-        return rows == 1;
-    }
-
-    public async Task<bool> TryRepromptPendingAsync(
-        Guid feedbackId, DateTimeOffset now, TimeSpan minGap, CancellationToken ct = default)
-    {
-        var cutoff = now - minGap;
-        var rows = await db.MatchFeedback
-            .Where(f => f.Id == feedbackId
-                     && f.Answer == FeedbackAnswer.Pending
-                     && f.PromptedAt <= cutoff)
-            .ExecuteUpdateAsync(u => u.SetProperty(f => f.PromptedAt, now), ct);
-        return rows == 1;
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            // Scope the swallow to the passed aggregate. Inside a Wolverine handler
+            // tx the scoped HookDbContext also tracks ProviderStats / ServiceRequest /
+            // ChatSession / etc; a concurrency loss on any of those unrelated rows
+            // is real data loss, not a feedback race — rethrow so the outer tx
+            // rolls back and the message retries.
+            foreach (var entry in ex.Entries)
+            {
+                if (!ReferenceEquals(entry.Entity, aggregate)) throw;
+                // Detach the losing UPDATE: ReloadAsync re-fetches the winner row
+                // and resets State = Unchanged so AutoApplyTransactions does not
+                // retry this same WHERE Version = @prev predicate at outer commit.
+                await entry.ReloadAsync(ct);
+            }
+            return false;
+        }
     }
 
     public Task<bool> TryAddPendingAsync(MatchFeedback feedback, CancellationToken ct = default) =>

@@ -6,7 +6,7 @@ namespace Hook.Features.ProviderAvailability.AvailabilityAggregate;
 
 public class ProviderAvailability : IAggregateRoot
 {
-    public required string Phone { get; init; }
+    public string Phone { get; private init; } = string.Empty;
     public List<string> Services { get; private set; } = [];
     public Point Location { get; private set; } = default!;
     public string FormattedAddress { get; private set; } = string.Empty;

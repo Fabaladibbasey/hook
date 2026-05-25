@@ -10,10 +10,7 @@ public sealed class AmbiguousIntentDraftRepository(HookDbContext db) : IAmbiguou
         db.AmbiguousIntentDrafts.FirstOrDefaultAsync(d => d.Phone == phone, ct);
 
     public Task UpsertAsync(AmbiguousIntentDraft draft, CancellationToken ct = default) =>
-        db.AmbiguousIntentDrafts.UpsertAsync([draft.Phone], draft, (e, d) =>
-        {
-            e.OriginalText = d.OriginalText;
-        }, ct);
+        db.AmbiguousIntentDrafts.UpsertAsync([draft.Phone], draft, (e, d) => e.Refresh(d.OriginalText), ct);
 
     public Task DeleteAsync(string phone, CancellationToken ct = default) =>
         db.AmbiguousIntentDrafts.DeleteByKeyAsync([phone], ct);

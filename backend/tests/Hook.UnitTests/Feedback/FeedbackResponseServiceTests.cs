@@ -6,7 +6,9 @@ using Hook.Features.Feedback.ProviderStatsAggregate;
 using Hook.Features.Feedback.Step1Intent;
 using Hook.Features.Feedback.Step1Prompt;
 using Hook.Features.Feedback.Step2Intent;
+using Hook.Features.Geocoding.Models;
 using Hook.Features.Matching.MatchAggregate;
+using Hook.Features.ServiceRequest.RequestAggregate;
 using Hook.Features.Whatsapp.Models;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Core;
@@ -15,6 +17,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Moq;
 using MatchEntity = Hook.Features.Matching.MatchAggregate.Match;
+using ServiceRequestEntity = Hook.Features.ServiceRequest.RequestAggregate.ServiceRequest;
 
 namespace Hook.UnitTests.Feedback;
 
@@ -39,6 +42,42 @@ public class FeedbackResponseServiceTests
     public void ScrubForOutbox_replaces_separator_formatted_phone_numbers(string input, string expected) =>
         Assert.Equal(expected, FeedbackResponseService.ScrubForOutbox(input, 1000));
 
+    [Fact]
+    public void ScrubForOutbox_OrderNumber_EmbeddedInWord_NotScrubbed()
+    {
+        // Word-boundary anchor must suppress matches inside alphanumeric IDs —
+        // before the \b tightening this would have been mangled to "your [phone] ships".
+        Assert.Equal(
+            "your ORD12345678 ships",
+            FeedbackResponseService.ScrubForOutbox("your ORD12345678 ships", 1000));
+    }
+
+    [Fact]
+    public void ScrubForOutbox_RealPhone_StillScrubbed()
+    {
+        Assert.Equal(
+            "ping +2207001234567 ack",
+            FeedbackResponseService.ScrubForOutbox("ping +2207001234567 ack", 1000)
+                .Replace("[phone]", "+2207001234567"));
+        // Round-trip via Replace asserts the original phone was actually scrubbed
+        // to [phone] and back, distinguishing the no-op case.
+        Assert.Equal(
+            "ping [phone] ack",
+            FeedbackResponseService.ScrubForOutbox("ping +2207001234567 ack", 1000));
+    }
+
+    [Fact]
+    public void ScrubForOutbox_TruncatesBeforeScrub()
+    {
+        // Truncation runs first so backtracking is bounded on adversarial input.
+        // A 20-char cap on a 200-char input ending in a phone must drop the phone
+        // entirely (rather than slicing inside a [phone] token mid-replacement).
+        var input = new string('a', 100) + " +2207001234567";
+        var result = FeedbackResponseService.ScrubForOutbox(input, 20);
+        Assert.Equal(20, result.Length);
+        Assert.DoesNotContain("[phone]", result);
+    }
+
     [Theory]
     [InlineData("1", 3, 1)]
     [InlineData("  2  ", 3, 2)]
@@ -62,6 +101,7 @@ public class FeedbackResponseServiceTests
     private readonly List<Guid> _deleted = [];
     private readonly List<(Guid Id, FeedbackAnswer Answer)> _claimed = [];
     private readonly List<(Guid Id, FeedbackAnswer Answer, DateTimeOffset EtaUtc)> _claimedWithEta = [];
+    private readonly List<Guid> _rescheduled = [];
     private readonly List<(PhoneNumber To, string Body)> _sent = [];
     private readonly List<object> _published = [];
     private readonly List<(object Message, TimeSpan Delay)> _scheduled = [];
@@ -69,10 +109,15 @@ public class FeedbackResponseServiceTests
     private readonly List<ExtractStep1IntentCommand> _extractStep1Requests = [];
     private readonly List<ExtractStep2IntentCommand> _extractStep2Requests = [];
 
+    private readonly Dictionary<Guid, MatchFeedback> _store = [];
+    private readonly Dictionary<Guid, int> _storeBaselineRecheck = [];
+
     private readonly Mock<IFeedbackRepository> _feedbackMock = new();
     private readonly Mock<IMatchRepository> _matchesMock = new();
+    private readonly Mock<IServiceRequestRepository> _requestsMock = new();
     private readonly Mock<IEventBus> _busMock = new();
     private readonly Mock<Wolverine.IMessageBus> _messageBusMock = new();
+    private readonly Dictionary<Guid, ServiceRequestEntity> _requests = [];
     // Hard-coded test dates rot; derive from wall-clock so the relative offsets stay meaningful.
     private readonly FakeTimeProvider _clock = new(DateTimeOffset.UtcNow);
     private readonly FeedbackOptions _options = new();
@@ -92,19 +137,22 @@ public class FeedbackResponseServiceTests
         _feedbackMock.Setup(x => x.DeletePendingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .Callback<Guid, CancellationToken>((id, _) => _deleted.Add(id))
             .ReturnsAsync(true);
-        _feedbackMock.Setup(x => x.TryClaimPendingAsync(
-                It.IsAny<Guid>(), It.IsAny<FeedbackAnswer>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid id, FeedbackAnswer answer, DateTimeOffset _, CancellationToken _) =>
+        _feedbackMock.Setup(x => x.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) => _store.TryGetValue(id, out var v) ? v : null);
+        _feedbackMock.Setup(x => x.TrySaveAsync(It.IsAny<MatchFeedback>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((MatchFeedback agg, CancellationToken _) =>
             {
-                if (_tryClaimResult) _claimed.Add((id, answer));
-                return _tryClaimResult;
-            });
-        _feedbackMock.Setup(x => x.TryClaimPendingWithEtaAsync(
-                It.IsAny<Guid>(), It.IsAny<FeedbackAnswer>(), It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid id, FeedbackAnswer answer, DateTimeOffset eta, DateTimeOffset _, CancellationToken _) =>
-            {
-                if (_tryClaimResult) _claimedWithEta.Add((id, answer, eta));
-                return _tryClaimResult;
+                if (!_tryClaimResult) return false;
+                if (agg.Answer is FeedbackAnswer.EtaCaptured && agg.EtaUtc is { } eta)
+                    _claimedWithEta.Add((agg.Id, agg.Answer, eta));
+                else if (agg.Answer is not FeedbackAnswer.Pending)
+                    _claimed.Add((agg.Id, agg.Answer));
+                else if (_storeBaselineRecheck.TryGetValue(agg.Id, out var baseline) && agg.Step1RecheckCount > baseline)
+                {
+                    _rescheduled.Add(agg.Id);
+                    _storeBaselineRecheck[agg.Id] = agg.Step1RecheckCount;
+                }
+                return true;
             });
         _feedbackMock.Setup(x => x.UpsertStatsAsync(It.IsAny<ProviderStats>(), It.IsAny<CancellationToken>()))
             .Callback<ProviderStats, CancellationToken>((s, _) => _lastUpsertedStats = s)
@@ -123,6 +171,10 @@ public class FeedbackResponseServiceTests
                 _requestMatches.TryGetValue(requestId, out var l)
                     ? l.Where(m => m.PickedAt is not null).ToList()
                     : Array.Empty<MatchEntity>());
+
+        _requestsMock.Setup(x => x.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) =>
+                _requests.TryGetValue(id, out var r) ? r : null);
 
         _busMock.Setup(x => x.PublishAsync(It.IsAny<It.IsAnyType>(), It.IsAny<CancellationToken>()))
             .Callback(new InvocationAction(inv => _published.Add(inv.Arguments[0])))
@@ -153,16 +205,29 @@ public class FeedbackResponseServiceTests
     }
 
     private FeedbackResponseService Build() =>
-        new(_feedbackMock.Object, _matchesMock.Object, _busMock.Object, _messageBusMock.Object,
+        new(_feedbackMock.Object, _matchesMock.Object, _requestsMock.Object,
+            _busMock.Object, _messageBusMock.Object,
             Microsoft.Extensions.Options.Options.Create(_options),
             _clock,
             NullLogger<FeedbackResponseService>.Instance);
 
     private MatchEntity SeedAnchor(string providerPhone)
     {
-        var m = MatchEntity.Create(Guid.NewGuid(), providerPhone, "plumbing", 0, 0, _clock.GetUtcNow());
+        // Create the ServiceRequest first so its Id can pin the match's RequestId
+        // — the recheck-command builder loads request via match.RequestId.
+        var req = ServiceRequestEntity.Create(
+            clientPhone: "+2203339999",
+            serviceSlug: "plumbing",
+            location: new Location(13.45, -16.6),
+            formattedAddress: "Banjul",
+            description: "req-test",
+            initialRadiusKm: 5.0,
+            now: _clock.GetUtcNow(),
+            sharePhoneNumber: false);
+        var m = MatchEntity.Create(req.Id, providerPhone, "plumbing", 0, 0, _clock.GetUtcNow());
         _matches[m.Id] = m;
         _requestMatches[m.RequestId] = [m];
+        _requests[req.Id] = req;
         return m;
     }
 
@@ -185,8 +250,11 @@ public class FeedbackResponseServiceTests
     private MatchFeedback SeedPendingForStep(FeedbackStep step, DateTimeOffset? promptedAt = null)
     {
         var anchor = SeedAnchor("+2203331234");
-        return MatchFeedback.CreatePending(
+        var p = MatchFeedback.CreatePending(
             anchor.Id, anchor.RequestId, step, promptedAt ?? _clock.GetUtcNow());
+        _store[p.Id] = p;
+        _storeBaselineRecheck[p.Id] = p.Step1RecheckCount;
+        return p;
     }
 
     private static InboundMessage NewInbound(string text) =>
@@ -204,6 +272,9 @@ public class FeedbackResponseServiceTests
     public async Task HandleAsync_UnknownStep_ThrowsInvalidOperation()
     {
         var pending = MatchFeedback.CreatePending(Guid.NewGuid(), Guid.NewGuid(), (FeedbackStep)999, _clock.GetUtcNow());
+        // HandleAsync re-loads via GetByIdAsync now — seed the store so the
+        // switch runs and the unknown-step throw fires.
+        _store[pending.Id] = pending;
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             Build().HandleAsync(NewInbound("yes"), pending, CancellationToken.None));
@@ -386,17 +457,12 @@ public class FeedbackResponseServiceTests
     [Fact]
     public async Task DidYouFind_RescheduleReply_BumpsRecheckSchedulesAtFirstRung()
     {
-        var rescheduledIds = new List<Guid>();
-        _feedbackMock.Setup(x => x.TryRescheduleAsync(
-                It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .Callback<Guid, DateTimeOffset, CancellationToken>((id, _, _) => rescheduledIds.Add(id))
-            .ReturnsAsync(true);
-
         var pending = SeedPendingForStep(FeedbackStep.DidYouFind);
 
         await Build().HandleAsync(NewInbound("still looking"), pending, CancellationToken.None);
 
-        Assert.Equal(pending.Id, rescheduledIds.Single());
+        Assert.Equal(pending.Id, _rescheduled.Single());
+        Assert.Equal(1, pending.Step1RecheckCount);
         Assert.Single(_scheduled);
         var (msg, delay) = _scheduled[0];
         Assert.IsType<Step1RecheckCommand>(msg);
@@ -411,16 +477,12 @@ public class FeedbackResponseServiceTests
     {
         // Pending row already at the cap; the next ambiguous reschedule must
         // claim Skipped with no extra prompts.
-        var pending = MatchFeedback.CreatePending(
-            Guid.NewGuid(), Guid.NewGuid(), FeedbackStep.DidYouFind, _clock.GetUtcNow());
-        // Bump RecheckCount to cap via the private setter is not exposed — exercise
-        // through the public Resolve path is also unsuitable. Cheapest: rely on the
-        // service contract (Step1MaxRechecks=4 default; bump four times via Reschedule).
-        // Instead, just override the option to 0 so the very next no-eta reschedule
-        // claims Skipped.
+        var pending = SeedPendingForStep(FeedbackStep.DidYouFind);
+        // Step1MaxRechecks=0 → the very next no-eta reschedule claims Skipped.
         var maxedOpts = new FeedbackOptions { Step1MaxRechecks = 0 };
         var svc = new FeedbackResponseService(
-            _feedbackMock.Object, _matchesMock.Object, _busMock.Object, _messageBusMock.Object,
+            _feedbackMock.Object, _matchesMock.Object, _requestsMock.Object,
+            _busMock.Object, _messageBusMock.Object,
             Microsoft.Extensions.Options.Options.Create(maxedOpts),
             _clock,
             NullLogger<FeedbackResponseService>.Instance);
@@ -437,9 +499,6 @@ public class FeedbackResponseServiceTests
     public async Task ApplyStep1IntentAsync_RescheduleWithEta_SchedulesAtEtaPlusBuffer()
     {
         var pending = SeedPendingForStep(FeedbackStep.DidYouFind);
-        _feedbackMock.Setup(x => x.TryRescheduleAsync(
-                It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
 
         var eta = _clock.GetUtcNow().AddHours(3);
         await Build().ApplyStep1IntentAsync(
@@ -460,9 +519,6 @@ public class FeedbackResponseServiceTests
         // 10 days out > MaxEtaHorizon (7d default) — we cap rather than StopAsking
         // so the user who says "ask in a month" still gets one bounded recheck.
         var pending = SeedPendingForStep(FeedbackStep.DidYouFind);
-        _feedbackMock.Setup(x => x.TryRescheduleAsync(
-                It.IsAny<Guid>(), It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
         var eta = _clock.GetUtcNow().AddDays(10);
 
         await Build().ApplyStep1IntentAsync(
@@ -496,19 +552,11 @@ public class FeedbackResponseServiceTests
     [Fact]
     public async Task HandleCaptureNoReasonAsync_FreeText_PersistsAndAcks()
     {
-        var captured = new List<(Guid Id, string? Reason)>();
-        _feedbackMock.Setup(x => x.TryClaimNoReasonAsync(
-                It.IsAny<Guid>(), It.IsAny<string?>(),
-                It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .Callback<Guid, string?, DateTimeOffset, CancellationToken>((id, reason, _, _) =>
-                captured.Add((id, reason)))
-            .ReturnsAsync(true);
-
         var pending = SeedPendingForStep(FeedbackStep.CaptureNoReason);
         await Build().HandleAsync(NewInbound("prices were too high"), pending, CancellationToken.None);
 
-        Assert.Single(captured);
-        Assert.Equal("prices were too high", captured[0].Reason);
+        Assert.Equal(FeedbackAnswer.NoReasonCaptured, pending.Answer);
+        Assert.Equal("prices were too high", pending.NoReason);
         Assert.Single(_sent);
         Assert.Equal(FeedbackCopy.CaptureNoReasonAck, _sent[0].Body);
     }
@@ -516,19 +564,11 @@ public class FeedbackResponseServiceTests
     [Fact]
     public async Task HandleCaptureNoReasonAsync_Skip_PersistsNullReason()
     {
-        var captured = new List<(Guid Id, string? Reason)>();
-        _feedbackMock.Setup(x => x.TryClaimNoReasonAsync(
-                It.IsAny<Guid>(), It.IsAny<string?>(),
-                It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .Callback<Guid, string?, DateTimeOffset, CancellationToken>((id, reason, _, _) =>
-                captured.Add((id, reason)))
-            .ReturnsAsync(true);
-
         var pending = SeedPendingForStep(FeedbackStep.CaptureNoReason);
         await Build().HandleAsync(NewInbound("SKIP"), pending, CancellationToken.None);
 
-        Assert.Single(captured);
-        Assert.Null(captured[0].Reason);
+        Assert.Equal(FeedbackAnswer.NoReasonCaptured, pending.Answer);
+        Assert.Null(pending.NoReason);
         Assert.Single(_sent);
     }
 
@@ -1045,5 +1085,20 @@ public class FeedbackResponseServiceTests
         Assert.Equal(FeedbackAnswer.Skipped, _claimed[0].Answer);
         Assert.Single(_sent);
         Assert.Equal(FeedbackCopy.SkippedAck, _sent[0].Body);
+    }
+
+    [Fact]
+    public void ScrubForOutbox_PathologicalInput_CompletesUnder100ms()
+    {
+        // Adversarial payload: many repeating phone-like fragments. Truncate-before-regex
+        // is what bounds backtracking — strip it and this test catches the regression.
+        var hostile = string.Concat(Enumerable.Repeat("+220 1234567 ", 5000));
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        var result = FeedbackResponseService.ScrubForOutbox(hostile, maxChars: 1000);
+
+        sw.Stop();
+        Assert.True(sw.ElapsedMilliseconds < 100, $"took {sw.ElapsedMilliseconds}ms");
+        Assert.True(result.Length <= 1000);
     }
 }

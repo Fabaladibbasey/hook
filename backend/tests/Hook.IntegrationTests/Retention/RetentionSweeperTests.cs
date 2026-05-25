@@ -107,28 +107,13 @@ public sealed class RetentionSweeperTests : PipelineTestBase
 
         var oldGeoKey = $"old-{Guid.NewGuid()}";
         var freshGeoKey = $"new-{Guid.NewGuid()}";
-        var oldGeo = new GeocodeCacheEntry
-        {
-            Key = oldGeoKey,
-            Latitude = 13.45,
-            Longitude = -16.6,
-            FormattedAddress = "Banjul",
-            Provider = "test",
-            FetchedAt = old
-        };
-        var newGeo = new GeocodeCacheEntry
-        {
-            Key = freshGeoKey,
-            Latitude = 13.45,
-            Longitude = -16.6,
-            FormattedAddress = "Banjul",
-            Provider = "test",
-            FetchedAt = fresh
-        };
+        var banjul = new GeocodeResult(new Location(13.45, -16.6), "Banjul", "test", FromCache: false);
+        var oldGeo = GeocodeCacheEntry.Capture(oldGeoKey, banjul, old);
+        var newGeo = GeocodeCacheEntry.Capture(freshGeoKey, banjul, fresh);
         db.GeocodeCache.AddRange(oldGeo, newGeo);
 
-        var oldContact = new WhatsappContact { Phone = UniquePhone(), LastInboundAt = old };
-        var freshContact = new WhatsappContact { Phone = UniquePhone(), LastInboundAt = fresh };
+        var oldContact = WhatsappContact.Recorded(UniquePhone(), old);
+        var freshContact = WhatsappContact.Recorded(UniquePhone(), fresh);
         db.WhatsappContacts.AddRange(oldContact, freshContact);
 
         await db.SaveChangesAsync();
@@ -200,28 +185,14 @@ public sealed class RetentionSweeperTests : PipelineTestBase
         var (_, oldMatch2) = await SeedRequestAndMatchAsync(db, fresh);
         var (_, freshMatch) = await SeedRequestAndMatchAsync(db, fresh);
 
-        var oldAnswered = new MatchFeedback
-        {
-            Id = Guid.CreateVersion7(),
-            MatchId = oldMatch.Id,
-            RequestId = oldMatch.RequestId,
-            Step = FeedbackStep.DidYouFind,
-            PromptedAt = ancient,
-            Answer = FeedbackAnswer.Yes,
-            RepliedAt = ancient + TimeSpan.FromHours(2),
-        };
+        var oldAnswered = MatchFeedback.CreatePending(
+            oldMatch.Id, oldMatch.RequestId, FeedbackStep.DidYouFind, ancient);
+        oldAnswered.ClaimYes(ancient + TimeSpan.FromHours(2));
         var oldPending = MatchFeedback.CreatePending(
             oldMatch2.Id, oldMatch2.RequestId, FeedbackStep.DidYouFind, old);
-        var recent = new MatchFeedback
-        {
-            Id = Guid.CreateVersion7(),
-            MatchId = freshMatch.Id,
-            RequestId = freshMatch.RequestId,
-            Step = FeedbackStep.JobCompleted,
-            PromptedAt = fresh,
-            Answer = FeedbackAnswer.Yes,
-            RepliedAt = fresh,
-        };
+        var recent = MatchFeedback.CreatePending(
+            freshMatch.Id, freshMatch.RequestId, FeedbackStep.JobCompleted, fresh);
+        recent.ClaimYes(fresh);
         var phone = UniquePhone();
         var stats = ProviderStats.Initial(phone, ancient);
 
@@ -253,16 +224,9 @@ public sealed class RetentionSweeperTests : PipelineTestBase
             "Banjul", "cascade-test", 5.0, old, false);
         oldRequest.Close();
         var match = Match.Create(oldRequest.Id, UniquePhone(), "plumbing", 0, 0, old);
-        var feedback = new MatchFeedback
-        {
-            Id = Guid.CreateVersion7(),
-            MatchId = match.Id,
-            RequestId = match.RequestId,
-            Step = FeedbackStep.DidYouFind,
-            PromptedAt = fresh,
-            Answer = FeedbackAnswer.Yes,
-            RepliedAt = fresh,
-        };
+        var feedback = MatchFeedback.CreatePending(
+            match.Id, match.RequestId, FeedbackStep.DidYouFind, fresh);
+        feedback.ClaimYes(fresh);
         db.ServiceRequests.Add(oldRequest);
         db.Matches.Add(match);
         db.MatchFeedback.Add(feedback);
@@ -389,7 +353,7 @@ public sealed class RetentionSweeperTests : PipelineTestBase
         var (old, _) = Boundaries(opts);
 
         var phone = UniquePhone();
-        var oldContact = new WhatsappContact { Phone = phone, LastInboundAt = old };
+        var oldContact = WhatsappContact.Recorded(phone, old);
         db.WhatsappContacts.Add(oldContact);
         await db.SaveChangesAsync();
 

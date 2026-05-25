@@ -8,7 +8,7 @@ public class ServiceTests
     [Fact]
     public void RememberRawExample_TruncatesEntries_BeyondMaxLength()
     {
-        var svc = Service.Create("plumbing");
+        var svc = Service.Create("plumbing", DateTimeOffset.UtcNow);
         var raw = new string('x', Service.MaxRawExampleLength + 50);
 
         svc.RememberRawExample(raw);
@@ -20,7 +20,7 @@ public class ServiceTests
     [Fact]
     public void RememberRawExample_KeepsUpToTenEntries_DroppingOldest()
     {
-        var svc = Service.Create("plumbing");
+        var svc = Service.Create("plumbing", DateTimeOffset.UtcNow);
         for (var i = 0; i < 12; i++) svc.RememberRawExample($"entry-{i}");
 
         svc.RawExamples.Count.ShouldBe(10);
@@ -31,7 +31,7 @@ public class ServiceTests
     [Fact]
     public void RememberRawExample_DeduplicatesCaseInsensitive()
     {
-        var svc = Service.Create("plumbing");
+        var svc = Service.Create("plumbing", DateTimeOffset.UtcNow);
         svc.RememberRawExample("Leaky pipe");
         svc.RememberRawExample("leaky pipe");
 
@@ -41,9 +41,9 @@ public class ServiceTests
     [Fact]
     public void AssignParent_RejectsReParent_OnAlreadyParented()
     {
-        var svc = Service.Create("cardiology");
-        var doctor = Service.Create("doctor");
-        var lawyer = Service.Create("lawyer");
+        var svc = Service.Create("cardiology", DateTimeOffset.UtcNow);
+        var doctor = Service.Create("doctor", DateTimeOffset.UtcNow);
+        var lawyer = Service.Create("lawyer", DateTimeOffset.UtcNow);
         svc.AssignParent(doctor);
 
         Should.Throw<InvalidOperationException>(() => svc.AssignParent(lawyer));
@@ -53,7 +53,7 @@ public class ServiceTests
     [Fact]
     public void AssignParent_RejectsSelfParent()
     {
-        var svc = Service.Create("doctor");
+        var svc = Service.Create("doctor", DateTimeOffset.UtcNow);
         Should.Throw<InvalidOperationException>(() => svc.AssignParent(svc));
         svc.ParentSlug.ShouldBeNull();
     }
@@ -61,18 +61,18 @@ public class ServiceTests
     [Fact]
     public void AssignParent_RejectsNullParent()
     {
-        var svc = Service.Create("doctor");
+        var svc = Service.Create("doctor", DateTimeOffset.UtcNow);
         Should.Throw<ArgumentNullException>(() => svc.AssignParent(null!));
     }
 
     [Fact]
     public void AssignParent_NonRootParent_Throws()
     {
-        var grandparent = Service.Create("doctor");
-        var mid = Service.Create("internal-medicine");
+        var grandparent = Service.Create("doctor", DateTimeOffset.UtcNow);
+        var mid = Service.Create("internal-medicine", DateTimeOffset.UtcNow);
         mid.AssignParent(grandparent);
 
-        var svc = Service.Create("cardiology");
+        var svc = Service.Create("cardiology", DateTimeOffset.UtcNow);
         Should.Throw<InvalidOperationException>(() => svc.AssignParent(mid));
         svc.ParentSlug.ShouldBeNull();
     }

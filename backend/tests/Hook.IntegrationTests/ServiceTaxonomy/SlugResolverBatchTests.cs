@@ -72,7 +72,7 @@ public sealed class SlugResolverBatchTests : PipelineTestBase
         await using (var seed = _fx.Factory.Services.CreateAsyncScope())
         {
             var db = seed.ServiceProvider.GetRequiredService<HookDbContext>();
-            db.Services.Add(Service.Create(existing, "pre-seed"));
+            db.Services.Add(Service.Create(existing, DateTimeOffset.UtcNow, "pre-seed"));
             await db.SaveChangesAsync();
         }
 
