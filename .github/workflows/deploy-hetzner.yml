@@ -85,9 +85,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish container
+      - name: Build frontend
+        working-directory: frontend
         env:
           VITE_SUPPORT_WHATSAPP: ${{ vars.VITE_SUPPORT_WHATSAPP }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Publish container
         run: |
           dotnet publish src/Hook.csproj \
             -c Release \
@@ -98,10 +104,9 @@ jobs:
 
       # Framework-dependent apphost for the host RID (linux-x64 on CI =
       # linux-x64 on Hetzner). ~5-10MB binary, executed via dotnet/runtime:10.0
-      # on the deploy host. Skip frontend — bundle doesn't need wwwroot.
+      # on the deploy host.
       - name: Generate EF migration bundle
         env:
-          SkipFrontendBuild: "true"
           # Placeholder so Program.cs's UseNpgsql/NpgsqlDataSource setup
           # doesn't choke on a null connection string during DbContext
           # construction. Real conn string is injected at bundle run time

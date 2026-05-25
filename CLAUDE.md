@@ -41,7 +41,7 @@ npm run typecheck    # tsc --noEmit
 npm run lint         # eslint src --ext ts,tsx
 ```
 
-Note: `dotnet publish` invokes `npm ci && npm run build` automatically via the `BuildFrontend` MSBuild target in `backend/src/Hook.csproj`. Pass `-p:SkipFrontendBuild=true` to skip.
+Note: frontend build is decoupled from MSBuild. CI workflows (`build-and-test.yml`, `deploy-hetzner.yml`) explicitly run `npm ci && npm run build` in `frontend/` before `dotnet publish /t:PublishContainer` so the container layer captures a populated `wwwroot/`. For local `dotnet run` (Development env), `FrontendBootstrapper.EnsureBuilt` runs the same npm steps once at startup if `wwwroot/index.html` is missing.
 
 ### Build file-lock workaround
 
