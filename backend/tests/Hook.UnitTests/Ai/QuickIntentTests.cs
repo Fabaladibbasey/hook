@@ -53,6 +53,9 @@ public class QuickIntentTests
     [InlineData("That's right", IntentKind.Confirmation)]
     [InlineData("thats right", IntentKind.Confirmation)]                 // missing apostrophe
     [InlineData("that’s right", IntentKind.Confirmation)]           // curly apostrophe (mobile autocorrect)
+    [InlineData("that's correct", IntentKind.Confirmation)]
+    [InlineData("thats correct", IntentKind.Confirmation)]
+    [InlineData("that’s correct", IntentKind.Confirmation)]         // curly apostrophe
     [InlineData("you're right", IntentKind.Confirmation)]
     [InlineData("you’re right", IntentKind.Confirmation)]           // curly apostrophe
     [InlineData("you got it", IntentKind.Confirmation)]
@@ -104,6 +107,34 @@ public class QuickIntentTests
     [InlineData("new", IntentKind.NewRequest)]
     [InlineData("NEW", IntentKind.NewRequest)]
     [InlineData(" New ", IntentKind.NewRequest)]
+    // Trailing punctuation must not break the literal / phrase tables. Step1 / Step2
+    // detectors already strip these in Normalize(); Detect now matches.
+    [InlineData("yes.", IntentKind.Confirmation)]
+    [InlineData("yes!", IntentKind.Confirmation)]
+    [InlineData("yes?", IntentKind.Confirmation)]
+    [InlineData("no.", IntentKind.Rejection)]
+    [InlineData("no!", IntentKind.Rejection)]
+    [InlineData("ok!", IntentKind.Confirmation)]
+    [InlineData("that's right.", IntentKind.Confirmation)]
+    [InlineData("that's right!", IntentKind.Confirmation)]
+    [InlineData("thats right,", IntentKind.Confirmation)]
+    // Verdict-drift coverage for the trailing-punct trim — Cancel / NewRequest /
+    // Edit / Greeting variants must classify the same with and without trailing
+    // punctuation so downstream router branches stay stable.
+    [InlineData("cancel.", IntentKind.Cancel)]
+    [InlineData("cancel!", IntentKind.Cancel)]
+    [InlineData("bye.", IntentKind.Cancel)]
+    [InlineData("bye?", IntentKind.Cancel)]
+    [InlineData("done!", IntentKind.Cancel)]
+    [InlineData("hi!", IntentKind.Greeting)]
+    [InlineData("hi.", IntentKind.Greeting)]
+    [InlineData("hey?", IntentKind.Greeting)]
+    [InlineData("edit.", IntentKind.Edit)]
+    [InlineData("edit!", IntentKind.Edit)]
+    [InlineData("new.", IntentKind.NewRequest)]
+    [InlineData("new!", IntentKind.NewRequest)]
+    [InlineData("yes,", IntentKind.Confirmation)]
+    [InlineData("no,", IntentKind.Rejection)]
     public void Detect_KnownInputs(string input, IntentKind expected)
         => Assert.Equal(expected, QuickIntent.Detect(input));
 

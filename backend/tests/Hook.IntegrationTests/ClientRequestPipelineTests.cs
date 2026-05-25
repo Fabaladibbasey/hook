@@ -276,6 +276,41 @@ public class ClientRequestPipelineTests : PipelineTestBase
         advanced.ShouldNotBeNull();
     }
 
+    // Regression for the "that's right." literal-table miss — QuickIntent.Detect
+    // now strips trailing punctuation so the deterministic path advances without
+    // hitting the LLM fallback.
+    [Fact]
+    public async Task TrailingPunctConfirmation_AdvancesClientFunnel_NoLlmCall()
+    {
+        using var client = _fx.Factory.CreateClient();
+        var phone = "+220700000097";
+
+        await _fx.InjectTextAndAwaitAsync(phone, "I need a plumber");
+        await _fx.InjectTextAndAwaitAsync(phone, "that's right.");
+
+        var advanced = await client.ExpectOutboundAsync(
+            phone,
+            m => m.Body.Contains("Send your location", StringComparison.OrdinalIgnoreCase));
+        advanced.ShouldNotBeNull();
+        _fx.FakeAi.ExtractConfirmIntentCalls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task ConfirmService_LocationPin_RepromptsWithoutLlmCall()
+    {
+        using var client = _fx.Factory.CreateClient();
+        var phone = "+220700000098";
+
+        await _fx.InjectTextAndAwaitAsync(phone, "I need a plumber");
+        await _fx.InjectLocationAndAwaitAsync(phone, 13.4549, -16.5790);
+
+        var reprompt = await client.ExpectOutboundAsync(
+            phone,
+            m => m.Body.Contains("Please reply YES or NO", StringComparison.OrdinalIgnoreCase));
+        reprompt.ShouldNotBeNull();
+        _fx.FakeAi.ExtractConfirmIntentCalls.ShouldBe(0);
+    }
+
     [Fact]
     public async Task ServiceRequest_DescriptionStep_AmbiguousReply_TreatedAsSkip()
     {

@@ -60,6 +60,12 @@ public sealed class DevPipelineFixture : IAsyncLifetime
 
     public WebApplicationFactory<Program> Factory { get; private set; } = default!;
 
+    // Convenience: every shard registers FakeConversationAi via ConfigureTestServices,
+    // so tests that need to override AI verdicts or assert call counts can reach it
+    // through one accessor instead of duplicating the GetRequiredService+cast.
+    public FakeConversationAi FakeAi =>
+        (FakeConversationAi)Factory.Services.GetRequiredService<IConversationAi>();
+
     public async Task InitializeAsync()
     {
         await ContainerInitLock.WaitAsync();
