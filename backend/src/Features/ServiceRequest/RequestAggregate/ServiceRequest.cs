@@ -6,18 +6,18 @@ namespace Hook.Features.ServiceRequest.RequestAggregate;
 
 public class ServiceRequest : AggregateRoot
 {
-    public Guid Id { get; init; }
-    public required string ClientPhone { get; init; }
-    public required string ServiceSlug { get; init; }
-    public required Point Location { get; init; }
-    public string FormattedAddress { get; init; } = string.Empty;
-    public string Description { get; init; } = string.Empty;
-    public DateTimeOffset CreatedAt { get; init; }
+    public Guid Id { get; private init; }
+    public string ClientPhone { get; private init; } = string.Empty;
+    public string ServiceSlug { get; private init; } = string.Empty;
+    public Point Location { get; private init; } = default!;
+    public string FormattedAddress { get; private init; } = string.Empty;
+    public string Description { get; private init; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; private init; }
     public ServiceRequestStatus Status { get; private set; } = ServiceRequestStatus.Open;
 
     public List<string> ShownProviderPhones { get; private set; } = [];
-    public double CurrentRadiusKm { get; set; }
-    public bool AutoExpandedOnce { get; set; }
+    public double CurrentRadiusKm { get; private set; }
+    public bool AutoExpandedOnce { get; private set; }
     public bool SharePhoneNumber { get; private set; }
 
     public static ServiceRequest Create(
@@ -49,13 +49,46 @@ public class ServiceRequest : AggregateRoot
 
     public void RecordShown(IEnumerable<string> providerPhones)
     {
+        var existing = ShownProviderPhones.ToHashSet(StringComparer.Ordinal);
         foreach (var phone in providerPhones)
-        {
-            if (!ShownProviderPhones.Contains(phone))
-                ShownProviderPhones.Add(phone);
-        }
+            if (existing.Add(phone)) ShownProviderPhones.Add(phone);
     }
 
-    public void MarkMatched() => Status = ServiceRequestStatus.Matched;
-    public void Close() => Status = ServiceRequestStatus.Closed;
+    public bool IsRadiusAtMax(double maxKm) => CurrentRadiusKm >= maxKm;
+
+    public double NextRadiusAfterExpansion(double factor, double maxKm) =>
+        ClampToMax(factor, maxKm);
+
+    public bool ExpandRadius(double factor, double maxKm)
+    {
+        if (IsRadiusAtMax(maxKm)) return false;
+        CurrentRadiusKm = ClampToMax(factor, maxKm);
+        return true;
+    }
+
+    public bool TryAutoExpandOnce(double factor, double maxKm)
+    {
+        if (AutoExpandedOnce || IsRadiusAtMax(maxKm)) return false;
+        CurrentRadiusKm = ClampToMax(factor, maxKm);
+        AutoExpandedOnce = true;
+        return true;
+    }
+
+    private double ClampToMax(double factor, double maxKm) =>
+        Math.Min(CurrentRadiusKm * factor, maxKm);
+
+    public void MarkMatched()
+    {
+        if (Status == ServiceRequestStatus.Matched) return;
+        if (Status == ServiceRequestStatus.Closed)
+            throw new InvalidOperationException(
+                $"ServiceRequest {Id} is Closed; cannot re-open as Matched.");
+        Status = ServiceRequestStatus.Matched;
+    }
+
+    public void Close()
+    {
+        if (Status == ServiceRequestStatus.Closed) return;
+        Status = ServiceRequestStatus.Closed;
+    }
 }

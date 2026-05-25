@@ -36,5 +36,11 @@ public class RateLimitOptions
     [Range(0, 10000)]
     public int WebhookQueueLimit { get; init; } = 50;
 
+    [Range(1, 1000)]
+    public int ChatHubBurstTokens { get; init; } = 20;
+
+    [Range(1, 600)]
+    public int ChatHubBurstWindowSeconds { get; init; } = 5;
+
     public string[] BypassHosts { get; init; } = [];
 }

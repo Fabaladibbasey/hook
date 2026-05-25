@@ -1,8 +1,10 @@
+using Hook.Shared.Domain;
+
 namespace Hook.Features.Feedback.ProviderStatsAggregate;
 
-public class ProviderStats
+public class ProviderStats : IAggregateRoot
 {
-    public required string ProviderPhone { get; init; }
+    public string ProviderPhone { get; private init; } = string.Empty;
     public int CompletedCount { get; private set; }
     public int SuccessCount { get; private set; }
     public double SuccessRate { get; private set; }

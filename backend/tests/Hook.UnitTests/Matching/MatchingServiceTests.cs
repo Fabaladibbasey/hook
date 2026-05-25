@@ -96,7 +96,7 @@ public class MatchingServiceTests
     public async Task RunForRequestAsync_UsesCurrentRadiusWhenWidened()
     {
         var request = SeedRequest(initialRadiusKm: 5);
-        request.CurrentRadiusKm = 20;
+        request.ExpandRadius(factor: 4, maxKm: 100);
 
         await Build().RunForRequestAsync(request.Id);
 

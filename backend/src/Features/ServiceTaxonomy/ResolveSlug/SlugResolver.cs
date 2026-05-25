@@ -14,6 +14,7 @@ public class SlugResolver(
     IConversationAi ai,
     IMessageBus bus,
     IOptions<ServiceTaxonomyOptions> options,
+    TimeProvider clock,
     ILogger<SlugResolver> logger,
     IDbContextFactory<HookDbContext>? dbFactory = null)
 {
@@ -102,7 +103,7 @@ public class SlugResolver(
     {
         await using var db = await dbFactory!.CreateDbContextAsync(ct);
         var perCallRepo = new ServiceRepository(db);
-        var perCallResolver = new SlugResolver(perCallRepo, ai, bus, options, logger);
+        var perCallResolver = new SlugResolver(perCallRepo, ai, bus, options, clock, logger);
         var memo = rawExample.Length > 0 ? rawExample : rawSlug;
         var pair = await perCallResolver.ResolveCoreAsync(normalizedSlug, memo, peersExcludingSelf, ct);
         await db.SaveChangesAsync(ct);
@@ -195,7 +196,7 @@ public class SlugResolver(
             logger.LogDebug("AI judged proposal {Slug} as new (top similarity {Sim:F2})", normalized, topSim);
         }
 
-        var created = Service.Create(normalized, memo);
+        var created = Service.Create(normalized, clock.GetUtcNow(), memo);
         await repository.AddAsync(created, ct);
 
         var resolution = top is not null && topSim >= opts.AiJudgeThreshold
@@ -211,7 +212,7 @@ public class SlugResolver(
         var existing = await repository.GetBySlugAsync(slug, ct);
         if (existing is null)
         {
-            existing = Service.Create(slug, rawExample);
+            existing = Service.Create(slug, clock.GetUtcNow(), rawExample);
             await repository.AddAsync(existing, ct);
             return (new ResolveSlugResult(slug, resolution, topSim), slug);
         }

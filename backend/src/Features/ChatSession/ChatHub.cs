@@ -1,8 +1,9 @@
 using Hook.Features.ChatLifecycle;
 using Hook.Features.ChatLifecycle.EndChat;
 using Hook.Features.ChatSession.ParticipantAggregate;
+using Hook.Features.ChatSession.PublishKey;
+using Hook.Features.ChatSession.SendMessage;
 using Hook.Features.ChatSession.SessionAggregate;
-using Hook.Shared.Persistence.Data;
 using Hook.Shared.Pipeline.PostCommitSends;
 using Microsoft.AspNetCore.SignalR;
 using Wolverine;
@@ -11,9 +12,9 @@ namespace Hook.Features.ChatSession;
 
 public sealed class ChatHub(
     IChatRepository chats,
-    HookDbContext db,
     ChatScheduler scheduler,
     IMessageBus bus,
+    ChatHubMessageLimiter limiter,
     ILogger<ChatHub> logger,
     TimeProvider clock) : Hub
 {
@@ -71,30 +72,44 @@ public sealed class ChatHub(
             return;
         }
 
-        var participant = await EnsureCurrentSessionAsync(sessionId);
-        if (participant is null) return;
+        // No client-facing PublishKey-rejected payload exists; a tight publish loop
+        // is hostile, drop the connection.
+        if (!limiter.TryAcquire(participantId.ToString()).IsAllowed)
+        {
+            Context.Abort();
+            return;
+        }
 
-        participant.SetPublicKey(spki);
-        await db.SaveChangesAsync();
+        var response = await bus.InvokeAsync<PublishParticipantKeyResponse>(
+            new PublishParticipantKeyCommand(sessionId, chatId, participantId, spki));
 
-        var peer = await chats.GetPeerAsync(chatId, participantId);
-        if (peer?.PublicKey is { Length: > 0 } peerKey)
+        if (response.Result is PublishParticipantKeyResult.SessionRevoked
+                              or PublishParticipantKeyResult.ParticipantMissing)
+        {
+            await Clients.Caller.SendAsync(ChatHubConstants.Events.SessionRevoked);
+            Context.Abort();
+            return;
+        }
+
+        if (response.Result == PublishParticipantKeyResult.InvalidKey)
+        {
+            logger.LogWarning(
+                "Invalid SPKI rejected chat={ChatId} participant={ParticipantId}", chatId, participantId);
+            Context.Abort();
+            return;
+        }
+
+        // Caller-side notification stays inline — the response payload carries the
+        // PEER's key for this caller. Broadcast to other group members is owned by
+        // the outbox-driven BroadcastChatEvent raised by ChatParticipant.SetPublicKey.
+        if (response.PeerPublicKey.Length > 0)
         {
             await Clients.Caller.SendAsync(ChatHubConstants.Events.PeerKeyAvailable, new
             {
-                peerParticipantId = peer.Id,
-                peerPublicKeyB64 = Convert.ToBase64String(peerKey)
+                peerParticipantId = response.PeerParticipantId,
+                peerPublicKeyB64 = Convert.ToBase64String(response.PeerPublicKey)
             });
         }
-
-        await Clients.OthersInGroup(ChatGroup(chatId)).SendAsync(ChatHubConstants.Events.PeerKeyAvailable, new
-        {
-            peerParticipantId = participantId,
-            // Re-encode from the decoded SPKI rather than echoing the client's
-            // b64 string. Kills cross-browser whitespace drift + matches the
-            // peer?.PublicKey path above that always re-encodes.
-            peerPublicKeyB64 = Convert.ToBase64String(spki)
-        });
 
         logger.LogDebug("Public key published chat={ChatId} participant={ParticipantId}", chatId, participantId);
     }
@@ -115,13 +130,9 @@ public sealed class ChatHub(
             return;
         }
 
-        var participant = await EnsureCurrentSessionAsync(sessionId);
-        if (participant is null) return;
-
-        var session = await chats.GetSessionAsync(chatId);
-        if (session is null || !session.CanSendMessage(clock.GetUtcNow()))
+        if (!limiter.TryAcquire(participantId.ToString()).IsAllowed)
         {
-            await RejectAsync(message.MessageId, ChatMessageRejectReason.SessionEnded);
+            await RejectAsync(message.MessageId, ChatMessageRejectReason.RateLimited);
             return;
         }
 
@@ -140,39 +151,36 @@ public sealed class ChatHub(
             return;
         }
 
-        var msg = ChatMessage.Create(
-            id: message.MessageId,
-            chatId: chatId,
-            participantId: participantId,
-            sequence: message.Sequence,
-            ciphertext: ciphertext,
-            nonce: nonce,
-            now: clock.GetUtcNow());
+        var response = await bus.InvokeAsync<AcceptChatMessageResponse>(
+            new AcceptChatMessageCommand(
+                sessionId, chatId, participantId,
+                message.MessageId, message.Sequence, ciphertext, nonce));
 
-        if (!participant.TryAdvanceSequence(message.Sequence))
+        switch (response.Result)
         {
-            logger.LogWarning("Replayed/out-of-order seq rejected chat={ChatId} participant={ParticipantId} seq={Seq}",
-                chatId, participantId, message.Sequence);
-            await RejectAsync(message.MessageId, ChatMessageRejectReason.Replay);
-            return;
+            case AcceptChatMessageResult.SessionRevoked:
+                await Clients.Caller.SendAsync(ChatHubConstants.Events.SessionRevoked);
+                Context.Abort();
+                return;
+            case AcceptChatMessageResult.SessionEnded:
+                await RejectAsync(message.MessageId, ChatMessageRejectReason.SessionEnded);
+                return;
+            case AcceptChatMessageResult.Replay:
+                logger.LogWarning("Replayed/out-of-order seq rejected chat={ChatId} participant={ParticipantId} seq={Seq}",
+                    chatId, participantId, message.Sequence);
+                await RejectAsync(message.MessageId, ChatMessageRejectReason.Replay);
+                return;
+            case AcceptChatMessageResult.Duplicate:
+                await RejectAsync(message.MessageId, ChatMessageRejectReason.Duplicate);
+                return;
+            case AcceptChatMessageResult.Accepted:
+                await scheduler.ScheduleIdleChecksAsync(chatId, response.Now);
+                await Clients.OthersInGroup(ChatGroup(chatId))
+                    .SendAsync(ChatHubConstants.Events.MessageReceived, ToWire(response.Message!));
+                logger.LogDebug("ChatMessage stored chat={ChatId} sender={ParticipantId} seq={Seq}",
+                    chatId, participantId, message.Sequence);
+                return;
         }
-
-        var inserted = await chats.TryAddMessageAsync(msg);
-        if (!inserted)
-        {
-            await RejectAsync(message.MessageId, ChatMessageRejectReason.Duplicate);
-            return;
-        }
-
-        var now = clock.GetUtcNow();
-        session.Touch(now);
-        await db.SaveChangesAsync();
-        await scheduler.ScheduleIdleChecksAsync(chatId, now);
-
-        await Clients.OthersInGroup(ChatGroup(chatId)).SendAsync(ChatHubConstants.Events.MessageReceived, ToWire(msg));
-
-        logger.LogDebug("ChatMessage stored chat={ChatId} sender={ParticipantId} seq={Seq}",
-            chatId, participantId, message.Sequence);
     }
 
     public async Task EndChat()
@@ -188,11 +196,21 @@ public sealed class ChatHub(
         if (participant is null) return;
         var role = (Context.Items[ChatHubConstants.Items.Role] as string) ?? participant.Role.ToString();
 
-        var response = await bus.InvokeAsync<EndChatResponse>(new EndChatCommand(chatId, EndChatReason.User, role));
+        var response = await bus.InvokeAsync<EndChatResponse>(
+            new EndChatCommand(chatId, EndChatReason.User, role, participant.Id));
         if (response.Result == EndChatResult.AlreadyEnded)
             await Clients.Caller.SendAsync(
                 ChatHubConstants.Events.ChatEnded,
                 new ChatEndedPayload(EndChatReason.AlreadyEnded.ToWire()));
+        else if (response.Result == EndChatResult.Unauthorized)
+        {
+            // Defence in depth — hub guard above resolved this participant by token,
+            // so a Unauthorized here implies tampering or stale connection.
+            logger.LogWarning(
+                "EndChat unauthorized for chat={ChatId} participant={ParticipantId}", chatId, participant.Id);
+            await Clients.Caller.SendAsync(ChatHubConstants.Events.SessionRevoked);
+            Context.Abort();
+        }
         else if (response.Result == EndChatResult.Ended)
             logger.LogInformation("Chat {ChatId} ended by {Role} ({ParticipantId})", chatId, role, participant.Id);
     }

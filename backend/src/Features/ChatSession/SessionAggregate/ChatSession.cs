@@ -6,12 +6,19 @@ namespace Hook.Features.ChatSession.SessionAggregate;
 
 public class ChatSession : AggregateRoot
 {
-    public Guid Id { get; init; }
+    public Guid Id { get; private init; }
     public ChatSessionStatus Status { get; private set; } = ChatSessionStatus.Active;
-    public DateTimeOffset CreatedAt { get; init; }
+    public DateTimeOffset CreatedAt { get; private init; }
     public DateTimeOffset ExpiresAt { get; private set; }
     public DateTimeOffset LastActivityAt { get; private set; }
     public DateTimeOffset? ProductiveSilenceFiredAt { get; private set; }
+
+    /// <summary>
+    /// Optimistic-concurrency token: every state mutation bumps this so the second
+    /// of two racing scopes cannot commit silently — the loser hits a concurrency
+    /// exception which AcceptChatMessageHandler surfaces as <c>SessionEnded</c>.
+    /// </summary>
+    public int Version { get; private set; }
 
     public static ChatSession Create(TimeSpan ttl, DateTimeOffset now) =>
         Create(Guid.CreateVersion7(), ttl, now);
@@ -28,6 +35,7 @@ public class ChatSession : AggregateRoot
     {
         if (Status != ChatSessionStatus.Active) return;
         LastActivityAt = now;
+        Version += 1;
     }
 
     public void End(DateTimeOffset now, EndChatReason reason, string endedBy = "")
@@ -38,6 +46,7 @@ public class ChatSession : AggregateRoot
         var endReason = MapEndReason(reason);
         Status = ChatSessionStatus.Ended;
         ExpiresAt = now;
+        Version += 1;
         RaiseDomainEvent(new BroadcastChatEvent(
             Id, ChatHubEvents.ChatEnded, new ChatEndedPayload(reason.ToWire(), endedBy)));
         RaiseDomainEvent(new ChatSessionEndedEvent(Id, endReason));
@@ -49,6 +58,7 @@ public class ChatSession : AggregateRoot
             throw new InvalidOperationException($"ChatSession {Id} cannot be hard-expired from {Status}");
         Status = ChatSessionStatus.Expired;
         ExpiresAt = now;
+        Version += 1;
         RaiseDomainEvent(new BroadcastChatEvent(
             Id, ChatHubEvents.ChatExpired, new ChatExpiredPayload("24h-expired")));
         RaiseDomainEvent(new ChatSessionEndedEvent(Id, ChatEndReason.Expired));

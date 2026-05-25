@@ -7,6 +7,11 @@ internal static class ChatHubConstants
     public const int NonceBytes = 12;
     public const int MaxPublicKeyBytes = 200;
     public const int InitialHistoryTake = 50;
+    // Caps how far ahead of LastInboundSequence a single client send may jump.
+    // Without this a malicious or buggy client can advance the participant's
+    // sequence to long.MaxValue and self-DoS — every later legitimate message
+    // is rejected as Replay because seq <= LastInboundSequence.
+    public const long MaxSequenceJump = 1000;
     public const string ChatMessagesPrimaryKey = "PK_chat_messages";
     public const string SequenceUniqueIndexName = "ux_chat_messages_chat_participant_sequence";
 

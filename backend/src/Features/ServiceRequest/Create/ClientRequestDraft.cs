@@ -19,7 +19,7 @@ public enum ClientRequestStep
 
 public class ClientRequestDraft : IAggregateRoot
 {
-    public required string Phone { get; init; }
+    public string Phone { get; private init; } = string.Empty;
     public ClientRequestStep Step { get; private set; } = ClientRequestStep.AwaitingService;
     public string DraftServiceSlug { get; private set; } = string.Empty;
     public double? DraftLatitude { get; private set; }
@@ -27,7 +27,7 @@ public class ClientRequestDraft : IAggregateRoot
     public string DraftFormattedAddress { get; private set; } = string.Empty;
     public string DraftDescription { get; private set; } = string.Empty;
     public bool? DraftSharePhoneConsent { get; private set; }
-    public DateTimeOffset StartedAt { get; init; }
+    public DateTimeOffset StartedAt { get; private init; }
     public DateTimeOffset UpdatedAt { get; private set; }
     // Set when entering ResolvingService, cleared on leaving. The TTL revert relies on
     // this rather than UpdatedAt so a follow-up "Touch" while resolving cannot keep the

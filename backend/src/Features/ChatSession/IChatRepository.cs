@@ -1,6 +1,7 @@
 using Hook.Features.ChatSession.AccessLog;
 using Hook.Features.ChatSession.ParticipantAggregate;
 using Hook.Features.ChatSession.SessionAggregate;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Hook.Features.ChatSession;
 
@@ -36,4 +37,21 @@ public interface IChatRepository
     Task AddParticipantsAsync(IEnumerable<ChatParticipant> participants, CancellationToken ct = default);
     Task<bool> TryAddMessageAsync(ChatMessage message, CancellationToken ct = default);
     Task AddAccessLogAsync(ChatAccessLog log, CancellationToken ct = default);
+
+    /// <summary>
+    /// Flushes tracked chat-aggregate mutations. Returns false on concurrency-token
+    /// loss (another writer mutated the same <c>ChatParticipant</c>/<c>ChatSession</c>
+    /// row between this scope's load and commit). Callers surface the loss as
+    /// <c>SessionRevoked</c>/<c>SessionEnded</c> so the racing tab is asked to refresh
+    /// rather than overwriting fresh state with stale.
+    /// </summary>
+    Task<bool> TryCommitAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Opens an explicit EF transaction. Used by <c>AcceptChatMessageHandler</c>
+    /// (which is <c>[NonTransactional]</c>) so the insert + sequence advance + touch
+    /// commit atomically and a concurrency-token loss on the post-insert mutations
+    /// rolls back the savepoint-protected message insert too.
+    /// </summary>
+    Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken ct = default);
 }

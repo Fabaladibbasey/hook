@@ -27,15 +27,13 @@ public class ApplyStep1IntentHandlerTests
     private readonly FakeTimeProvider _clock = new(DateTimeOffset.UtcNow);
     private readonly FeedbackOptions _options = new();
 
-    private readonly List<(Guid Id, FeedbackAnswer Answer)> _claimed = [];
+    private MatchFeedback? _stored;
 
     public ApplyStep1IntentHandlerTests()
     {
-        _feedbackMock.Setup(x => x.TryClaimPendingAsync(
-                It.IsAny<Guid>(), It.IsAny<FeedbackAnswer>(),
-                It.IsAny<DateTimeOffset>(), It.IsAny<CancellationToken>()))
-            .Callback<Guid, FeedbackAnswer, DateTimeOffset, CancellationToken>(
-                (id, answer, _, _) => _claimed.Add((id, answer)))
+        _feedbackMock.Setup(x => x.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => _stored);
+        _feedbackMock.Setup(x => x.TrySaveAsync(It.IsAny<MatchFeedback>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         _feedbackMock.Setup(x => x.TryAddPendingAsync(It.IsAny<MatchFeedback>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
@@ -48,7 +46,7 @@ public class ApplyStep1IntentHandlerTests
     private ApplyStep1IntentHandler Build()
     {
         var service = new FeedbackResponseService(
-            _feedbackMock.Object, _matchesMock.Object,
+            _feedbackMock.Object, _matchesMock.Object, _requestsMock.Object,
             _eventBusMock.Object, _busMock.Object,
             Options.Create(_options), _clock,
             NullLogger<FeedbackResponseService>.Instance);
@@ -60,16 +58,22 @@ public class ApplyStep1IntentHandlerTests
         FeedbackAnswer? resolveAs = null)
     {
         var now = _clock.GetUtcNow();
-        return new MatchFeedback
+        var p = MatchFeedback.CreatePending(Guid.NewGuid(), Guid.NewGuid(), step, now);
+        switch (resolveAs)
         {
-            Id = Guid.CreateVersion7(),
-            MatchId = Guid.NewGuid(),
-            RequestId = Guid.NewGuid(),
-            Step = step,
-            PromptedAt = now,
-            Answer = resolveAs ?? FeedbackAnswer.Pending,
-            RepliedAt = resolveAs is null ? null : now,
-        };
+            case null:
+            case FeedbackAnswer.Pending:
+                break;
+            case FeedbackAnswer.Yes: p.ClaimYes(now); break;
+            case FeedbackAnswer.No: p.ClaimNo(now); break;
+            case FeedbackAnswer.Skipped: p.ClaimSkipped(now); break;
+            case FeedbackAnswer.WinnerSelected: p.ClaimWinner(now); break;
+            case FeedbackAnswer.InProgress: p.ClaimInProgress(now); break;
+            case FeedbackAnswer.EtaCaptured: p.ClaimEta(now.AddHours(1), now); break;
+            case FeedbackAnswer.NoReasonCaptured: p.CaptureNoReason(null, now); break;
+            default: throw new ArgumentOutOfRangeException(nameof(resolveAs), resolveAs, null);
+        }
+        return p;
     }
 
     private void StubRequest(Guid requestId, string phone = "+2203339999")
@@ -84,64 +88,61 @@ public class ApplyStep1IntentHandlerTests
     [Fact]
     public async Task Handle_NullPending_NoOps()
     {
-        _feedbackMock.Setup(x => x.GetByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((MatchFeedback?)null);
+        _stored = null;
 
         await Build().Handle(
             new ApplyStep1IntentCommand(Guid.NewGuid(), Guid.NewGuid(), Step1ReplyIntent.Yes, null),
             CancellationToken.None);
 
-        _claimed.ShouldBeEmpty();
+        // Nothing to assert on a null aggregate — verify no save call happened.
+        _feedbackMock.Verify(x => x.TrySaveAsync(It.IsAny<MatchFeedback>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
     public async Task Handle_AlreadyClaimedNotPending_NoOps()
     {
         var pending = Pending(resolveAs: FeedbackAnswer.Yes);
-        _feedbackMock.Setup(x => x.GetByIdAsync(pending.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(pending);
+        _stored = pending;
 
         await Build().Handle(
             new ApplyStep1IntentCommand(pending.Id, pending.MatchId, Step1ReplyIntent.Yes, null),
             CancellationToken.None);
 
-        _claimed.ShouldBeEmpty();
+        pending.Answer.ShouldBe(FeedbackAnswer.Yes);
+        _feedbackMock.Verify(x => x.TrySaveAsync(It.IsAny<MatchFeedback>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
     public async Task Handle_WrongStep_NoOps()
     {
         var pending = Pending(step: FeedbackStep.JobCompleted);
-        _feedbackMock.Setup(x => x.GetByIdAsync(pending.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(pending);
+        _stored = pending;
 
         await Build().Handle(
             new ApplyStep1IntentCommand(pending.Id, pending.MatchId, Step1ReplyIntent.Yes, null),
             CancellationToken.None);
 
-        _claimed.ShouldBeEmpty();
+        pending.Answer.ShouldBe(FeedbackAnswer.Pending);
     }
 
     [Fact]
     public async Task Handle_WrongMatchId_NoOps()
     {
         var pending = Pending();
-        _feedbackMock.Setup(x => x.GetByIdAsync(pending.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(pending);
+        _stored = pending;
 
         await Build().Handle(
             new ApplyStep1IntentCommand(pending.Id, Guid.NewGuid(), Step1ReplyIntent.Yes, null),
             CancellationToken.None);
 
-        _claimed.ShouldBeEmpty();
+        pending.Answer.ShouldBe(FeedbackAnswer.Pending);
     }
 
     [Fact]
     public async Task Handle_RequestMissing_NoOps()
     {
         var pending = Pending();
-        _feedbackMock.Setup(x => x.GetByIdAsync(pending.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(pending);
+        _stored = pending;
         _requestsMock.Setup(r => r.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ServiceRequestEntity?)null);
 
@@ -149,34 +150,31 @@ public class ApplyStep1IntentHandlerTests
             new ApplyStep1IntentCommand(pending.Id, pending.MatchId, Step1ReplyIntent.Yes, null, pending.PromptedAt),
             CancellationToken.None);
 
-        _claimed.ShouldBeEmpty();
+        pending.Answer.ShouldBe(FeedbackAnswer.Pending);
     }
 
     [Fact]
     public async Task Handle_HappyPath_InvokesApplyOnService()
     {
         var pending = Pending();
-        _feedbackMock.Setup(x => x.GetByIdAsync(pending.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(pending);
+        _stored = pending;
         StubRequest(pending.RequestId);
 
         await Build().Handle(
             new ApplyStep1IntentCommand(pending.Id, pending.MatchId, Step1ReplyIntent.Yes, null, pending.PromptedAt),
             CancellationToken.None);
 
-        _claimed.ShouldHaveSingleItem();
-        _claimed[0].Answer.ShouldBe(FeedbackAnswer.Yes);
+        pending.Answer.ShouldBe(FeedbackAnswer.Yes);
     }
 
     [Fact]
     public async Task Handle_StalePromptedAt_NoOps()
     {
         // Re-prompt between Extract publish and Apply firing: pending.PromptedAt advanced
-        // via TryRepromptPendingAsync, so the in-flight envelope's snapshot no longer
-        // matches the row's prompted-at. Drop to avoid cross-prompt contamination.
+        // via Reprompt, so the in-flight envelope's snapshot no longer matches the row's
+        // prompted-at. Drop to avoid cross-prompt contamination.
         var pending = Pending();
-        _feedbackMock.Setup(x => x.GetByIdAsync(pending.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(pending);
+        _stored = pending;
         StubRequest(pending.RequestId);
         var stale = pending.PromptedAt - TimeSpan.FromMinutes(5);
 
@@ -184,6 +182,6 @@ public class ApplyStep1IntentHandlerTests
             new ApplyStep1IntentCommand(pending.Id, pending.MatchId, Step1ReplyIntent.Yes, null, stale),
             CancellationToken.None);
 
-        _claimed.ShouldBeEmpty();
+        pending.Answer.ShouldBe(FeedbackAnswer.Pending);
     }
 }

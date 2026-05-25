@@ -4,6 +4,7 @@ using Hook.Features.ChatSession.SessionAggregate;
 using Hook.Shared.Persistence;
 using Hook.Shared.Persistence.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Hook.Features.ChatSession;
 
@@ -102,4 +103,24 @@ public sealed class ChatRepository(HookDbContext db) : IChatRepository
 
     public async Task AddAccessLogAsync(ChatAccessLog log, CancellationToken ct = default) =>
         await db.ChatAccessLogs.AddAsync(log, ct);
+
+    public async Task<bool> TryCommitAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Drop tracked state so a follow-up SaveChanges (e.g. the
+            // AutoApplyTransactions commit when this method is called inside an
+            // outer-tx handler) does not retry the same losing UPDATE.
+            db.ChangeTracker.Clear();
+            return false;
+        }
+    }
+
+    public Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken ct = default) =>
+        db.Database.BeginTransactionAsync(ct);
 }

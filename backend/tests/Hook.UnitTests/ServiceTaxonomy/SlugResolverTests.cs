@@ -66,10 +66,11 @@ public class SlugResolverTests
             _aiMock.Object,
             _busMock.Object,
             options,
+            TimeProvider.System,
             NullLogger<SlugResolver>.Instance);
     }
 
-    private void Seed(string slug) => _store[slug] = Service.Create(slug);
+    private void Seed(string slug) => _store[slug] = Service.Create(slug, DateTimeOffset.UtcNow);
 
     [Theory]
     [InlineData("Plumbing Services!", "plumbing-services")]
@@ -245,7 +246,7 @@ public class SlugResolverTests
         // possible in concurrent retention sweeps). AcceptExistingAsync re-creates
         // the row and must publish parent-judgment for the new aggregate.
         _similarityRule = (existing, _) => existing == "ghost" ? 0.92 : 0;
-        _store["ghost"] = Service.Create("ghost"); // FindSimilar will see it...
+        _store["ghost"] = Service.Create("ghost", DateTimeOffset.UtcNow); // FindSimilar will see it...
         _repoMock.Setup(x => x.GetBySlugAsync("ghost", It.IsAny<CancellationToken>()))
             .ReturnsAsync((Service?)null); // ...but GetBySlugAsync says it's gone
 

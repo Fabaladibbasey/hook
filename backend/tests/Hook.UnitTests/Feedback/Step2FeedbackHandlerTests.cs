@@ -71,16 +71,20 @@ public class Step2FeedbackHandlerTests
     private MatchFeedback CompletedJob(MatchEntity match, FeedbackAnswer answer)
     {
         var now = _clock.GetUtcNow();
-        return new MatchFeedback
+        var p = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.JobCompleted, now);
+        switch (answer)
         {
-            Id = Guid.CreateVersion7(),
-            MatchId = match.Id,
-            RequestId = match.RequestId,
-            Step = FeedbackStep.JobCompleted,
-            PromptedAt = now,
-            Answer = answer,
-            RepliedAt = now,
-        };
+            case FeedbackAnswer.Yes: p.ClaimYes(now); break;
+            case FeedbackAnswer.No: p.ClaimNo(now); break;
+            case FeedbackAnswer.InProgress: p.ClaimInProgress(now); break;
+            case FeedbackAnswer.Skipped: p.ClaimSkipped(now); break;
+            case FeedbackAnswer.EtaCaptured: p.ClaimEta(now.AddHours(1), now); break;
+            case FeedbackAnswer.WinnerSelected: p.ClaimWinner(now); break;
+            case FeedbackAnswer.NoReasonCaptured: p.CaptureNoReason(null, now); break;
+            case FeedbackAnswer.Pending: break;
+            default: throw new ArgumentOutOfRangeException(nameof(answer), answer, null);
+        }
+        return p;
     }
 
     [Fact]

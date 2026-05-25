@@ -170,7 +170,8 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
 
         var entry = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
         Assert.True(await repo.TryAddPendingAsync(entry));
-        Assert.True(await repo.TryClaimPendingAsync(entry.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow));
+        entry.ClaimYes(DateTimeOffset.UtcNow);
+        Assert.True(await repo.TrySaveAsync(entry));
 
         await using var scope2 = _fx.Factory.Services.CreateAsyncScope();
         var repo2 = scope2.ServiceProvider.GetRequiredService<IFeedbackRepository>();
@@ -180,19 +181,43 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
     }
 
     [Fact]
-    public async Task TryClaimPendingAsync_SecondCall_ReturnsFalse()
+    public async Task TrySaveAsync_ConcurrentClaim_SecondLoses()
     {
+        // Two scopes load the same Pending row (same xmin), both mutate, save A → ok,
+        // save B → DbUpdateConcurrencyException is caught and returns false.
         var clientPhone = UniquePhone();
-        await using var scope = _fx.Factory.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
-        var (_, match) = await SeedMatchAsync(db, clientPhone);
-
+        await using var seedScope = _fx.Factory.Services.CreateAsyncScope();
+        var seedDb = seedScope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var seedRepo = seedScope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var (_, match) = await SeedMatchAsync(seedDb, clientPhone);
         var entry = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
-        await repo.TryAddPendingAsync(entry);
+        await seedRepo.TryAddPendingAsync(entry);
 
-        Assert.True(await repo.TryClaimPendingAsync(entry.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow));
-        Assert.False(await repo.TryClaimPendingAsync(entry.Id, FeedbackAnswer.No, DateTimeOffset.UtcNow));
+        await using var scopeA = _fx.Factory.Services.CreateAsyncScope();
+        await using var scopeB = _fx.Factory.Services.CreateAsyncScope();
+        var repoA = scopeA.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+        var repoB = scopeB.ServiceProvider.GetRequiredService<IFeedbackRepository>();
+
+        var loadedA = await repoA.GetByIdAsync(entry.Id);
+        var loadedB = await repoB.GetByIdAsync(entry.Id);
+        Assert.NotNull(loadedA);
+        Assert.NotNull(loadedB);
+
+        loadedA!.ClaimYes(DateTimeOffset.UtcNow);
+        Assert.True(await repoA.TrySaveAsync(loadedA));
+
+        loadedB!.ClaimNo(DateTimeOffset.UtcNow);
+        Assert.False(await repoB.TrySaveAsync(loadedB));
+
+        // Pin winner-side persistence: scopeA's ClaimYes survived; the loser
+        // did not overwrite with ClaimNo.
+        await using var verifyScope = _fx.Factory.Services.CreateAsyncScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var persisted = await verifyDb.MatchFeedback
+            .AsNoTracking()
+            .FirstOrDefaultAsync(f => f.Id == entry.Id);
+        Assert.NotNull(persisted);
+        Assert.Equal(FeedbackAnswer.Yes, persisted!.Answer);
     }
 
     [Fact]
@@ -211,7 +236,8 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         // Re-create + claim, then DeletePendingAsync should NOT remove the now-answered row.
         var answered = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
         await repo.TryAddPendingAsync(answered);
-        await repo.TryClaimPendingAsync(answered.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow);
+        answered.ClaimYes(DateTimeOffset.UtcNow);
+        await repo.TrySaveAsync(answered);
         Assert.False(await repo.DeletePendingAsync(answered.Id));
 
         await using var verifyScope = _fx.Factory.Services.CreateAsyncScope();
@@ -257,7 +283,8 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         var firstEntry = MatchFeedback.CreatePending(
             firstMatch.Id, firstMatch.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
         Assert.True(await repo.TryAddPendingAsync(firstEntry));
-        Assert.True(await repo.TryClaimPendingAsync(firstEntry.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow));
+        firstEntry.ClaimYes(DateTimeOffset.UtcNow);
+        Assert.True(await repo.TrySaveAsync(firstEntry));
 
         // Late sibling for the same request — broader partial unique includes answered rows.
         var sibling = MatchFeedback.CreatePending(
@@ -266,7 +293,7 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
     }
 
     [Fact]
-    public async Task TryRescheduleAsync_HappyPath_BumpsRecheckCountAndRefreshesPromptedAt()
+    public async Task Reschedule_HappyPath_BumpsRecheckCountAndRefreshesPromptedAt()
     {
         var clientPhone = UniquePhone();
         await using var scope = _fx.Factory.Services.CreateAsyncScope();
@@ -280,7 +307,8 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
         await repo.TryAddPendingAsync(entry);
 
         var bumpAt = DateTimeOffset.UtcNow;
-        Assert.True(await repo.TryRescheduleAsync(entry.Id, bumpAt));
+        entry.Reschedule(bumpAt);
+        Assert.True(await repo.TrySaveAsync(entry));
 
         await using var verifyScope = _fx.Factory.Services.CreateAsyncScope();
         var verifyDb = verifyScope.ServiceProvider.GetRequiredService<HookDbContext>();
@@ -290,23 +318,7 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
     }
 
     [Fact]
-    public async Task TryRescheduleAsync_AlreadyClaimed_ReturnsFalse()
-    {
-        var clientPhone = UniquePhone();
-        await using var scope = _fx.Factory.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
-        var (_, match) = await SeedMatchAsync(db, clientPhone);
-
-        var entry = MatchFeedback.CreatePending(match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
-        await repo.TryAddPendingAsync(entry);
-        await repo.TryClaimPendingAsync(entry.Id, FeedbackAnswer.Yes, DateTimeOffset.UtcNow);
-
-        Assert.False(await repo.TryRescheduleAsync(entry.Id, DateTimeOffset.UtcNow));
-    }
-
-    [Fact]
-    public async Task TryClaimNoReasonAsync_HappyPath_SetsAnswerAndReason()
+    public async Task CaptureNoReason_HappyPath_SetsAnswerAndReason()
     {
         var clientPhone = UniquePhone();
         await using var scope = _fx.Factory.Services.CreateAsyncScope();
@@ -318,71 +330,14 @@ public sealed class FeedbackRepositoryTests : PipelineTestBase
             match.Id, match.RequestId, FeedbackStep.CaptureNoReason, DateTimeOffset.UtcNow);
         await repo.TryAddPendingAsync(entry);
 
-        Assert.True(await repo.TryClaimNoReasonAsync(entry.Id, "too expensive", DateTimeOffset.UtcNow));
+        entry.CaptureNoReason("too expensive", DateTimeOffset.UtcNow);
+        Assert.True(await repo.TrySaveAsync(entry));
 
         await using var verifyScope = _fx.Factory.Services.CreateAsyncScope();
         var verifyDb = verifyScope.ServiceProvider.GetRequiredService<HookDbContext>();
         var loaded = await verifyDb.MatchFeedback.AsNoTracking().FirstAsync(f => f.Id == entry.Id);
         Assert.Equal(FeedbackAnswer.NoReasonCaptured, loaded.Answer);
         Assert.Equal("too expensive", loaded.NoReason);
-    }
-
-    [Fact]
-    public async Task TryClaimNoReasonAsync_AlreadyClaimed_ReturnsFalse()
-    {
-        var clientPhone = UniquePhone();
-        await using var scope = _fx.Factory.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
-        var (_, match) = await SeedMatchAsync(db, clientPhone);
-
-        var entry = MatchFeedback.CreatePending(
-            match.Id, match.RequestId, FeedbackStep.CaptureNoReason, DateTimeOffset.UtcNow);
-        await repo.TryAddPendingAsync(entry);
-        await repo.TryClaimNoReasonAsync(entry.Id, "first", DateTimeOffset.UtcNow);
-
-        Assert.False(await repo.TryClaimNoReasonAsync(entry.Id, "second", DateTimeOffset.UtcNow));
-    }
-
-    [Fact]
-    public async Task TryRepromptPendingAsync_GapNotElapsed_ReturnsFalse()
-    {
-        var clientPhone = UniquePhone();
-        await using var scope = _fx.Factory.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
-        var (_, match) = await SeedMatchAsync(db, clientPhone);
-
-        var entry = MatchFeedback.CreatePending(
-            match.Id, match.RequestId, FeedbackStep.DidYouFind, DateTimeOffset.UtcNow);
-        await repo.TryAddPendingAsync(entry);
-
-        // PromptedAt = now, gap = 5min, so "now + 1s" cutoff has not elapsed.
-        Assert.False(await repo.TryRepromptPendingAsync(
-            entry.Id, DateTimeOffset.UtcNow.AddSeconds(1), TimeSpan.FromMinutes(5)));
-    }
-
-    [Fact]
-    public async Task TryRepromptPendingAsync_GapElapsed_RefreshesPromptedAt()
-    {
-        var clientPhone = UniquePhone();
-        await using var scope = _fx.Factory.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
-        var repo = scope.ServiceProvider.GetRequiredService<IFeedbackRepository>();
-        var (_, match) = await SeedMatchAsync(db, clientPhone);
-
-        var oldPrompt = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(30);
-        var entry = MatchFeedback.CreatePending(
-            match.Id, match.RequestId, FeedbackStep.DidYouFind, oldPrompt);
-        await repo.TryAddPendingAsync(entry);
-
-        var now = DateTimeOffset.UtcNow;
-        Assert.True(await repo.TryRepromptPendingAsync(entry.Id, now, TimeSpan.FromMinutes(5)));
-
-        await using var verifyScope = _fx.Factory.Services.CreateAsyncScope();
-        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<HookDbContext>();
-        var loaded = await verifyDb.MatchFeedback.AsNoTracking().FirstAsync(f => f.Id == entry.Id);
-        Assert.True(Math.Abs((loaded.PromptedAt - now).TotalSeconds) < 1);
     }
 
     [Fact]

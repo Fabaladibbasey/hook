@@ -19,14 +19,14 @@ public enum RegistrationStep
 
 public class RegistrationDraft : IAggregateRoot
 {
-    public required string Phone { get; init; }
+    public string Phone { get; private init; } = string.Empty;
     public RegistrationStep Step { get; private set; } = RegistrationStep.AwaitingServices;
     public List<string> DraftServices { get; private set; } = [];
     public double? DraftLatitude { get; private set; }
     public double? DraftLongitude { get; private set; }
     public string DraftFormattedAddress { get; private set; } = string.Empty;
     public bool? DraftShareContact { get; private set; }
-    public DateTimeOffset StartedAt { get; init; }
+    public DateTimeOffset StartedAt { get; private init; }
     public DateTimeOffset UpdatedAt { get; private set; }
     // Set when entering ResolvingServices, cleared on leaving. The TTL revert relies on
     // this rather than UpdatedAt so a follow-up "Touch" while resolving cannot keep the

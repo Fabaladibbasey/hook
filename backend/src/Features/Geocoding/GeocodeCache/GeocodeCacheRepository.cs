@@ -1,10 +1,11 @@
 using Hook.Features.Geocoding.Models;
+using Hook.Shared.Persistence;
 using Hook.Shared.Persistence.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace Hook.Features.Geocoding.GeocodeCache;
 
-public sealed class GeocodeCacheRepository(HookDbContext db) : IGeocodeCache
+public sealed class GeocodeCacheRepository(HookDbContext db, TimeProvider clock) : IGeocodeCache
 {
     public async Task<GeocodeResult?> TryGetAsync(string key, CancellationToken ct = default)
     {
@@ -20,18 +21,8 @@ public sealed class GeocodeCacheRepository(HookDbContext db) : IGeocodeCache
 
     public async Task SetAsync(string key, GeocodeResult result, CancellationToken ct = default)
     {
-        var existing = await db.GeocodeCache.FindAsync([key], ct);
-        if (existing is not null) return;
-
-        await db.GeocodeCache.AddAsync(new GeocodeCacheEntry
-        {
-            Key = key,
-            Latitude = result.Location.Latitude,
-            Longitude = result.Location.Longitude,
-            FormattedAddress = result.FormattedAddress,
-            Provider = result.Provider,
-            FetchedAt = DateTimeOffset.UtcNow
-        }, ct);
-        await db.SaveChangesAsync(ct);
+        // First-writer-wins: 23505 against PK is a silent no-op.
+        var entry = GeocodeCacheEntry.Capture(key, result, clock.GetUtcNow());
+        await db.TryInsertUniqueAsync(entry, ct, GeocodeCacheConstants.PrimaryKeyName);
     }
 }

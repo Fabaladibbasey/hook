@@ -13,6 +13,7 @@ public static class ChatServiceCollectionExtensions
         services.AddScoped<ChatSessionFactory>();
 
         services.AddSingleton<ChatHubExceptionFilter>();
+        services.AddSingleton<ChatHubMessageLimiter>();
 
         services.AddSignalR(options =>
         {

@@ -8,6 +8,7 @@ namespace Hook.Features.ServiceTaxonomy.SeedRoots;
 
 public sealed class RootSectorSeeder(
     HookDbContext db,
+    TimeProvider clock,
     ILogger<RootSectorSeeder> logger)
 {
     private const string ServicesPrimaryKey = "PK_services";
@@ -54,7 +55,8 @@ public sealed class RootSectorSeeder(
         // a unique-race on commit detaches and falls back to per-slug retry.
         if (existing.Count == 0)
         {
-            var entities = missing.Select(s => Service.Create(s)).ToArray();
+            var now = clock.GetUtcNow();
+            var entities = missing.Select(s => Service.Create(s, now)).ToArray();
             await db.Services.AddRangeAsync(entities, ct);
             try
             {
@@ -75,7 +77,7 @@ public sealed class RootSectorSeeder(
         var inserted = 0;
         foreach (var slug in missing)
         {
-            if (await db.TryInsertUniqueAsync(Service.Create(slug), ct, ServicesPrimaryKey))
+            if (await db.TryInsertUniqueAsync(Service.Create(slug, clock.GetUtcNow()), ct, ServicesPrimaryKey))
                 inserted++;
         }
 

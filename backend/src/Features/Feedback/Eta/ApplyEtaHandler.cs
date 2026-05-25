@@ -39,8 +39,8 @@ public sealed class ApplyEtaHandler(
                 return;
             }
 
-            if (!await feedback.TryClaimPendingWithEtaAsync(
-                    pending.Id, FeedbackAnswer.EtaCaptured, etaValue, now, ct)) return;
+            pending.ClaimEta(etaValue, now);
+            if (!await feedback.TrySaveAsync(pending, ct)) return;
             var delay = etaValue - now + opts.EtaScheduleBuffer;
             if (delay < TimeSpan.Zero) delay = opts.EtaScheduleBuffer;
             await events.ScheduleAsync(new Step2FeedbackCheck(cmd.MatchId), delay, ct);
