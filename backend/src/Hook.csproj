@@ -16,33 +16,16 @@
     <InternalsVisibleTo Include="Hook.IntegrationTests" />
   </ItemGroup>
 
-  <PropertyGroup>
-    <FrontendDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../../frontend'))</FrontendDir>
-  </PropertyGroup>
-
   <!--
-    Ensure wwwroot/ exists before the SDK's static-web-assets machinery enumerates
-    it. The directory is gitignored and only populated by BuildFrontend; without
-    this, fresh clones and SkipFrontendBuild=true builds hit a missing directory.
+    Ensure wwwroot/ exists before the SDK's static-web-assets machinery
+    enumerates it. The directory is gitignored and populated either by
+    `npm run build` (CI publish step) or by Program.cs at Development
+    startup. Without this, fresh clones hit a missing directory.
   -->
   <Target Name="EnsureWwwroot"
           BeforeTargets="AssignTargetPaths"
           Condition="!Exists('$(MSBuildProjectDirectory)/wwwroot')">
     <MakeDir Directories="$(MSBuildProjectDirectory)/wwwroot" />
-  </Target>
-
-  <!--
-    Run before AssignTargetPaths so the generated wwwroot/ files are picked
-    up by the SDK's static-web-assets collection. ComputeFilesToPublish runs
-    after asset collection, which left wwwroot/ out of the published image.
-  -->
-  <Target Name="BuildFrontend"
-          BeforeTargets="AssignTargetPaths"
-          DependsOnTargets="EnsureWwwroot"
-          Condition="'$(SkipFrontendBuild)' != 'true'">
-    <Message Importance="high" Text="Building frontend in $(FrontendDir)" />
-    <Exec Command="npm ci" WorkingDirectory="$(FrontendDir)" />
-    <Exec Command="npm run build" WorkingDirectory="$(FrontendDir)" />
   </Target>
 
   <ItemGroup>

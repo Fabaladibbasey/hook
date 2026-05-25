@@ -4,7 +4,7 @@ Guidance for Claude Code working in this repo.
 
 ## Overview
 
-Hook is a WhatsApp-funnel + real-time chat platform. .NET 10 ASP.NET Core backend with vertical-slice (`Features/`) layout, Postgres + PostGIS persistence, Wolverine for in-process messaging, SignalR for chat. React 19 + TypeScript + Vite frontend (built into `backend/src/wwwroot/` for prod via MSBuild target). True end-to-end encryption: P-256 ECDH + HKDF-SHA-256 + AES-256-GCM; server stores ciphertext only.
+Hook is a WhatsApp-funnel + real-time chat platform. .NET 10 ASP.NET Core backend with vertical-slice (`Features/`) layout, Postgres + PostGIS persistence, Wolverine for in-process messaging, SignalR for chat. React 19 + TypeScript + Vite frontend (built into `backend/src/wwwroot/` for prod by the CI workflow's `npm run build` step before `dotnet publish`). True end-to-end encryption: P-256 ECDH + HKDF-SHA-256 + AES-256-GCM; server stores ciphertext only.
 
 ## Build & Test Commands
 
@@ -41,7 +41,7 @@ npm run typecheck    # tsc --noEmit
 npm run lint         # eslint src --ext ts,tsx
 ```
 
-Note: `dotnet publish` invokes `npm ci && npm run build` automatically via the `BuildFrontend` MSBuild target in `backend/src/Hook.csproj`. Pass `-p:SkipFrontendBuild=true` to skip.
+Note: frontend build is decoupled from MSBuild. CI workflows (`build-and-test.yml`, `deploy-hetzner.yml`) explicitly run `npm ci && npm run build` in `frontend/` before `dotnet publish /t:PublishContainer` so the container layer captures a populated `wwwroot/`. For local `dotnet run` (Development env), `FrontendBootstrapper.EnsureBuilt` runs the same npm steps once at startup if `wwwroot/index.html` is missing.
 
 ### Build file-lock workaround
 

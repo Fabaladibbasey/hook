@@ -47,6 +47,8 @@ try
 {
     var builder = WebApplication.CreateBuilder(args);
 
+    FrontendBootstrapper.EnsureBuilt(builder.Environment);
+
     builder.Host.UseSerilog((context, services, config) => config
         .ReadFrom.Configuration(context.Configuration)
         .ReadFrom.Services(services)
