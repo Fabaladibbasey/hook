@@ -91,4 +91,17 @@ public interface IConversationAi
         string slugAsked,
         string text,
         CancellationToken ct = default);
+
+    // Answers a free-text platform question grounded in the supplied knowledge base
+    // (markdown). Returns null on AI failure or when the model declines to answer
+    // (PromptSafety jailbreak echo, empty text). The absorbed-exception path
+    // increments AiOutboundDropped(stage="platform-answer", reason="exception").
+    // The handler-side null-reply fallback (AnswerPlatformQuestionHandler) also
+    // increments AiOutboundDropped(stage="platform-answer", reason="fallback")
+    // before publishing a localised deterministic fallback message.
+    Task<string?> AnswerPlatformQuestionAsync(
+        string question,
+        string locale,
+        string knowledgeBase,
+        CancellationToken ct = default);
 }

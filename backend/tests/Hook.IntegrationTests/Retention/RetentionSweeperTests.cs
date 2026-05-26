@@ -48,6 +48,7 @@ public sealed class RetentionSweeperTests : PipelineTestBase
             Enabled = true,
             RetentionDays = configured.RetentionDays,
             DeadLetterRetentionDays = configured.DeadLetterRetentionDays,
+            PendingFeedbackClaimAfter = configured.PendingFeedbackClaimAfter,
             SweepInterval = configured.SweepInterval,
             StartupDelay = configured.StartupDelay
         });
@@ -67,10 +68,13 @@ public sealed class RetentionSweeperTests : PipelineTestBase
         var result = await sweeper.RunOnceAsync(CancellationToken.None);
 
         // Wolverine's dead-letter table lives in a separate schema and is not part of the
-        // EF model — it is swept via raw SQL. Exempt that one key from the EF-mapped check.
+        // EF model — it is swept via raw SQL. The pending-claimed key is an operation
+        // (bulk UPDATE Pending → Skipped) sharing the match_feedback table, not a distinct
+        // entity, so it is exempt from the EF-mapped check too.
         var rawSweeps = new HashSet<string>(StringComparer.Ordinal)
         {
             RetentionTableKeys.WolverineDeadLetters,
+            RetentionTableKeys.MatchFeedbackPendingClaimed,
         };
 
         foreach (var key in result.DeletedByTable.Keys)
@@ -208,6 +212,44 @@ public sealed class RetentionSweeperTests : PipelineTestBase
         Assert.False(await db.MatchFeedback.AsNoTracking().AnyAsync(f => f.Id == oldPending.Id));
         Assert.True(await db.MatchFeedback.AsNoTracking().AnyAsync(f => f.Id == recent.Id));
         Assert.True(await db.ProviderStats.AsNoTracking().AnyAsync(s => s.ProviderPhone == phone));
+    }
+
+    [Fact]
+    public async Task Sweep_PendingFeedback_PastWindow_IsClaimedSkipped()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var opts = scope.ServiceProvider.GetRequiredService<IOptions<RetentionOptions>>().Value;
+        var now = DateTimeOffset.UtcNow;
+        // One hour past the claim-after window, one minute inside it.
+        var stale = now - opts.PendingFeedbackClaimAfter - TimeSpan.FromHours(1);
+        var fresh = now - opts.PendingFeedbackClaimAfter + TimeSpan.FromMinutes(1);
+
+        var (_, staleMatch) = await SeedRequestAndMatchAsync(db, stale);
+        var (_, freshMatch) = await SeedRequestAndMatchAsync(db, fresh);
+
+        var stalePending = MatchFeedback.CreatePending(
+            staleMatch.Id, staleMatch.RequestId, FeedbackStep.DidYouFind, stale);
+        var freshPending = MatchFeedback.CreatePending(
+            freshMatch.Id, freshMatch.RequestId, FeedbackStep.DidYouFind, fresh);
+        db.MatchFeedback.AddRange(stalePending, freshPending);
+        await db.SaveChangesAsync();
+
+        var staleVersion = stalePending.Version;
+
+        var sweeper = Resolve(scope.ServiceProvider);
+        var result = await sweeper.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.DeletedByTable[RetentionTableKeys.MatchFeedbackPendingClaimed]);
+
+        var staleAfter = await db.MatchFeedback.AsNoTracking().SingleAsync(f => f.Id == stalePending.Id);
+        Assert.Equal(FeedbackAnswer.Skipped, staleAfter.Answer);
+        Assert.NotNull(staleAfter.RepliedAt);
+        Assert.Equal(staleVersion + 1, staleAfter.Version);
+
+        var freshAfter = await db.MatchFeedback.AsNoTracking().SingleAsync(f => f.Id == freshPending.Id);
+        Assert.Equal(FeedbackAnswer.Pending, freshAfter.Answer);
+        Assert.Null(freshAfter.RepliedAt);
     }
 
     [Fact]

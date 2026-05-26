@@ -388,4 +388,30 @@ public class QuickIntentTests
     [InlineData(null)]
     public void TryExtractRelativeEta_NoMatch_ReturnsNull(string? text) =>
         Assert.Null(QuickIntent.TryExtractRelativeEta(text, DateTimeOffset.UtcNow));
+
+    [Theory]
+    // Positives: question mark
+    [InlineData("Is this free?")]
+    [InlineData("how does this work?")]
+    [InlineData("can I cancel anytime?")]
+    [InlineData("what's your privacy policy?")]
+    // Positives: bare interrogative lead-in (no '?')
+    [InlineData("how does this work")]
+    [InlineData("what is this")]
+    [InlineData("does it cost money")]
+    public void LooksLikePlatformQuestion_Positive(string text) =>
+        Assert.True(QuickIntent.LooksLikePlatformQuestion(text));
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("?")]                          // length < 3 after trim
+    [InlineData("I need a plumber")]           // service request
+    [InlineData("yes")]                        // confirmation
+    [InlineData("REQUEST")]                    // bare command
+    [InlineData("my pipe is leaking")]         // problem statement
+    [InlineData("can someone explain")]        // ask-for-help hint wins over Q&A
+    public void LooksLikePlatformQuestion_Negative(string? text) =>
+        Assert.False(QuickIntent.LooksLikePlatformQuestion(text));
 }

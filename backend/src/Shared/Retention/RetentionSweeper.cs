@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using Hook.Features.Feedback.Models;
 using Hook.Features.Observability;
 using Hook.Features.ServiceRequest.RequestAggregate;
 using Hook.Shared.Persistence;
@@ -30,6 +31,7 @@ public sealed class RetentionSweeper(
         var nowUtc = clock.GetUtcNow();
         var cutoff = nowUtc - TimeSpan.FromDays(opts.RetentionDays);
         var dlqCutoff = nowUtc - TimeSpan.FromDays(opts.DeadLetterRetentionDays);
+        var pendingCutoff = nowUtc - opts.PendingFeedbackClaimAfter;
 
         var sweeps = new (string Key, Func<Task<int>> Run)[]
         {
@@ -51,8 +53,27 @@ public sealed class RetentionSweeper(
                 () => db.ClientRequestDrafts.Where(d => d.UpdatedAt < cutoff).ExecuteDeleteAsync(ct)),
             (RetentionTableKeys.AmbiguousIntentDrafts,
                 () => db.AmbiguousIntentDrafts.Where(d => d.CreatedAt < cutoff).ExecuteDeleteAsync(ct)),
+            // Claim stale Pending rows BEFORE the delete sweep below so a row that
+            // crosses both thresholds gets the UPDATE (Pending → Skipped) before the
+            // 7-day DELETE. Bulk SetProperty bypasses the domain ClaimSkipped method;
+            // safe because (a) ClaimSkipped only sets Answer/RepliedAt/Version — the
+            // three columns we set; (b) tracked-aggregate update would not scale on
+            // large backlogs. Version+1 keeps optimistic concurrency: any racing
+            // in-memory aggregate loses its SaveChanges.
+            (RetentionTableKeys.MatchFeedbackPendingClaimed,
+                () => db.MatchFeedback
+                    .Where(f => f.Answer == FeedbackAnswer.Pending && f.PromptedAt < pendingCutoff)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(f => f.Answer, FeedbackAnswer.Skipped)
+                        .SetProperty(f => f.RepliedAt, nowUtc)
+                        .SetProperty(f => f.Version, f => f.Version + 1), ct)),
             (RetentionTableKeys.MatchFeedback,
                 () => db.MatchFeedback.Where(f => f.PromptedAt < cutoff).ExecuteDeleteAsync(ct)),
+            // Tiny per-(phone, question-hash) dedup rows have no signal past the
+            // configured DedupWindowSeconds — prune at the same retention cutoff
+            // as everything else.
+            (RetentionTableKeys.PlatformAnswerDedup,
+                () => db.PlatformAnswerDedup.Where(d => d.AnsweredAt < cutoff).ExecuteDeleteAsync(ct)),
             // Wolverine DLQ rows persist indefinitely after MaxAttempts failure;
             // their JSON body may include user text + unmasked phone for AI-stage envelopes.
             // Schema is a code const, not user input — must be concatenated, not parameterized,

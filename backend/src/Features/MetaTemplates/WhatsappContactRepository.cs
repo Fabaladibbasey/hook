@@ -24,4 +24,26 @@ public sealed class WhatsappContactRepository(HookDbContext db) : IWhatsappConta
               SET "LastInboundAt" = GREATEST(EXCLUDED."LastInboundAt", whatsapp_contacts."LastInboundAt");
             """, ct);
     }
+
+    public async Task<ContactTipState?> GetForTipsAsync(string phone, CancellationToken ct = default)
+    {
+        var row = await db.WhatsappContacts.AsNoTracking()
+            .Where(c => c.Phone == phone)
+            .Select(c => new { c.LastTipKey, c.LastTipAt })
+            .FirstOrDefaultAsync(ct);
+        return row is null ? null : new ContactTipState(row.LastTipKey, row.LastTipAt);
+    }
+
+    public async Task RecordTipAsync(string phone, string tipKey, DateTimeOffset at, CancellationToken ct = default)
+    {
+        // UpsertInboundAsync always lands first on the same inbound, so the row is
+        // guaranteed to exist when a tip dispatch reaches us. A plain UPDATE is
+        // sufficient; matched-rows = 0 is silently ignored (best-effort cooldown).
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+            UPDATE whatsapp_contacts
+               SET "LastTipKey" = {tipKey}, "LastTipAt" = {at}
+             WHERE "Phone" = {phone};
+            """, ct);
+    }
 }

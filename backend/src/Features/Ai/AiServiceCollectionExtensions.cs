@@ -1,3 +1,4 @@
+using Hook.Features.Ai.PlatformQa;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Polly;
@@ -28,6 +29,8 @@ public static class AiServiceCollectionExtensions
 
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<AiReadinessProbe>();
+
+        services.AddPlatformQa(configuration);
 
         return services;
     }

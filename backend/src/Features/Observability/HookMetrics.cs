@@ -26,6 +26,9 @@ public static class HookMetrics
     public static readonly Counter<long> AiClassifyFailures =
         Meter.CreateCounter<long>("hook.ai.classify_failures");
 
+    public static readonly Counter<long> PlatformQaIdentityShortcut =
+        Meter.CreateCounter<long>("hook.platform_qa.identity_shortcut");
+
     public static readonly Counter<long> ChatHubFaults =
         Meter.CreateCounter<long>("hook.chat_hub.faults");
 

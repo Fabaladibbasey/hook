@@ -46,6 +46,28 @@ public class InboundRouterRoutingTests : PipelineTestBase
     }
 
     [Fact]
+    public async Task ColdPath_Question_ShortCircuitsToPlatformAnswer()
+    {
+        using var client = _fx.Factory.CreateClient();
+        const string phone = "+22070002005";
+
+        await _fx.InjectTextAndAwaitAsync(phone, "how does this work?");
+
+        // Cold-path dispatcher sends an ack BEFORE the AI answer so the user
+        // doesn't stare at a silent WhatsApp window during the Ollama window.
+        var ack = await client.ExpectOutboundAsync(
+            phone, m => m.Body.Contains("one sec", StringComparison.OrdinalIgnoreCase));
+
+        // FakeConversationAi's stub replies "[stub-qa] {question}" verbatim.
+        var reply = await client.ExpectOutboundAsync(
+            phone,
+            m => m.Body.Contains("[stub-qa]", StringComparison.Ordinal),
+            since: ack.At);
+
+        reply.Body.ShouldContain("how does this work?");
+    }
+
+    [Fact]
     public async Task BareWord_Register_RoutesToProviderFunnel()
     {
         using var client = _fx.Factory.CreateClient();

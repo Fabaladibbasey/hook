@@ -19,11 +19,15 @@ public class OllamaPayloadShapeTests
     [InlineData("eta", 60)]
     [InlineData("reply", 200)]
     [InlineData("language", 30)]
+    [InlineData("platformAnswer", 100)]
     public async Task EachTaskSendsNumPredict(string task, int expected)
     {
         var handler = new RecordingHandler(StubResponseFor(task));
         var http = new HttpClient(handler) { BaseAddress = new Uri("http://test/") };
-        var ai = new OllamaConversationAi(http, Options.Create(new OllamaOptions()),
+        var ai = new OllamaConversationAi(
+            http,
+            Options.Create(new OllamaOptions()),
+            Options.Create(new Hook.Features.Ai.PlatformQa.PlatformAnswerOptions()),
             NullLogger<OllamaConversationAi>.Instance);
 
         await InvokeTaskAsync(ai, task);
@@ -40,7 +44,11 @@ public class OllamaPayloadShapeTests
         var handler = new RecordingHandler(StubResponseFor("reply"));
         var http = new HttpClient(handler) { BaseAddress = new Uri("http://test/") };
         var opts = new OllamaOptions { MaxOutputTokens = new OllamaTaskBudgets { Reply = 333 } };
-        var ai = new OllamaConversationAi(http, Options.Create(opts), NullLogger<OllamaConversationAi>.Instance);
+        var ai = new OllamaConversationAi(
+            http,
+            Options.Create(opts),
+            Options.Create(new Hook.Features.Ai.PlatformQa.PlatformAnswerOptions()),
+            NullLogger<OllamaConversationAi>.Instance);
 
         await InvokeTaskAsync(ai, "reply");
 
@@ -57,6 +65,7 @@ public class OllamaPayloadShapeTests
         "eta" => ai.ExtractEtaAsync("tomorrow", DateTimeOffset.UtcNow),
         "reply" => ai.GenerateReplyAsync(new ReplyContext("greeting-reply", [], "en")),
         "language" => ai.DetectLanguageAsync("hello"),
+        "platformAnswer" => ai.AnswerPlatformQuestionAsync("how does this work?", "en", "# overview\nHook is a bot."),
         _ => throw new ArgumentOutOfRangeException(nameof(task), task, "unknown task")
     };
 
@@ -73,6 +82,7 @@ public class OllamaPayloadShapeTests
             "eta" => """{"etaUtc":null}""",
             "reply" => "hello",
             "language" => """{"language":"en","confidence":0.9}""",
+            "platformAnswer" => "Hook is a WhatsApp bot.",
             _ => throw new ArgumentOutOfRangeException(nameof(task), task, "unknown task")
         };
         return "{\"message\":{\"content\":" + JsonSerializer.Serialize(content) + "}}";

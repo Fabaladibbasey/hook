@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Hook.Features.Ai.Models;
+using Hook.Features.Ai.PlatformQa;
 using Hook.Features.Ai.Prompts;
 using Hook.Features.Feedback.Step1Intent;
 using Hook.Features.Feedback.Step2Intent;
@@ -17,6 +18,7 @@ namespace Hook.Features.Ai;
 public sealed class OllamaConversationAi(
     HttpClient httpClient,
     IOptions<OllamaOptions> options,
+    IOptions<PlatformAnswerOptions> platformAnswerOptions,
     ILogger<OllamaConversationAi> logger) : IConversationAi
 {
     public const string HttpClientName = "ai.ollama";
@@ -525,7 +527,65 @@ public sealed class OllamaConversationAi(
         return new LanguageDetectionResult(lang, conf);
     }
 
-    private enum AiStage { Classify, ExtractServices, JudgeMatch, JudgeParent, ExtractEta, ExtractStep1Intent, ExtractStep2Intent, ExtractConfirmIntent }
+    public Task<string?> AnswerPlatformQuestionAsync(
+        string question,
+        string locale,
+        string knowledgeBase,
+        CancellationToken ct = default) =>
+        TryCallAsync<string?>(AiStage.PlatformAnswer, null,
+            () => AnswerPlatformQuestionCoreAsync(question, locale, knowledgeBase, ct), ct);
+
+    private async Task<string?> AnswerPlatformQuestionCoreAsync(
+        string question,
+        string locale,
+        string knowledgeBase,
+        CancellationToken ct)
+    {
+        // Defence-in-depth: dispatcher already sanitises, but direct callers (tests,
+        // future integrations) could bypass it. The classifier-emitted code lands
+        // outside the user-input fence so an unsanitised newline could smuggle
+        // instructions into the trusted slot.
+        var safeLocale = LocaleValidator.Sanitize(locale);
+
+        // KB-first ordering: Ollama's KV prefix cache reuses across calls only
+        // when the leading bytes are identical. Putting the invariant KB before
+        // the per-call locale + question lets warm calls skip the prefill of the
+        // largest segment of the prompt.
+        var prompt = $$"""
+            Knowledge base (authoritative — only answer from this):
+            {{knowledgeBase}}
+
+            Reply in language: {{safeLocale}}
+
+            User question:
+            {{PromptSafety.Fence(question, options.Value.MaxUserInputChars)}}
+            """;
+
+        var reply = await CallTextAsync(
+            AiPrompts.PlatformAnswerSystem,
+            prompt,
+            platformAnswerOptions.Value.MaxOutputTokens,
+            ct);
+
+        if (string.IsNullOrWhiteSpace(reply)) return null;
+        // Drop if the model echoed jailbreak markers from the user input back at us
+        // (defence-in-depth — the system prompt already refuses prompt-leak attempts).
+        if (PromptSafety.IsLikelyJailbreak(reply)) return null;
+        return reply.Trim();
+    }
+
+    private enum AiStage
+    {
+        Classify,
+        ExtractServices,
+        JudgeMatch,
+        JudgeParent,
+        ExtractEta,
+        ExtractStep1Intent,
+        ExtractStep2Intent,
+        ExtractConfirmIntent,
+        PlatformAnswer
+    }
 
     private static string TagOf(AiStage stage) => stage switch
     {
@@ -537,6 +597,7 @@ public sealed class OllamaConversationAi(
         AiStage.ExtractStep1Intent => "extract-step1-intent",
         AiStage.ExtractStep2Intent => "extract-step2-intent",
         AiStage.ExtractConfirmIntent => "extract-confirm-intent",
+        AiStage.PlatformAnswer => "platform-answer",
         _ => throw new ArgumentOutOfRangeException(nameof(stage), stage, null)
     };
 

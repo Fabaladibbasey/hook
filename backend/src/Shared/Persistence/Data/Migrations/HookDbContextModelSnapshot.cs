@@ -25,6 +25,26 @@ namespace Hook.Shared.Persistence.Data.Migrations
             NpgsqlModelBuilderExtensions.HasPostgresExtension(modelBuilder, "postgis");
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Hook.Features.Ai.PlatformQa.PlatformAnswerDedup", b =>
+                {
+                    b.Property<string>("Phone")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<long>("QuestionHash")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("AnsweredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Phone", "QuestionHash");
+
+                    b.HasIndex("AnsweredAt")
+                        .HasDatabaseName("ix_platform_answer_dedup_answered_at");
+
+                    b.ToTable("platform_answer_dedup", (string)null);
+                });
+
             modelBuilder.Entity("Hook.Features.ChatSession.AccessLog.ChatAccessLog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -395,6 +415,18 @@ namespace Hook.Shared.Persistence.Data.Migrations
 
                     b.Property<DateTimeOffset>("LastInboundAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("LastTipAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("'1970-01-01 00:00:00+00'");
+
+                    b.Property<string>("LastTipKey")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasDefaultValue("");
 
                     b.HasKey("Phone");
 

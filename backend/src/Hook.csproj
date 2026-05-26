@@ -12,6 +12,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Platform Q&A knowledge base — read at runtime via Assembly.GetManifestResourceStream. -->
+    <EmbeddedResource Include="Features/Ai/KnowledgeBase/*.md" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Hook.UnitTests" />
     <InternalsVisibleTo Include="Hook.IntegrationTests" />
   </ItemGroup>

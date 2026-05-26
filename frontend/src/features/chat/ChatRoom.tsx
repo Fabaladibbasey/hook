@@ -4,6 +4,7 @@ import { useChatHub } from "./useChatHub";
 import MessageList from "./MessageList";
 import MessageInput from "./MessageInput";
 import RevokedToast from "./RevokedToast";
+import TipsBanner from "./TipsBanner";
 import WaitingForPeer from "./WaitingForPeer";
 import LegalFooter from "@/components/LegalFooter";
 import { fetchJson } from "@/api/fetchJson";
@@ -94,6 +95,7 @@ export default function ChatRoom() {
         </button>
       </header>
       <LegalFooter variant="chat" />
+      <TipsBanner />
       <MessageList messages={state.messages} myParticipantId={open.participantId} chatId={open.chatId} />
       {waitingForPeer && <WaitingForPeer />}
       <MessageInput onSend={send} disabled={waitingForPeer} />

@@ -363,7 +363,11 @@ public class OllamaConversationAiTests
     {
         var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
         var options = Options.Create(new OllamaOptions { Model = "test-model" });
-        return new OllamaConversationAi(http, options, NullLogger<OllamaConversationAi>.Instance);
+        return new OllamaConversationAi(
+            http,
+            options,
+            Options.Create(new Hook.Features.Ai.PlatformQa.PlatformAnswerOptions()),
+            NullLogger<OllamaConversationAi>.Instance);
     }
 
     private static ReplyContext ReplyCtx(string purpose) =>

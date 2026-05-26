@@ -167,7 +167,11 @@ public class OllamaConversationAiValidationTests
         var handler = new ScriptedHandler(rawModelContent, captureBody);
         var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") };
         var options = Options.Create(new OllamaOptions { Model = "test-model" });
-        return new OllamaConversationAi(http, options, NullLogger<OllamaConversationAi>.Instance);
+        return new OllamaConversationAi(
+            http,
+            options,
+            Options.Create(new Hook.Features.Ai.PlatformQa.PlatformAnswerOptions()),
+            NullLogger<OllamaConversationAi>.Instance);
     }
 
     // ScriptedHandler returns the content the model would have produced. For text replies

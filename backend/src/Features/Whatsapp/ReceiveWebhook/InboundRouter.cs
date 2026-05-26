@@ -1,5 +1,6 @@
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
+using Hook.Features.Ai.PlatformQa;
 using Hook.Features.ContactSharing.ExchangePhones;
 using Hook.Features.Feedback.AggregateStats;
 using Hook.Features.MetaTemplates;
@@ -34,6 +35,7 @@ public sealed class InboundRouterHandler(
     PhoneExchanger phoneExchanger,
     FeedbackResponseService feedbackService,
     IWhatsappContactRepository contacts,
+    PlatformQaDispatcher platformQa,
     TimeProvider clock,
     ILogger<InboundRouterHandler> logger)
 {
@@ -78,9 +80,15 @@ public sealed class InboundRouterHandler(
 
         logger.LogDebug("Routing inbound {MessageId} from {From} kind={Kind}", msg.MessageId, masked, msg.Kind);
 
+        // Hoist QuickIntent detection once per inbound — Detect + DetectIntentHint
+        // each run compiled-regex IsMatch and a phrase loop, and the router consumes
+        // them at 4-5 sites below.
+        var quickIntent = QuickIntent.Detect(text);
+        var hint = QuickIntent.DetectIntentHint(text);
+
         if (!isReentry)
         {
-            if (QuickIntent.Detect(text) == IntentKind.Cancel)
+            if (quickIntent == IntentKind.Cancel)
             {
                 if (await AbandonAsync(phone, msg.From, ct)) return;
             }
@@ -89,11 +97,6 @@ public sealed class InboundRouterHandler(
             // tears down a draft does not extend the contact's last-inbound timestamp.
             await contacts.UpsertInboundAsync(phone, clock.GetUtcNow(), ct);
         }
-
-        // Compute hint up front so we can detect cross-flow intent switches before
-        // dispatching into an active draft. Hint is deterministic regex; LLM intent
-        // detection happens only on the no-active-draft path below.
-        var hint = QuickIntent.DetectIntentHint(text);
 
         // Lazy lookups in the order the router consumes them — first hit short-circuits
         // and avoids the remaining RTTs. Happy-path "active registration draft" is one RTT.
@@ -137,7 +140,42 @@ public sealed class InboundRouterHandler(
         var ambiguousDraft = await prefetch.GetAmbiguousDraftAsync(phone, ct);
         if (await TryResolveAmbiguousAsync(msg, ambiguousDraft, text, masked, ct)) return;
 
-        if (await prefetch.GetPendingFeedbackAsync(phone, ct) is { } pendingFeedback)
+        var pendingFeedback = await prefetch.GetPendingFeedbackAsync(phone, ct);
+
+        // Unified platform-Q&A gate. Sits above the pending-feedback route so a
+        // question-shaped reply during a Pending step (e.g. "how does this work?")
+        // gets answered AND the open step gets re-prompted, instead of being
+        // misparsed as the feedback reply itself. The reschedule/in-progress/stop
+        // exclusions are surgical — those Step1/Step2 replies often end in '?' and
+        // would otherwise be swallowed by LooksLikePlatformQuestion. quickIntent and
+        // hint filters keep the gate out of legitimate funnel inputs. The previous
+        // `activeRequest is null` guard from the old cold-only arm is dropped on
+        // purpose: an active request user pivoting to a platform question still
+        // benefits from the LLM-saving deterministic dispatch.
+        if (msg.Kind == InboundMessageKind.Text
+            && hint is null
+            && quickIntent is null
+            && QuickIntent.LooksLikePlatformQuestion(text)
+            && !QuickIntent.DetectStop(text)
+            && !QuickIntent.DetectReschedule(text)
+            && !QuickIntent.DetectInProgress(text))
+        {
+            if (pendingFeedback is not null)
+            {
+                logger.LogDebug("Route → Q&A mid-flow + re-prompt for {Phone}", masked);
+                await platformQa.DispatchMidFlowAsync(
+                    msg.From, text, "en", pendingFeedback.Step.ToString());
+                await feedbackService.RepromptOpenStepAsync(msg.From, pendingFeedback, ct);
+            }
+            else
+            {
+                logger.LogDebug("Cold-path Q&A short-circuit for {Phone}", masked);
+                await platformQa.DispatchColdAsync(msg.From, text, "en", "cold-deterministic");
+            }
+            return;
+        }
+
+        if (pendingFeedback is not null)
         {
             logger.LogDebug("Route → FeedbackResponseService (pending feedback) for {Phone}", masked);
             await feedbackService.HandleAsync(msg, pendingFeedback, ct);
@@ -152,7 +190,7 @@ public sealed class InboundRouterHandler(
             return;
         }
 
-        if (activeRequest is not null && QuickIntent.Detect(text) is IntentKind.Confirmation)
+        if (activeRequest is not null && quickIntent is IntentKind.Confirmation)
         {
             var quick = new IntentDetectionResult(IntentKind.Confirmation, 1.0, "en", "quick");
             logger.LogDebug("Route → ShareTopOrAskAsync (yes after present) for {Phone}", masked);
@@ -164,7 +202,7 @@ public sealed class InboundRouterHandler(
         // current request and prompt for a fresh service description. Deterministic
         // bypass keeps the LLM out of it — especially important for users who are
         // also listed providers (would mis-route to the heartbeat path).
-        if (activeRequest is not null && QuickIntent.Detect(text) is IntentKind.NewRequest)
+        if (activeRequest is not null && quickIntent is IntentKind.NewRequest)
         {
             activeRequest.Close();
             logger.LogDebug("Route → NewRequest (closed {RequestId}, prompting) for {Phone}",
@@ -217,6 +255,15 @@ public sealed class InboundRouterHandler(
 
         switch (detected.Intent)
         {
+            case IntentKind.PlatformQuestion:
+                logger.LogDebug("Route → AnswerPlatformQuestion (classifier) for {Phone}", masked);
+                // No second ack here: the LLM-defer arm above already sent
+                // "Got your message — one sec…" before the classifier ran. Use
+                // the mid-flow (no-ack) entry point so the user sees one ack,
+                // not two.
+                await platformQa.DispatchMidFlowAsync(
+                    msg.From, text, detected.LanguageCode, "cold-classified");
+                return;
             case IntentKind.NextMatches when activeRequest is not null:
                 logger.LogDebug("Route → IterationCoordinator.Next for {Phone}", masked);
                 await iterationCoordinator.NextAsync(msg.From, ct);
@@ -258,7 +305,8 @@ public sealed class InboundRouterHandler(
                     return;
                 }
                 logger.LogDebug("Cold reply (greeting-reply) for {Phone}", masked);
-                await SendColdReplyAsync(msg.From, text, detected, "greeting-reply", ct);
+                await SendColdReplyAsync(
+                    msg.From, text, detected, "greeting-reply", ct, tip: Tips.TipTrigger.AfterWelcome);
                 return;
             case IntentKind.Unknown:
                 if (listedProvider is not null)
@@ -346,8 +394,9 @@ public sealed class InboundRouterHandler(
         string text,
         IntentDetectionResult detected,
         string purpose,
-        CancellationToken ct) =>
-        bus.PublishAsync(new SendColdReplyCommand(from, text, detected, purpose));
+        CancellationToken ct,
+        Tips.TipTrigger? tip = null) =>
+        bus.PublishAsync(new SendColdReplyCommand(from, text, detected, purpose, Tip: tip));
 
     private async Task TryPickAsync(
         ServiceRequest.RequestAggregate.ServiceRequest request,

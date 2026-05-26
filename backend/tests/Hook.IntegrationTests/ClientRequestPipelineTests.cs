@@ -32,13 +32,56 @@ public class ClientRequestPipelineTests : PipelineTestBase
         using var client = _fx.Factory.CreateClient();
         var phone = "+22070001009";
 
-        await _fx.InjectTextAndAwaitAsync(phone, "what's the weather today");
+        // Non-question off-topic statement — questions are routed to the
+        // platform-Q&A pipeline, so the out-of-scope cold-reply path is now
+        // reserved for declarative off-topic inbound.
+        await _fx.InjectTextAndAwaitAsync(phone, "the weather is nice today");
 
         var reply = await client.ExpectOutboundAsync(
             phone,
             m => m.Body.Contains("out-of-scope", StringComparison.OrdinalIgnoreCase));
 
         reply.Body.ShouldNotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task MidFlow_QuestionAtAwaitingLocation_AnswersAndReprompts()
+    {
+        using var client = _fx.Factory.CreateClient();
+        var phone = "+22070001050";
+
+        await _fx.InjectTextAndAwaitAsync(phone, "I need a plumber");
+        await _fx.InjectTextAndAwaitAsync(phone, "yes");
+        // Draft now at AwaitingLocation with the location-pin re-prompt already in the outbox.
+        var locationPrompt = await client.ExpectOutboundAsync(
+            phone, m => m.Body.Contains("location pin", StringComparison.OrdinalIgnoreCase));
+
+        var drafts = _fx.Factory.Services.GetRequiredService<IClientRequestDraftRepository>();
+        var updatedAtBefore = (await drafts.GetAsync(phone, default))!.UpdatedAt;
+
+        await _fx.InjectTextAndAwaitAsync(phone, "is my data private?");
+
+        // Both messages must arrive AFTER the original location prompt: the AI Q&A
+        // answer (FakeConversationAi stub) and the canonical step re-prompt.
+        var aiAnswer = await client.ExpectOutboundAsync(
+            phone,
+            m => m.Body.Contains("[stub-qa]", StringComparison.Ordinal),
+            since: locationPrompt.At);
+        var reprompt = await client.ExpectOutboundAsync(
+            phone,
+            m => m.Body.Contains("location pin", StringComparison.OrdinalIgnoreCase),
+            since: locationPrompt.At);
+
+        aiAnswer.Body.ShouldContain("is my data private?");
+        reprompt.Body.ShouldContain("location pin", Case.Insensitive);
+
+        // Draft must remain at AwaitingLocation — the Q&A path does not advance it —
+        // AND UpdatedAt must not bump, otherwise spam Q&A could indefinitely block
+        // the inactivity-based draft expiry.
+        var draft = await drafts.GetAsync(phone, default);
+        draft.ShouldNotBeNull();
+        draft!.Step.ShouldBe(ClientRequestStep.AwaitingLocation);
+        draft.UpdatedAt.ShouldBe(updatedAtBefore);
     }
 
     [Fact]

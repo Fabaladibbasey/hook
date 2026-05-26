@@ -16,6 +16,7 @@ public sealed class FakeConversationAi : IConversationAi
     public int ExtractStep1IntentCalls { get; private set; }
     public int ExtractStep2IntentCalls { get; private set; }
     public int ExtractConfirmIntentCalls { get; private set; }
+    public int AnswerPlatformQuestionCalls { get; private set; }
 
     /// <summary>Force a specific (intent, confidence) for a given exact input — useful
     /// for integration tests that need to drive low-confidence disambiguation paths.</summary>
@@ -29,11 +30,13 @@ public sealed class FakeConversationAi : IConversationAi
         _step1IntentOverrides.Clear();
         _step2IntentOverrides.Clear();
         _confirmIntentOverrides.Clear();
+        _platformAnswerOverrides.Clear();
         DetectIntentCalls = 0;
         ExtractEtaCalls = 0;
         ExtractStep1IntentCalls = 0;
         ExtractStep2IntentCalls = 0;
         ExtractConfirmIntentCalls = 0;
+        AnswerPlatformQuestionCalls = 0;
     }
 
     public Task PingAsync(CancellationToken ct = default) => Task.CompletedTask;
@@ -305,6 +308,29 @@ public sealed class FakeConversationAi : IConversationAi
             return Task.FromResult(ConfirmReplyIntent.Yes);
 
         return Task.FromResult(ConfirmReplyIntent.Unsure);
+    }
+
+    private readonly Dictionary<string, string?> _platformAnswerOverrides =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Force the platform-answer text for a specific exact input so integration
+    /// tests can drive the Q&amp;A path without booting Ollama. Set to null to drive the
+    /// AI-failure / deterministic-fallback branch.</summary>
+    public void OverridePlatformAnswer(string question, string? answer) =>
+        _platformAnswerOverrides[question] = answer;
+
+    public Task<string?> AnswerPlatformQuestionAsync(
+        string question,
+        string locale,
+        string knowledgeBase,
+        CancellationToken ct = default)
+    {
+        AnswerPlatformQuestionCalls++;
+        if (_platformAnswerOverrides.TryGetValue(question, out var overridden))
+            return Task.FromResult(overridden);
+
+        // Deterministic stub text so integration tests can grep the outbound reply.
+        return Task.FromResult<string?>($"[stub-qa] {question}");
     }
 
     private static string Normalize(string text) =>

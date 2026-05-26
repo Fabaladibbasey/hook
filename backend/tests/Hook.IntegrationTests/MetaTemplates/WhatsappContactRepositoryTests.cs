@@ -50,6 +50,50 @@ public sealed class WhatsappContactRepositoryTests : PipelineTestBase
     }
 
     [Fact]
+    public async Task GetForTipsAsync_UnknownPhone_ReturnsNull()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IWhatsappContactRepository>();
+
+        var state = await repo.GetForTipsAsync(UniquePhone());
+
+        state.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task GetForTipsAsync_FreshContact_ReturnsEpochDefaults()
+    {
+        var phone = UniquePhone();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IWhatsappContactRepository>();
+        await repo.UpsertInboundAsync(phone, DateTimeOffset.UtcNow);
+
+        var state = await repo.GetForTipsAsync(phone);
+
+        state.ShouldNotBeNull();
+        state!.LastTipKey.ShouldBe(string.Empty);
+        // DB default '1970-01-01 00:00:00+00' is the "never tipped" sentinel.
+        state.LastTipAt.UtcDateTime.ShouldBe(new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+    }
+
+    [Fact]
+    public async Task RecordTipAsync_PersistsKeyAndTimestamp()
+    {
+        var phone = UniquePhone();
+        var at = DateTimeOffset.UtcNow;
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IWhatsappContactRepository>();
+        await repo.UpsertInboundAsync(phone, at);
+
+        await repo.RecordTipAsync(phone, "after-welcome:1", at);
+
+        var state = await repo.GetForTipsAsync(phone);
+        state.ShouldNotBeNull();
+        state!.LastTipKey.ShouldBe("after-welcome:1");
+        state.LastTipAt.ShouldBe(at, TimeSpan.FromMilliseconds(1));
+    }
+
+    [Fact]
     public async Task UpsertInboundAsync_OutOfOrderEarlierTimestamp_DoesNotMoveBackwards()
     {
         // GREATEST() in the ON CONFLICT clause must keep the newest timestamp even

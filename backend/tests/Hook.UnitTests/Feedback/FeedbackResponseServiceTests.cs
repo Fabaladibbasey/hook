@@ -1,3 +1,4 @@
+using Hook.Features.Ai;
 using Hook.Features.Feedback;
 using Hook.Features.Feedback.AggregateStats;
 using Hook.Features.Feedback.Eta;
@@ -1085,6 +1086,52 @@ public class FeedbackResponseServiceTests
         Assert.Equal(FeedbackAnswer.Skipped, _claimed[0].Answer);
         Assert.Single(_sent);
         Assert.Equal(FeedbackCopy.SkippedAck, _sent[0].Body);
+    }
+
+    // -- Router moved the platform-Q&A gate above pending-feedback prefetch, so the
+    // mid-flow bypass tests that used to live here are integration-level concerns
+    // now. RepromptOpenStepAsync (public) is exercised through that route. Below
+    // is the negative spot-check that the stale-window Skipped arm still fires for
+    // non-Q-shaped replies — the service-level behaviour the router gate relies on.
+
+    [Fact]
+    public async Task HandleAsync_DidYouFind_NonQuestionStaleInbound_StillClaimsSkipped()
+    {
+        var pending = SeedPendingForStep(
+            FeedbackStep.DidYouFind,
+            promptedAt: _clock.GetUtcNow() - TimeSpan.FromHours(2));
+
+        await Build().HandleAsync(NewInbound("blegh"), pending, CancellationToken.None);
+
+        Assert.Single(_claimed);
+        Assert.Equal(FeedbackAnswer.Skipped, _claimed[0].Answer);
+        Assert.Single(_sent);
+        Assert.Equal(FeedbackCopy.SkippedAck, _sent[0].Body);
+    }
+
+    // Surgical-exclusion tests — these prove the router-level gate cannot swallow
+    // legitimate Step1 Reschedule / Step2 InProgress replies that happen to end in '?'.
+    // The router calls QuickIntent.DetectReschedule + DetectInProgress to short-circuit
+    // before LooksLikePlatformQuestion can intercept; assert both pieces hold.
+
+    [Theory]
+    [InlineData("still working?")]
+    [InlineData("still doing it?")]
+    [InlineData("almost done?")]
+    public void RouterGate_QShapedInProgress_DetectInProgress_Wins(string text)
+    {
+        Assert.True(QuickIntent.LooksLikePlatformQuestion(text));
+        Assert.True(QuickIntent.DetectInProgress(text));
+    }
+
+    [Theory]
+    [InlineData("ask me later?")]
+    [InlineData("check back tomorrow?")]
+    [InlineData("not yet?")]
+    public void RouterGate_QShapedReschedule_DetectReschedule_Wins(string text)
+    {
+        Assert.True(QuickIntent.LooksLikePlatformQuestion(text));
+        Assert.True(QuickIntent.DetectReschedule(text));
     }
 
     [Fact]

@@ -584,6 +584,41 @@ public sealed class FeedbackResponseService(
         await bus.PublishAsync(new SendWhatsAppTextCommand(from, promptCopy));
         await ApplyAsync(original, claim, ct);
     }
+
+    // Canonical re-prompt for each Pending step. Used by the router-level Q&A gate
+    // so a platform question does not silently swallow the open feedback step.
+    // IdentifyWinner needs the picked list to reconstruct the bot-owned slot
+    // numbers; if the anchor lost its picks between schedule and reply we fall
+    // back to the generic Step1 retry — same degrade-safe arm as HandleIdentifyWinner.
+    public async Task RepromptOpenStepAsync(
+        PhoneNumber from, MatchFeedback pending, CancellationToken ct)
+    {
+        string copy;
+        switch (pending.Step)
+        {
+            case FeedbackStep.DidYouFind:
+                copy = FeedbackCopy.Step1UnclearRetry;
+                break;
+            case FeedbackStep.IdentifyWinner:
+                var picked = await GetPickedMatchesAsync(pending.MatchId, ct);
+                copy = picked.Count == 0
+                    ? FeedbackCopy.Step1UnclearRetry
+                    : FeedbackCopy.IdentifyWinnerRetryHintBody(PickedMatchListFormatter.Format(picked));
+                break;
+            case FeedbackStep.JobCompleted:
+                copy = FeedbackCopy.Step2UnclearRetry;
+                break;
+            case FeedbackStep.AwaitingEta:
+                copy = FeedbackCopy.AwaitingEtaRetry;
+                break;
+            case FeedbackStep.CaptureNoReason:
+                copy = FeedbackCopy.Step1NoAsk;
+                break;
+            default:
+                throw new InvalidOperationException($"Unhandled FeedbackStep '{pending.Step}'");
+        }
+        await bus.PublishAsync(new SendWhatsAppTextCommand(from, copy));
+    }
 }
 
 internal static class FeedbackCopy
@@ -601,7 +636,7 @@ internal static class FeedbackCopy
         "Sorry, didn't catch that. Reply YES if the job is done, NO if it didn't happen, "
         + "or IN PROGRESS if you're still working on it.";
     public const string StopAck = "Got it — we won't ask about this one again.";
-    public const string SkippedAck = "Thanks — recorded that. No more questions on this one.";
+    public const string SkippedAck = "Got it — we'll close this one out. No more questions on this one.";
     public const string CaptureNoReasonAck = "Thanks — that helps us improve.";
     public const string AwaitingEtaGotIt = "Got your ETA — one sec…";
     public const string AwaitingEtaRetry =

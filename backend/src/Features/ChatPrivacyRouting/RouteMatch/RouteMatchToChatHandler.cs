@@ -1,5 +1,6 @@
 using System.Globalization;
 using Hook.Features.ChatSession;
+using Hook.Features.Tips;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Pipeline.PostCommitSends;
 using Hook.Shared.Whatsapp;
@@ -58,7 +59,7 @@ public sealed class RouteMatchToChatHandler(
         providerText = RequestDetailsFormatter.AppendIfPresent(providerText, cmd.Description);
 
         if (PhoneNumber.TryParse(cmd.ClientPhone, out var client))
-            await bus.PublishAsync(new SendWhatsAppTextCommand(client, clientText));
+            await bus.PublishAsync(new SendWhatsAppTextCommand(client, clientText, Tip: TipTrigger.AfterChatOpened));
         if (providerParsed)
             await bus.PublishAsync(new SendWhatsAppTextCommand(provider, providerText));
 

@@ -1,5 +1,6 @@
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
+using Hook.Features.Ai.PlatformQa;
 using Hook.Features.Feedback;
 using Hook.Features.Geocoding.Geocode;
 using Hook.Features.Geocoding.Models;
@@ -7,6 +8,7 @@ using Hook.Features.ProviderAvailability.AvailabilityAggregate;
 using Hook.Features.ProviderAvailability.Refresh;
 using Hook.Features.ProviderAvailability.Register.ExtractServices;
 using Hook.Features.ServiceRequest.RequestAggregate;
+using Hook.Features.Tips;
 using Hook.Features.Whatsapp.Models;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Pipeline.PostCommitSends;
@@ -22,6 +24,7 @@ public sealed class RegistrationOrchestrator(
     IFeedbackRepository feedback,
     IMessageBus bus,
     ProviderRefreshScheduler refreshScheduler,
+    PlatformQaDispatcher platformQa,
     IOptions<ProviderAvailabilityOptions> options,
     TimeProvider clock,
     ILogger<RegistrationOrchestrator> logger)
@@ -49,6 +52,10 @@ public sealed class RegistrationOrchestrator(
                     "You are unlisted. Reply 'I offer …' to list again, or 'I need …' to request a service."));
                 return;
             }
+
+            // Mid-flow Q&A for listed providers is handled by the cold-path
+            // short-circuit in InboundRouter (no reg draft is active here), so
+            // there is no branch for it in this orchestrator.
 
             // Pending add-service confirmation: a previous inbound proposed new
             // slugs and asked YES/EDIT. Drive that flow before treating this
@@ -94,6 +101,22 @@ public sealed class RegistrationOrchestrator(
             existingDraft = null;
         }
         var draft = existingDraft ?? RegistrationDraft.Start(phone.Value, now);
+
+        // Mid-flow Q&A (unlisted provider with active draft): answer asynchronously
+        // and re-prompt the current step so the funnel stays on track. Runs BEFORE
+        // Touch/UpsertAsync — spam Q&A must not extend the draft's UpdatedAt.
+        if (existingDraft is not null
+            && message.Kind == InboundMessageKind.Text
+            && QuickIntent.LooksLikePlatformQuestion(message.Text)
+            && QuickIntent.Detect(message.Text) is null
+            && QuickIntent.DetectIntentHint(message.Text) is null)
+        {
+            await platformQa.DispatchMidFlowAsync(
+                phone, message.Text ?? string.Empty, "en", draft.Step.ToString());
+            await RepromptCurrentRegStepAsync(draft, phone, ct);
+            return;
+        }
+
         if (existingDraft is not null) draft.Touch(now);
 
         switch (draft.Step)
@@ -356,6 +379,14 @@ public sealed class RegistrationOrchestrator(
             "Reply YES to confirm this address, or send your GPS pin instead."));
     }
 
+    // Canonical re-prompt per registration step. Delegates to RegistrationStepPrompts
+    // so the orchestrator's mid-flow-Q&A re-prompt and the per-step handlers share
+    // one source of truth for the wording.
+    private ValueTask RepromptCurrentRegStepAsync(
+        RegistrationDraft draft, PhoneNumber phone, CancellationToken ct) =>
+        bus.PublishAsync(new SendWhatsAppTextCommand(
+            phone, RegistrationStepPrompts.For(draft.Step)));
+
     private async Task CollectConsentAsync(
         RegistrationDraft draft,
         InboundMessage message,
@@ -436,7 +467,7 @@ public sealed class RegistrationOrchestrator(
                 $"You are listed for {options.Value.ExpiryHours}h. " +
                 "Reply 'I offer …' anytime to update your services, " +
                 "or LEAVE to unlist.";
-            await bus.PublishAsync(new SendWhatsAppTextCommand(phone, text));
+            await bus.PublishAsync(new SendWhatsAppTextCommand(phone, text, Tip: TipTrigger.AfterDraftDone));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

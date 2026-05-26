@@ -309,6 +309,31 @@ public static class QuickIntent
         return compact.Length >= 4 && FuzzyMatch.MatchesAny(compact, InProgressTokens, 1);
     }
 
+    // Interrogative leaders — the cheap deterministic gate the cold-path Q&A
+    // short-circuit and the mid-flow orchestrators check before falling back to
+    // the LLM. Trailing '?' is the dominant signal; the regex covers bare
+    // English question lead-ins. "is/are/will/who" deliberately omitted —
+    // they collide with service-request patterns ("is my pipe leaking",
+    // "are you free", "will it cost", "who can help") which the hint detector
+    // already classifies as ServiceRequest.
+    private static readonly Regex PlatformQuestionRx = new(
+        @"^\s*(what|how|why|when|where|which|can|could|does|do|should)\b",
+        RxOpts);
+
+    /// <summary>True when the text reads as an English question — either ends with '?' or
+    /// leads with an interrogative pronoun/auxiliary, AND no deterministic service-request /
+    /// provider-registration hint applies (those hints win — e.g. "is my pipe leaking?"
+    /// reads as ServiceRequest, not a platform question). Used as a deterministic prefilter
+    /// before publishing <c>AnswerPlatformQuestionCommand</c>.</summary>
+    public static bool LooksLikePlatformQuestion(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var s = text.Trim();
+        if (s.Length < 3) return false;
+        if (!s.EndsWith('?') && !PlatformQuestionRx.IsMatch(s)) return false;
+        return DetectIntentHint(text) is null;
+    }
+
     private static readonly Regex RelativeEtaRx = new(
         @"\bin\s+(\d{1,3})\s+(hour|hr|minute|min|day)s?\b",
         RxOpts);
