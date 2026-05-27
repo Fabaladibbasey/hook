@@ -2,9 +2,10 @@ using System.Collections.Frozen;
 
 namespace Hook.Features.Tips;
 
-// One source of truth for every appended tip. Adding a new tip is append-only —
-// the TipPicker hashes phone → index so reordering changes which tip a contact
-// sees first; not a correctness issue, but be aware.
+// One source of truth for every appended tip. Insertion, reorder, and removal
+// all shift which tip a contact sees first, because TipPicker indexes with
+// `hash % (uint)candidates.Count` — both the modulus AND the array position of
+// each tip enter the pick. Not a correctness issue, but be aware.
 public static class TipCatalog
 {
     private static readonly IReadOnlyList<Tip> AllTips =
@@ -41,6 +42,20 @@ public static class TipCatalog
             "Tip: You can still abandon this with CANCEL until you connect with a provider."),
         new("draft:leave-provider",       TipTrigger.AfterDraftDone,
             "Tip: If you're a listed provider, reply LEAVE any time to unlist."),
+
+        // User-requested bucket — answers "what does this platform do for me?"
+        // not situational. Same deterministic phone-hash pick rule as every other
+        // bucket; repeated TIP within cooldown returns "no new tip" via the dispatcher.
+        new("ask:request-or-register",    TipTrigger.UserRequested,
+            "Tip: Reply REQUEST to start a new service request, or REGISTER to list yourself as a provider."),
+        new("ask:pick-by-number",         TipTrigger.UserRequested,
+            "Tip: Pick a match by number — \"1\" or \"PICK 2\" both work."),
+        new("ask:new",                    TipTrigger.UserRequested,
+            "Tip: Reply NEW to close the current request and start a fresh one."),
+        new("ask:next-increase",          TipTrigger.UserRequested,
+            "Tip: Replying NEXT shows more matches; INCREASE widens the search radius."),
+        new("ask:free-during-launch",     TipTrigger.UserRequested,
+            "Tip: The platform is free during launch. You pay the provider directly for the work."),
     ];
 
     public static readonly FrozenDictionary<TipTrigger, IReadOnlyList<Tip>> ByTrigger =

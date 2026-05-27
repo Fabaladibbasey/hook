@@ -17,6 +17,7 @@ public sealed class FakeConversationAi : IConversationAi
     public int ExtractStep2IntentCalls { get; private set; }
     public int ExtractConfirmIntentCalls { get; private set; }
     public int AnswerPlatformQuestionCalls { get; private set; }
+    public string LastAnswerPlatformQuestionLocale { get; private set; } = string.Empty;
 
     /// <summary>Force a specific (intent, confidence) for a given exact input — useful
     /// for integration tests that need to drive low-confidence disambiguation paths.</summary>
@@ -37,6 +38,7 @@ public sealed class FakeConversationAi : IConversationAi
         ExtractStep2IntentCalls = 0;
         ExtractConfirmIntentCalls = 0;
         AnswerPlatformQuestionCalls = 0;
+        LastAnswerPlatformQuestionLocale = string.Empty;
     }
 
     public Task PingAsync(CancellationToken ct = default) => Task.CompletedTask;
@@ -326,6 +328,7 @@ public sealed class FakeConversationAi : IConversationAi
         CancellationToken ct = default)
     {
         AnswerPlatformQuestionCalls++;
+        LastAnswerPlatformQuestionLocale = locale;
         if (_platformAnswerOverrides.TryGetValue(question, out var overridden))
             return Task.FromResult(overridden);
 

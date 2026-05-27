@@ -27,20 +27,29 @@ public class TipCatalogTests
     }
 
     [Fact]
-    public void Keys_FitInColumn()
+    public void Keys_FitInMetricTagBudget()
     {
+        // Tip keys flow into metric tags + log fields; cap at 64 chars to keep
+        // dashboards legible. (Cooldown is now per-trigger jsonb, not per-key.)
         foreach (var tip in TipCatalog.ByTrigger.SelectMany(kv => kv.Value))
         {
             tip.Key.Length.ShouldBeLessThanOrEqualTo(64,
-                $"key '{tip.Key}' exceeds LastTipKey column maxLength (64).");
+                $"key '{tip.Key}' exceeds metric-tag length budget (64).");
         }
+    }
+
+    [Fact]
+    public void UserRequested_BucketIsNonEmpty()
+    {
+        TipCatalog.ByTrigger[TipTrigger.UserRequested].Count.ShouldBeGreaterThanOrEqualTo(3,
+            "user-requested bucket too small — repeated TIP within cooldown returns 'no new tip' for all picks");
     }
 
     [Fact]
     public void Keys_AreGloballyUnique_AcrossTriggers()
     {
-        // Cooldown indexing keys on the contact's LastTipKey only — a key reused
-        // across triggers would silently share a cooldown across both.
+        // Globally-unique keys keep metric tags + log fields unambiguous so an
+        // operator can see "which tip fired" without disambiguating by trigger.
         var all = TipCatalog.ByTrigger.SelectMany(kv => kv.Value).ToArray();
         all.Select(t => t.Key).Distinct(StringComparer.Ordinal).Count().ShouldBe(all.Length);
     }

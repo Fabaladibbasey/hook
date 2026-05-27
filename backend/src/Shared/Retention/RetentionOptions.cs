@@ -27,5 +27,12 @@ public sealed class RetentionOptions
     [Range(typeof(TimeSpan), "00:01:00", "7.00:00:00")]
     public TimeSpan PendingFeedbackClaimAfter { get; init; } = TimeSpan.FromDays(1);
 
+    // Tiny per-(phone, question-hash) rows lose their dedup signal past the
+    // PlatformAnswerOptions.DedupWindowSeconds horizon — prune at a much
+    // shorter cadence than the 7d global retention so the table stays bounded
+    // under question-spam load without waiting a week.
+    [Range(typeof(TimeSpan), "00:01:00", "7.00:00:00")]
+    public TimeSpan PlatformAnswerDedupCleanupAfter { get; init; } = TimeSpan.FromHours(1);
+
     public bool Enabled { get; init; } = true;
 }

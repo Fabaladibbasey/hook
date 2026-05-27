@@ -551,9 +551,14 @@ public sealed class OllamaConversationAi(
         // when the leading bytes are identical. Putting the invariant KB before
         // the per-call locale + question lets warm calls skip the prefill of the
         // largest segment of the prompt.
+        //
+        // The KB is wrapped in <knowledge_base> tags so the system prompt can
+        // refer to it as data — defence-in-depth in case a future KB file is
+        // sourced from a less-trusted channel than today's embedded resources.
         var prompt = $$"""
-            Knowledge base (authoritative — only answer from this):
+            <knowledge_base>
             {{knowledgeBase}}
+            </knowledge_base>
 
             Reply in language: {{safeLocale}}
 
@@ -570,7 +575,15 @@ public sealed class OllamaConversationAi(
         if (string.IsNullOrWhiteSpace(reply)) return null;
         // Drop if the model echoed jailbreak markers from the user input back at us
         // (defence-in-depth — the system prompt already refuses prompt-leak attempts).
-        if (PromptSafety.IsLikelyJailbreak(reply)) return null;
+        // Tag the metric so DoS-via-jailbreak-echo (attacker churning the dedup
+        // table by forcing fallbacks) is observable before tightening further.
+        if (PromptSafety.IsLikelyJailbreak(reply))
+        {
+            HookMetrics.AiOutboundDropped.Add(1,
+                new KeyValuePair<string, object?>("stage", "platform-answer"),
+                new KeyValuePair<string, object?>("reason", "jailbreak-echo"));
+            return null;
+        }
         return reply.Trim();
     }
 

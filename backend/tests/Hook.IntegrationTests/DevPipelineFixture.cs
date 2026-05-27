@@ -188,7 +188,16 @@ public sealed class DevPipelineFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        await Factory.DisposeAsync();
+        // Wolverine 5.x cancels its internal CTS at the start of graceful shutdown
+        // and then runs MessageStoreCollection.ReleaseAllOwnershipAsync to reassign
+        // in-flight envelopes. Under high cascade pressure (e.g. [NonTransactional]
+        // AI-stage handlers leaving 20+ envelopes queued at the end of the last
+        // test) that Npgsql command observes the canceled token and the OCE escapes
+        // WAF.DisposeAsync, surfacing as "Test Collection Cleanup Failure" and
+        // failing CI even when every test passed. The shard DB is dropped on the
+        // next lines, so residual envelopes vanish anyway.
+        try { await Factory.DisposeAsync(); }
+        catch (OperationCanceledException) { }
 
         // Static container; the per-shard clone is dropped here. The container itself
         // is reaped by Testcontainers' Ryuk sidecar (enabled by default) on abnormal

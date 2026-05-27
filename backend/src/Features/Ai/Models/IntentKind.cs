@@ -20,5 +20,6 @@ public enum IntentKind
     FeedbackResponse = 11,
     Greeting = 12,
     NewRequest = 13,
-    PlatformQuestion = 14
+    PlatformQuestion = 14,
+    TipRequest = 15
 }

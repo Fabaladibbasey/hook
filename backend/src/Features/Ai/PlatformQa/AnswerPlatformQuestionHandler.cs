@@ -23,20 +23,15 @@ public sealed class AnswerPlatformQuestionHandler(
         "I'm not sure about that. Try rephrasing, or send REQUEST / REGISTER to use the platform.";
 
     private static readonly FrozenDictionary<string, string> LocalisedFallbacks =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["en"] = Fallback,
             ["fr"] = "Je ne suis pas sûr. Reformulez votre question, ou envoyez REQUEST / REGISTER pour utiliser la plateforme.",
             ["ar"] = "لست متأكدا. أعد صياغة سؤالك، أو أرسل REQUEST / REGISTER لاستخدام المنصة.",
             ["wo"] = "Xamuma. Soppi sa laaj, walla yónnee REQUEST / REGISTER ngir jëfandikoo plateforme bi.",
         }.ToFrozenDictionary();
 
-    internal static string FallbackFor(string? locale)
-    {
-        if (string.IsNullOrEmpty(locale) || locale.Length < 2) return Fallback;
-        var key = locale[..2].ToLowerInvariant();
-        return LocalisedFallbacks.TryGetValue(key, out var s) ? s : Fallback;
-    }
+    internal static string FallbackFor(string? locale) =>
+        LocalisedString.For(locale, LocalisedFallbacks, Fallback);
 
     // [NonTransactional]: AI inference takes 60-150s; opt out of AutoApplyTransactions
     // so the handler doesn't pin an Npgsql connection across the Ollama window.
@@ -44,18 +39,8 @@ public sealed class AnswerPlatformQuestionHandler(
     [NonTransactional]
     public async Task Handle(AnswerPlatformQuestionCommand cmd, CancellationToken ct)
     {
-        // Suppress a duplicate Ollama call when a Wolverine retry replays the same
-        // (phone, question) within the dedup window. Done BEFORE the AI call so a
-        // transient publish failure on the SendWhatsApp side doesn't double-bill us
-        // for inference on the next attempt.
-        var hash = unchecked((long)XxHash64.HashToUInt64(Encoding.UTF8.GetBytes(cmd.Question)));
-        if (!await dedup.TryClaimAsync(cmd.To.Value, hash, ct))
-        {
-            logger.LogDebug("PlatformAnswer dedup skip for {To}", cmd.To.Mask());
-            return;
-        }
-
         var reply = await ai.AnswerPlatformQuestionAsync(cmd.Question, cmd.Locale, kb.Content, ct);
+        string body;
         if (string.IsNullOrWhiteSpace(reply))
         {
             HookMetrics.AiOutboundDropped.Add(1,
@@ -63,10 +48,41 @@ public sealed class AnswerPlatformQuestionHandler(
                 new KeyValuePair<string, object?>("reason", "fallback"));
             logger.LogInformation(
                 "PlatformAnswer fallback for {To} ctx={Ctx}", cmd.To.Mask(), cmd.ReplyContextHint);
-            await bus.PublishAsync(new SendWhatsAppTextCommand(cmd.To, FallbackFor(cmd.Locale)));
-            return;
+            body = FallbackFor(cmd.Locale);
+        }
+        else
+        {
+            body = reply;
         }
 
-        await bus.PublishAsync(new SendWhatsAppTextCommand(cmd.To, reply));
+        // Publish FIRST so a DLQ on the answer envelope does not silently
+        // drop the user's answer on operator replay. Claim AFTER so the dedup
+        // row reflects "we did send" rather than "we plan to send".
+        await bus.PublishAsync(new SendWhatsAppTextCommand(cmd.To, body));
+
+        // Post-publish best-effort cost-suppression record. Failure here is
+        // swallowed — including OCE — because a Wolverine retry would re-run
+        // Ollama AND re-publish a duplicate answer. The dedup row is best-effort
+        // cost-suppression; user-facing delivery already happened.
+        var hash = unchecked((long)XxHash64.HashToUInt64(Encoding.UTF8.GetBytes(cmd.Question)));
+        try
+        {
+            var claimed = await dedup.TryClaimAsync(cmd.To.Value, hash, ct);
+            if (!claimed)
+            {
+                HookMetrics.AiOutboundDropped.Add(1,
+                    new KeyValuePair<string, object?>("stage", "platform-answer"),
+                    new KeyValuePair<string, object?>("reason", "dedup-row-present"));
+                logger.LogDebug(
+                    "PlatformAnswer dedup row already present post-publish for {To}", cmd.To.Mask());
+            }
+        }
+        catch (Exception ex)
+        {
+            HookMetrics.AiOutboundDropped.Add(1,
+                new KeyValuePair<string, object?>("stage", "platform-answer"),
+                new KeyValuePair<string, object?>("reason", "dedup-persist-failed"));
+            logger.LogWarning(ex, "PlatformAnswer dedup persist failed for {To}", cmd.To.Mask());
+        }
     }
 }

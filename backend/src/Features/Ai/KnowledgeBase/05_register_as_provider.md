@@ -6,11 +6,11 @@
 2. **Confirm services.** The bot confirms the service slug(s). You can list up to 5 services on one listing.
 3. **Share location.** Send a WhatsApp location pin or type your address.
 4. **Confirm consent.** The bot asks whether the platform may share your phone number with matched clients. You can say no — in that case clients reach you only through the encrypted chat link.
-5. **You are listed for 24 hours.** Nearby clients picking your service may pick you; the bot pings you when they do.
+5. **You are listed for up to 24 hours per session.** Nearby clients picking your service may pick you; the bot pings you when they do. A little before the listing expires, the bot pings you with a refresh prompt — reply and the timer extends. Any reply from your number extends the timer; sending `LEAVE` unlists you.
 
 ## Heartbeat
 
-Your listing extends each time you continue a registration step or send a funnel command. Off-topic messages do not extend it. If you go quiet for the retention window, the listing flag-expires and is eventually hard-deleted.
+Your listing extends each time you send any reply to the bot. To unlist before the 24-hour window, send `LEAVE`. The listing flag-expires if you go quiet for the full retention window and is eventually hard-deleted.
 
 ## Commands you can send
 

@@ -135,8 +135,33 @@ public class QuickIntentTests
     [InlineData("new!", IntentKind.NewRequest)]
     [InlineData("yes,", IntentKind.Confirmation)]
     [InlineData("no,", IntentKind.Rejection)]
+    // Tip request — phrase variants. Bare "tip"/"tips"/"advice" are caught by
+    // DetectIntentHint (see TipRequest_BareKeywords below), not by Detect.
+    [InlineData("any tip", IntentKind.TipRequest)]
+    [InlineData("Any Tip", IntentKind.TipRequest)]
+    [InlineData("any tips", IntentKind.TipRequest)]
+    [InlineData("got a tip", IntentKind.TipRequest)]
+    [InlineData("got tips", IntentKind.TipRequest)]
+    [InlineData("got any tips", IntentKind.TipRequest)]
+    [InlineData("any advice", IntentKind.TipRequest)]
+    [InlineData("got advice", IntentKind.TipRequest)]
+    [InlineData("give me a tip", IntentKind.TipRequest)]
+    [InlineData("tip please", IntentKind.TipRequest)]
+    [InlineData("any tip?", IntentKind.TipRequest)]
     public void Detect_KnownInputs(string input, IntentKind expected)
         => Assert.Equal(expected, QuickIntent.Detect(input));
+
+    [Theory]
+    [InlineData("tip")]
+    [InlineData("TIP")]
+    [InlineData(" Tip ")]
+    [InlineData("tips")]
+    [InlineData("advice")]
+    [InlineData("tip.")]
+    [InlineData("tip!")]
+    [InlineData("tip?")]
+    public void DetectIntentHint_BareKeywords_ReturnTipRequest(string input)
+        => Assert.Equal(IntentKind.TipRequest, QuickIntent.DetectIntentHint(input));
 
     [Theory]
     [InlineData(null)]

@@ -8,4 +8,5 @@ public enum TipTrigger
     AfterContactShared = 2,
     AfterChatOpened = 3,
     AfterDraftDone = 4,
+    UserRequested = 5,
 }

@@ -158,6 +158,15 @@ public static class QuickIntent
         ("youre right",    IntentKind.Confirmation),
         ("you got it",    IntentKind.Confirmation),
         ("got it",        IntentKind.Confirmation),
+        ("any tip",       IntentKind.TipRequest),
+        ("any tips",      IntentKind.TipRequest),
+        ("got a tip",     IntentKind.TipRequest),
+        ("got tips",      IntentKind.TipRequest),
+        ("got any tips",  IntentKind.TipRequest),
+        ("any advice",    IntentKind.TipRequest),
+        ("got advice",    IntentKind.TipRequest),
+        ("give me a tip", IntentKind.TipRequest),
+        ("tip please",    IntentKind.TipRequest),
         ("sounds good",   IntentKind.Confirmation),
         ("sounds right",  IntentKind.Confirmation),
         ("that's it",     IntentKind.Confirmation),
@@ -366,19 +375,23 @@ public static class QuickIntent
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
         var s = text.Trim();
-        // Short utterances handled by Detect (yes/no/edit/etc) shouldn't be re-classified here.
-        if (s.Length < 4) return null;
 
         // Bare-keyword shortcuts: single words the bot advertises ("REQUEST a service",
-        // "Reply HIRE or OFFER"). Deterministic so the LLM never sees them.
+        // "Reply HIRE or OFFER", "TIP for usage guidance"). Deterministic so the LLM
+        // never sees them. Lifted above the length floor so 3-char "tip" matches.
         var lower = s.ToLowerInvariant().TrimEnd('.', '!', '?');
         var bareIntent = lower switch
         {
             "request" or "hire" => (IntentKind?)IntentKind.ServiceRequest,
             "register" or "offer" => IntentKind.ProviderRegistration,
+            "tip" or "tips" or "advice" => IntentKind.TipRequest,
             _ => null
         };
         if (bareIntent is not null) return bareIntent;
+
+        // Short utterances handled by Detect (yes/no/edit/etc) shouldn't be re-classified
+        // against the regex HintRules.
+        if (s.Length < 4) return null;
 
         foreach (var (rx, intent) in HintRules)
             if (rx.IsMatch(s)) return intent;

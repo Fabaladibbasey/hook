@@ -7,14 +7,14 @@ namespace Hook.Features.ServiceRequest.Create;
 // still waiting for X".
 internal static class ClientRequestStepPrompts
 {
-    public static string For(ClientRequestStep step, string? draftServiceSlug = null) => step switch
+    public static string For(ClientRequestStep step, string draftServiceSlug = "") => step switch
     {
         ClientRequestStep.AwaitingService =>
             "What service do you need? Reply with something like \"I need a plumber\".",
         ClientRequestStep.ResolvingService =>
             "Still looking up your earlier message — one moment.",
         ClientRequestStep.ConfirmService =>
-            $"Please reply YES or NO — YES to confirm {(draftServiceSlug ?? string.Empty).Replace('-', ' ')}, "
+            $"Please reply YES or NO — YES to confirm {draftServiceSlug.Replace('-', ' ')}, "
             + "NO to choose another service.",
         ClientRequestStep.AwaitingLocation =>
             "Send your location pin (or type your address).",

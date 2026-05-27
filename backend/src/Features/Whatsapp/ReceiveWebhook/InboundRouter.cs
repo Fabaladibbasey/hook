@@ -9,6 +9,7 @@ using Hook.Features.ProviderAvailability.Register;
 using Hook.Features.ServiceRequest.Create;
 using Hook.Features.ServiceRequest.IterateMatches;
 using Hook.Features.ServiceRequest.RequestAggregate;
+using Hook.Features.Tips;
 using Hook.Features.Whatsapp.Models;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Features.Whatsapp.ReceiveWebhook.ClassifyInboundIntent;
@@ -36,6 +37,7 @@ public sealed class InboundRouterHandler(
     FeedbackResponseService feedbackService,
     IWhatsappContactRepository contacts,
     PlatformQaDispatcher platformQa,
+    TipDispatcher tipDispatcher,
     TimeProvider clock,
     ILogger<InboundRouterHandler> logger)
 {
@@ -96,6 +98,27 @@ public sealed class InboundRouterHandler(
             // Persist contact AFTER the cancel/abandon detection so a CANCEL inbound that
             // tears down a draft does not extend the contact's last-inbound timestamp.
             await contacts.UpsertInboundAsync(phone, clock.GetUtcNow(), ct);
+        }
+
+        // Bare-tip early route: deterministic "tip"/"tips"/"advice"/"any tip" must
+        // reach TipDispatcher BEFORE the draft checks below — otherwise a mid-flow
+        // user typing "tip" gets the token treated as a draft input. CANCEL stays
+        // a winner above (disjoint tokens); the LLM-classified TipRequest at the
+        // switch-case still handles verbose tip questions that miss the detectors.
+        if (quickIntent is IntentKind.TipRequest || hint is IntentKind.TipRequest)
+        {
+            logger.LogDebug("Bare-tip early route → TipDispatcher for {Phone}", masked);
+            // Listed-provider parity: every inbound from a listed provider
+            // extends the TTL (Greeting/Unknown already do this further down).
+            // Heartbeat silently first so a listed provider asking for a tip
+            // does not silently let their listing expire; TipDispatcher then
+            // sends the visible reply.
+            if (await providers.GetAsync(phone, ct) is not null)
+            {
+                await registrationOrchestrator.HeartbeatSilentAsync(msg.From, clock.GetUtcNow(), ct);
+            }
+            await tipDispatcher.DispatchAsync(msg.From, ct);
+            return;
         }
 
         // Lazy lookups in the order the router consumes them — first hit short-circuits
@@ -160,17 +183,23 @@ public sealed class InboundRouterHandler(
             && !QuickIntent.DetectReschedule(text)
             && !QuickIntent.DetectInProgress(text))
         {
+            // Lazy locale fetch — only inside the deterministic Q&A short-circuit.
+            // LocaleValidator.Sanitize folds an empty PreferredLocale back to "en",
+            // preserving cold-account behaviour. Persisted by the classifier handler
+            // on every LLM-routed inbound, so repeat questioners see their language.
+            var locale = LocaleValidator.Sanitize(await contacts.GetPreferredLocaleAsync(phone, ct));
+
             if (pendingFeedback is not null)
             {
                 logger.LogDebug("Route → Q&A mid-flow + re-prompt for {Phone}", masked);
                 await platformQa.DispatchMidFlowAsync(
-                    msg.From, text, "en", pendingFeedback.Step.ToString());
+                    msg.From, text, locale, pendingFeedback.Step.ToString());
                 await feedbackService.RepromptOpenStepAsync(msg.From, pendingFeedback, ct);
             }
             else
             {
                 logger.LogDebug("Cold-path Q&A short-circuit for {Phone}", masked);
-                await platformQa.DispatchColdAsync(msg.From, text, "en", "cold-deterministic");
+                await platformQa.DispatchColdAsync(msg.From, text, locale, "cold-deterministic");
             }
             return;
         }
@@ -306,7 +335,7 @@ public sealed class InboundRouterHandler(
                 }
                 logger.LogDebug("Cold reply (greeting-reply) for {Phone}", masked);
                 await SendColdReplyAsync(
-                    msg.From, text, detected, "greeting-reply", ct, tip: Tips.TipTrigger.AfterWelcome);
+                    msg.From, text, detected, "greeting-reply", ct, tip: TipTrigger.AfterWelcome);
                 return;
             case IntentKind.Unknown:
                 if (listedProvider is not null)
@@ -321,6 +350,10 @@ public sealed class InboundRouterHandler(
                 }
                 logger.LogDebug("Cold reply (out-of-scope) for {Phone}", masked);
                 await SendColdReplyAsync(msg.From, text, detected, "out-of-scope", ct);
+                return;
+            case IntentKind.TipRequest:
+                logger.LogDebug("Route → TipDispatcher for {Phone}", masked);
+                await tipDispatcher.DispatchAsync(msg.From, ct);
                 return;
             case IntentKind.Cancel:
                 await AbandonAsync(phone, msg.From, ct);
@@ -395,7 +428,7 @@ public sealed class InboundRouterHandler(
         IntentDetectionResult detected,
         string purpose,
         CancellationToken ct,
-        Tips.TipTrigger? tip = null) =>
+        TipTrigger? tip = null) =>
         bus.PublishAsync(new SendColdReplyCommand(from, text, detected, purpose, Tip: tip));
 
     private async Task TryPickAsync(

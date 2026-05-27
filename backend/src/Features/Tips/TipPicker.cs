@@ -21,14 +21,16 @@ public sealed class TipPicker(
         if (state is null) return null;
 
         // Deterministic stable pick — same phone always maps to the same tip for a
-        // trigger. Cooldown is a single global-per-contact gate via state.LastTipAt;
-        // a per-tip MinIntervalHours override raises the floor for that tip only.
+        // trigger. Cooldown is per-trigger: an AfterWelcome cooldown does not block
+        // a UserRequested tip on the same contact. Missing key = no prior send,
+        // gates trivially open. Per-tip MinIntervalHours raises the floor only.
         var index = HashIndex(phone, candidates.Count);
         var tip = candidates[index];
 
         var cooldownHours = tip.MinIntervalHours > 0 ? tip.MinIntervalHours : opts.DefaultCooldownHours;
+        var lastSent = state.Cooldowns.GetValueOrDefault(trigger, DateTimeOffset.MinValue);
         var now = clock.GetUtcNow();
-        if (now - state.LastTipAt < TimeSpan.FromHours(cooldownHours))
+        if (now - lastSent < TimeSpan.FromHours(cooldownHours))
             return null;
 
         return tip;

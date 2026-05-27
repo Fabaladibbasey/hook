@@ -9,6 +9,7 @@ public static class TipsServiceCollectionExtensions
         // (which holds the scoped HookDbContext). Wolverine handlers resolve from a
         // per-envelope scope so this matches the SendWhatsAppTextHandler lifetime.
         services.AddScoped<ITipPicker, TipPicker>();
+        services.AddScoped<TipDispatcher>();
         return services;
     }
 }

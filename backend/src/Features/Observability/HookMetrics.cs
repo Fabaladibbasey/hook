@@ -44,14 +44,17 @@ public static class HookMetrics
     public static readonly Counter<long> RateLimitBlocks =
         Meter.CreateCounter<long>("hook.ratelimit.blocks");
 
-    public static readonly Counter<long> RetentionDeleted =
-        Meter.CreateCounter<long>("hook.retention.deleted.total");
+    public static readonly Counter<long> RetentionSwept =
+        Meter.CreateCounter<long>("hook.retention.swept.total");
 
     public static readonly Histogram<double> RetentionSweepDuration =
         Meter.CreateHistogram<double>("hook.retention.sweep.duration_ms");
 
     public static readonly Counter<long> RetentionSweepErrors =
         Meter.CreateCounter<long>("hook.retention.sweep.errors");
+
+    public static readonly Counter<long> TipCooldownPersistFailures =
+        Meter.CreateCounter<long>("hook.tip.cooldown_persist.failures");
 
     public static readonly Counter<long> DlqIndexBootstrapMissedRetries =
         Meter.CreateCounter<long>("hook.dlq_index_bootstrap.missed_retries");

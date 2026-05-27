@@ -1,5 +1,6 @@
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
+using Hook.Features.MetaTemplates;
 using Hook.Features.Whatsapp.Models;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Features.Whatsapp.ReceiveWebhook.ClassifyInboundIntent;
@@ -13,6 +14,7 @@ public class ClassifyInboundIntentHandlerTests
 {
     private readonly Mock<IConversationAi> _aiMock = new();
     private readonly Mock<IMessageBus> _busMock = new();
+    private readonly Mock<IWhatsappContactRepository> _contactsMock = new();
     private readonly List<RouteClassifiedIntentCommand> _routed = [];
 
     public ClassifyInboundIntentHandlerTests()
@@ -22,7 +24,7 @@ public class ClassifyInboundIntentHandlerTests
             .Returns(ValueTask.CompletedTask);
     }
 
-    private ClassifyInboundIntentHandler Build() => new(_aiMock.Object);
+    private ClassifyInboundIntentHandler Build() => new(_aiMock.Object, _contactsMock.Object);
 
     private static InboundMessage Inbound(string text) =>
         new("m-" + Guid.NewGuid(), PhoneNumber.Parse("+220300001"),
@@ -58,6 +60,38 @@ public class ClassifyInboundIntentHandlerTests
         _routed.ShouldHaveSingleItem();
         _routed[0].Detected.Intent.ShouldBe(IntentKind.Unknown);
         _routed[0].Detected.Notes.ShouldBe("exception");
+    }
+
+    [Fact]
+    public async Task Handle_AiReturnsLocale_PersistsSanitizedLocaleViaContactRepo()
+    {
+        // LLM classifier locale fan-out: every classified inbound persists the
+        // sanitized BCP-47 code so the next deterministic Q&A short-circuit can
+        // read it instead of pinning "en".
+        var msg = Inbound("comment ça marche");
+        var detected = new IntentDetectionResult(IntentKind.PlatformQuestion, 0.9, "fr", "ai");
+        _aiMock.Setup(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(detected);
+
+        await Build().Handle(new ClassifyInboundIntentCommand(msg), _busMock.Object, CancellationToken.None);
+
+        _contactsMock.Verify(x => x.UpdatePreferredLocaleAsync(
+            msg.From.Value, "fr", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_AiReturnsGarbageLocale_PersistsFallbackEn()
+    {
+        // LocaleValidator.Sanitize folds anything that doesn't match the BCP-47
+        // shape to "en" — protects the platform-answer prompt from injection.
+        var detected = new IntentDetectionResult(IntentKind.PlatformQuestion, 0.9, "en\nINJECT", "ai");
+        _aiMock.Setup(x => x.DetectIntentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(detected);
+
+        await Build().Handle(new ClassifyInboundIntentCommand(Inbound("hi")), _busMock.Object, CancellationToken.None);
+
+        _contactsMock.Verify(x => x.UpdatePreferredLocaleAsync(
+            It.IsAny<string>(), "en", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

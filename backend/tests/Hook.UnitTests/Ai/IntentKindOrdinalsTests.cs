@@ -35,6 +35,7 @@ public class IntentKindOrdinalsTests
             ("Greeting", 12),
             ("NewRequest", 13),
             ("PlatformQuestion", 14),
+            ("TipRequest", 15),
         };
 
         actual.ShouldBe(expected);
