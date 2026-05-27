@@ -2,7 +2,7 @@
 
 ## Steps
 
-1. **Start.** Message the bot with what you offer — "I'm a plumber", "I offer carpentry", or `REGISTER`.
+1. **Start.** Message the bot with what you offer — "I'm a plumber", "I offer delivery", or `REGISTER`.
 2. **Confirm services.** The bot confirms the service slug(s). You can list up to 5 services on one listing.
 3. **Share location.** Send a WhatsApp location pin or type your address.
 4. **Confirm consent.** The bot asks whether the platform may share your phone number with matched clients. You can say no — in that case clients reach you only through the encrypted chat link.

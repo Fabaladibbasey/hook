@@ -48,18 +48,25 @@ public sealed class PlatformKnowledgeBase
         // <knowledge_base>...</knowledge_base> fences. A KB file containing the
         // literal tag would break the fence and let prompt-injected content
         // escape into the system-prompt role. Fail fast at load.
+        ThrowIfPoisoned(content);
+
+        return TruncateSafe(content, maxChars);
+    }
+
+    internal static void ThrowIfPoisoned(string content)
+    {
         if (content.Contains("</knowledge_base>", StringComparison.OrdinalIgnoreCase)
             || content.Contains("<knowledge_base>", StringComparison.OrdinalIgnoreCase))
-        {
             throw new InvalidOperationException(
                 "PlatformKnowledgeBase: KB source contains a <knowledge_base> tag; "
               + "this would break the OllamaConversationAi prompt fence. Rename it.");
-        }
+    }
 
+    internal static string TruncateSafe(string content, int maxChars)
+    {
         if (content.Length <= maxChars) return content;
-
-        // Surrogate-pair safe truncation: if the cap lands on a high surrogate,
-        // back up one char so the resulting string is well-formed UTF-16.
+        // Surrogate-pair safe: if the cap lands on a high surrogate, back up one
+        // char so the resulting string is well-formed UTF-16.
         var cut = maxChars;
         if (char.IsHighSurrogate(content[cut - 1])) cut--;
         return content[..cut];

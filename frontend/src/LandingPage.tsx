@@ -35,6 +35,12 @@ export default function LandingPage() {
           <span className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-700">
             No app needed
           </span>
+          <span className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-700">
+            No login
+          </span>
+          <span className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-700">
+            24/7 support
+          </span>
           <Link
             to="/privacy"
             className="text-xs px-3 py-1 rounded-full bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"

@@ -1,6 +1,4 @@
 using System.Collections.Frozen;
-using System.IO.Hashing;
-using System.Text;
 using Hook.Features.Observability;
 using Hook.Shared.Pipeline.PostCommitSends;
 using Wolverine;
@@ -64,7 +62,7 @@ public sealed class AnswerPlatformQuestionHandler(
         // swallowed — including OCE — because a Wolverine retry would re-run
         // Ollama AND re-publish a duplicate answer. The dedup row is best-effort
         // cost-suppression; user-facing delivery already happened.
-        var hash = unchecked((long)XxHash64.HashToUInt64(Encoding.UTF8.GetBytes(cmd.Question)));
+        var hash = PlatformAnswerDedupKey.Of(cmd.Question);
         try
         {
             var claimed = await dedup.TryClaimAsync(cmd.To.Value, hash, ct);

@@ -2,7 +2,7 @@
 
 ## Steps
 
-1. **Start.** Message the bot on WhatsApp with what you need — e.g. "I need a plumber", "my fridge is broken", or just "REQUEST".
+1. **Start.** Message the bot on WhatsApp with what you need — e.g. "I need a plumber", "I need a ride", or just "REQUEST".
 2. **Confirm the service.** The bot asks "Do you need <service>?" — reply `YES` or `NO`.
 3. **Share location.** Send a WhatsApp location pin, or type your address. The bot geocodes the address to coordinates.
 4. **Describe the job (optional).** A short free-text description helps providers respond faster.

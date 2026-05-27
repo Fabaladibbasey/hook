@@ -81,4 +81,60 @@ public class PlatformKnowledgeBaseTests
     [InlineData("####### too many hashes")]
     public void StripMarkdownHeaders_PreservesNonAtx(string input) =>
         PlatformKnowledgeBase.StripMarkdownHeadersForTest(input).ShouldBe(input);
+
+    // --- Poison-tag guard ---
+
+    [Fact]
+    public void ThrowIfPoisoned_OpeningTag_Throws()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => PlatformKnowledgeBase.ThrowIfPoisoned("hello <knowledge_base> world"));
+        ex.Message.ShouldContain("knowledge_base");
+    }
+
+    [Fact]
+    public void ThrowIfPoisoned_ClosingTag_Throws()
+    {
+        Assert.Throws<InvalidOperationException>(
+            () => PlatformKnowledgeBase.ThrowIfPoisoned("</knowledge_base>"));
+    }
+
+    [Fact]
+    public void ThrowIfPoisoned_CaseInsensitive_Throws()
+    {
+        Assert.Throws<InvalidOperationException>(
+            () => PlatformKnowledgeBase.ThrowIfPoisoned("<KNOWLEDGE_BASE>"));
+    }
+
+    [Fact]
+    public void ThrowIfPoisoned_CleanContent_DoesNotThrow()
+    {
+        Should.NotThrow(() => PlatformKnowledgeBase.ThrowIfPoisoned("safe content here"));
+    }
+
+    // --- Surrogate-pair safe truncation ---
+
+    [Fact]
+    public void TruncateSafe_EmojiAtCutBoundary_BacksUpOneSurrogate()
+    {
+        // 🎉 = U+1F389 → surrogate pair: \uD83C (HIGH, index 6) + \uDF89 (LOW, index 7).
+        // maxChars=7: cut=7, content[cut-1]=content[6]=\uD83C IS a high surrogate
+        // → cut-- → cut=6 → content[..6] = "Hello ".
+        var content = "Hello \U0001F389world";
+        var result = PlatformKnowledgeBase.TruncateSafe(content, 7);
+        result.ShouldBe("Hello ");
+        result.Length.ShouldBe(6);
+    }
+
+    [Fact]
+    public void TruncateSafe_CutOnAscii_TruncatesExactly()
+    {
+        PlatformKnowledgeBase.TruncateSafe("Hello world", 5).ShouldBe("Hello");
+    }
+
+    [Fact]
+    public void TruncateSafe_ContentShorterThanMax_ReturnsUnchanged()
+    {
+        PlatformKnowledgeBase.TruncateSafe("Hi", 100).ShouldBe("Hi");
+    }
 }

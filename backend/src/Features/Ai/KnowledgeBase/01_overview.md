@@ -5,7 +5,7 @@ Hook is a WhatsApp-first marketplace that connects people who need a service ("c
 ## Two flows
 
 - **Request a service (client flow).** Tell the bot what you need ("I need a plumber"), share your location, and the bot matches you to nearby providers.
-- **Register as a provider (provider flow).** Tell the bot what you do ("I offer carpentry"), share your location, and you become listed. The bot pings you when a nearby client picks you.
+- **Register as a provider (provider flow).** Tell the bot what you do ("I offer delivery"), share your location, and you become listed. The bot pings you when a nearby client picks you.
 
 ## Two ways the bot connects you
 
@@ -18,4 +18,4 @@ Hook is not a hiring platform, not a payments platform, not a verification servi
 
 ## Support
 
-WhatsApp is the only support channel. There is no email, no phone line, no human agent.
+The bot is available 24/7 on WhatsApp. There is no email, no phone line, and no human agent — the bot handles all support.

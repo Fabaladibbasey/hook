@@ -252,4 +252,13 @@ public class PlatformQaDispatcherTests
         // falling back via 2-letter truncation (mnk → mn → miss → default).
         PlatformQaDispatcher.IdentityReplyForTest(locale).ShouldStartWith("I'm Hook —");
     }
+
+    [Theory]
+    [InlineData("ｗｈａｔ ｉｓ ｔｈｉｓ", "what is this")] // full-width letters → ASCII via NFKC
+    [InlineData("whoـareـyou",           "who are you")]   // Arabic tatweel U+0640 stripped
+    [InlineData("who‌are‍you",  "who are you")]   // ZWNJ+ZWJ replaced with spaces
+    public void Normalize_InvisibleUnicodeVariants_CanonicalisesToAscii(string input, string expected)
+    {
+        PlatformQaDispatcher.Normalize(input).ShouldBe(expected);
+    }
 }

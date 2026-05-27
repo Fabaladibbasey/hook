@@ -24,6 +24,11 @@ public sealed class TipPicker(
         // trigger. Cooldown is per-trigger: an AfterWelcome cooldown does not block
         // a UserRequested tip on the same contact. Missing key = no prior send,
         // gates trivially open. Per-tip MinIntervalHours raises the floor only.
+        //
+        // Multiple tips per trigger bucket provide catalog variety across the user
+        // population (different phones hash to different indices) but do NOT rotate
+        // for a single returning user — the pick is fixed by phone hash. If per-user
+        // rotation is ever desired, mix lastSent.Ticks/cooldownTicks into HashIndex.
         var index = HashIndex(phone, candidates.Count);
         var tip = candidates[index];
 

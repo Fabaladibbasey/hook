@@ -257,6 +257,32 @@ public sealed class RetentionSweeperTests : PipelineTestBase
     }
 
     [Fact]
+    public async Task Sweep_PendingFeedback_TightBoundary_OnlyBarelyStaleIsClaimed()
+    {
+        // SQL: f.PromptedAt < pendingCutoff (strict less-than).
+        // A row 1 second past the boundary IS claimed; 1 second inside is NOT.
+        // Tighter margin than the 1h/1min test — documents the strict < semantics.
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var opts = scope.ServiceProvider.GetRequiredService<IOptions<RetentionOptions>>().Value;
+        var now = DateTimeOffset.UtcNow;
+        var barelyStale = now - opts.PendingFeedbackClaimAfter - TimeSpan.FromSeconds(1);
+        var barelyFresh = now - opts.PendingFeedbackClaimAfter + TimeSpan.FromSeconds(1);
+
+        var (_, staleMatch) = await SeedRequestAndMatchAsync(db, barelyStale);
+        var (_, freshMatch) = await SeedRequestAndMatchAsync(db, barelyFresh);
+
+        db.MatchFeedback.AddRange(
+            MatchFeedback.CreatePending(staleMatch.Id, staleMatch.RequestId, FeedbackStep.DidYouFind, barelyStale),
+            MatchFeedback.CreatePending(freshMatch.Id, freshMatch.RequestId, FeedbackStep.DidYouFind, barelyFresh));
+        await db.SaveChangesAsync();
+
+        var result = await Resolve(scope.ServiceProvider).RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.CountsByTable[RetentionTableKeys.MatchFeedbackPendingClaimed]);
+    }
+
+    [Fact]
     public async Task Sweep_DeletingServiceRequest_CascadesMatchAndFeedback()
     {
         await using var scope = _fx.Factory.Services.CreateAsyncScope();
