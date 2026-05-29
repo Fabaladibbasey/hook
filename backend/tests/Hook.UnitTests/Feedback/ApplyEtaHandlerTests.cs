@@ -175,7 +175,7 @@ public class ApplyEtaHandlerTests
         pending.Answer.ShouldBe(FeedbackAnswer.Skipped);
         _scheduled.ShouldHaveSingleItem();
         _scheduled[0].Delay.ShouldBe(_options.Step2InProgressRecheckDelay);
-        _sent.ShouldHaveSingleItem().Text.ShouldContain("Thanks");
+        _sent.ShouldHaveSingleItem().Text.ShouldBe(FeedbackCopy.SkippedAck);
     }
 
     [Fact]
@@ -193,7 +193,7 @@ public class ApplyEtaHandlerTests
         pending.EtaUtc.ShouldBeNull();
         _scheduled.ShouldHaveSingleItem();
         _scheduled[0].Delay.ShouldBe(_options.Step2InProgressRecheckDelay);
-        _sent.ShouldHaveSingleItem().Text.ShouldContain("Thanks");
+        _sent.ShouldHaveSingleItem().Text.ShouldBe(FeedbackCopy.SkippedAck);
     }
 
     [Fact]

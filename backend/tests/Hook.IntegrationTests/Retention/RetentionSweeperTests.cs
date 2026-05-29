@@ -1,3 +1,5 @@
+using System.Diagnostics.Metrics;
+using Hook.Features.Ai.PlatformQa;
 using Hook.Features.ChatSession.AccessLog;
 using Hook.Features.ChatSession.ParticipantAggregate;
 using Hook.Features.ChatSession.SessionAggregate;
@@ -7,6 +9,7 @@ using Hook.Features.Geocoding.GeocodeCache;
 using Hook.Features.Geocoding.Models;
 using Hook.Features.Matching.MatchAggregate;
 using Hook.Features.MetaTemplates;
+using Hook.Features.Observability;
 using Hook.Features.ServiceRequest.RequestAggregate;
 using Hook.Shared.Persistence.Data;
 using Hook.Shared.Retention;
@@ -48,6 +51,8 @@ public sealed class RetentionSweeperTests : PipelineTestBase
             Enabled = true,
             RetentionDays = configured.RetentionDays,
             DeadLetterRetentionDays = configured.DeadLetterRetentionDays,
+            PendingFeedbackClaimAfter = configured.PendingFeedbackClaimAfter,
+            PlatformAnswerDedupCleanupAfter = configured.PlatformAnswerDedupCleanupAfter,
             SweepInterval = configured.SweepInterval,
             StartupDelay = configured.StartupDelay
         });
@@ -67,13 +72,16 @@ public sealed class RetentionSweeperTests : PipelineTestBase
         var result = await sweeper.RunOnceAsync(CancellationToken.None);
 
         // Wolverine's dead-letter table lives in a separate schema and is not part of the
-        // EF model — it is swept via raw SQL. Exempt that one key from the EF-mapped check.
+        // EF model — it is swept via raw SQL. The pending-claimed key is an operation
+        // (bulk UPDATE Pending → Skipped) sharing the match_feedback table, not a distinct
+        // entity, so it is exempt from the EF-mapped check too.
         var rawSweeps = new HashSet<string>(StringComparer.Ordinal)
         {
             RetentionTableKeys.WolverineDeadLetters,
+            RetentionTableKeys.MatchFeedbackPendingClaimed,
         };
 
-        foreach (var key in result.DeletedByTable.Keys)
+        foreach (var key in result.CountsByTable.Keys)
         {
             if (rawSweeps.Contains(key)) continue;
             var found = db.Model.GetEntityTypes()
@@ -121,12 +129,12 @@ public sealed class RetentionSweeperTests : PipelineTestBase
         var sweeper = Resolve(scope.ServiceProvider);
         var result = await sweeper.RunOnceAsync(CancellationToken.None);
 
-        Assert.Equal(1, result.DeletedByTable[RetentionTableKeys.ChatSessions]);
-        Assert.Equal(1, result.DeletedByTable[RetentionTableKeys.ServiceRequests]);
-        Assert.Equal(1, result.DeletedByTable[RetentionTableKeys.GeocodeCache]);
-        Assert.Equal(1, result.DeletedByTable[RetentionTableKeys.WhatsappContacts]);
-        Assert.True(result.DeletedByTable.ContainsKey(RetentionTableKeys.MatchFeedback));
-        Assert.False(result.DeletedByTable.ContainsKey("provider_stats"));
+        Assert.Equal(1, result.CountsByTable[RetentionTableKeys.ChatSessions]);
+        Assert.Equal(1, result.CountsByTable[RetentionTableKeys.ServiceRequests]);
+        Assert.Equal(1, result.CountsByTable[RetentionTableKeys.GeocodeCache]);
+        Assert.Equal(1, result.CountsByTable[RetentionTableKeys.WhatsappContacts]);
+        Assert.True(result.CountsByTable.ContainsKey(RetentionTableKeys.MatchFeedback));
+        Assert.False(result.CountsByTable.ContainsKey("provider_stats"));
 
         // Old rows gone; fresh control rows survived.
         Assert.False(await db.ChatSessions.AsNoTracking().AnyAsync(s => s.Id == oldChat.Id));
@@ -203,11 +211,75 @@ public sealed class RetentionSweeperTests : PipelineTestBase
         var sweeper = Resolve(scope.ServiceProvider);
         var result = await sweeper.RunOnceAsync(CancellationToken.None);
 
-        Assert.Equal(2, result.DeletedByTable[RetentionTableKeys.MatchFeedback]);
+        Assert.Equal(2, result.CountsByTable[RetentionTableKeys.MatchFeedback]);
         Assert.False(await db.MatchFeedback.AsNoTracking().AnyAsync(f => f.Id == oldAnswered.Id));
         Assert.False(await db.MatchFeedback.AsNoTracking().AnyAsync(f => f.Id == oldPending.Id));
         Assert.True(await db.MatchFeedback.AsNoTracking().AnyAsync(f => f.Id == recent.Id));
         Assert.True(await db.ProviderStats.AsNoTracking().AnyAsync(s => s.ProviderPhone == phone));
+    }
+
+    [Fact]
+    public async Task Sweep_PendingFeedback_PastWindow_IsClaimedSkipped()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var opts = scope.ServiceProvider.GetRequiredService<IOptions<RetentionOptions>>().Value;
+        var now = DateTimeOffset.UtcNow;
+        // One hour past the claim-after window, one minute inside it.
+        var stale = now - opts.PendingFeedbackClaimAfter - TimeSpan.FromHours(1);
+        var fresh = now - opts.PendingFeedbackClaimAfter + TimeSpan.FromMinutes(1);
+
+        var (_, staleMatch) = await SeedRequestAndMatchAsync(db, stale);
+        var (_, freshMatch) = await SeedRequestAndMatchAsync(db, fresh);
+
+        var stalePending = MatchFeedback.CreatePending(
+            staleMatch.Id, staleMatch.RequestId, FeedbackStep.DidYouFind, stale);
+        var freshPending = MatchFeedback.CreatePending(
+            freshMatch.Id, freshMatch.RequestId, FeedbackStep.DidYouFind, fresh);
+        db.MatchFeedback.AddRange(stalePending, freshPending);
+        await db.SaveChangesAsync();
+
+        var staleVersion = stalePending.Version;
+
+        var sweeper = Resolve(scope.ServiceProvider);
+        var result = await sweeper.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.CountsByTable[RetentionTableKeys.MatchFeedbackPendingClaimed]);
+
+        var staleAfter = await db.MatchFeedback.AsNoTracking().SingleAsync(f => f.Id == stalePending.Id);
+        Assert.Equal(FeedbackAnswer.Skipped, staleAfter.Answer);
+        Assert.NotNull(staleAfter.RepliedAt);
+        Assert.Equal(staleVersion + 1, staleAfter.Version);
+
+        var freshAfter = await db.MatchFeedback.AsNoTracking().SingleAsync(f => f.Id == freshPending.Id);
+        Assert.Equal(FeedbackAnswer.Pending, freshAfter.Answer);
+        Assert.Null(freshAfter.RepliedAt);
+    }
+
+    [Fact]
+    public async Task Sweep_PendingFeedback_TightBoundary_OnlyBarelyStaleIsClaimed()
+    {
+        // SQL: f.PromptedAt < pendingCutoff (strict less-than).
+        // A row 1 second past the boundary IS claimed; 1 second inside is NOT.
+        // Tighter margin than the 1h/1min test — documents the strict < semantics.
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var opts = scope.ServiceProvider.GetRequiredService<IOptions<RetentionOptions>>().Value;
+        var now = DateTimeOffset.UtcNow;
+        var barelyStale = now - opts.PendingFeedbackClaimAfter - TimeSpan.FromSeconds(1);
+        var barelyFresh = now - opts.PendingFeedbackClaimAfter + TimeSpan.FromSeconds(1);
+
+        var (_, staleMatch) = await SeedRequestAndMatchAsync(db, barelyStale);
+        var (_, freshMatch) = await SeedRequestAndMatchAsync(db, barelyFresh);
+
+        db.MatchFeedback.AddRange(
+            MatchFeedback.CreatePending(staleMatch.Id, staleMatch.RequestId, FeedbackStep.DidYouFind, barelyStale),
+            MatchFeedback.CreatePending(freshMatch.Id, freshMatch.RequestId, FeedbackStep.DidYouFind, barelyFresh));
+        await db.SaveChangesAsync();
+
+        var result = await Resolve(scope.ServiceProvider).RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.CountsByTable[RetentionTableKeys.MatchFeedbackPendingClaimed]);
     }
 
     [Fact]
@@ -324,7 +396,7 @@ public sealed class RetentionSweeperTests : PipelineTestBase
             var sweeper = Resolve(scope.ServiceProvider);
             var result = await sweeper.RunOnceAsync(CancellationToken.None);
 
-            Assert.True(result.DeletedByTable[RetentionTableKeys.WolverineDeadLetters] >= 1,
+            Assert.True(result.CountsByTable[RetentionTableKeys.WolverineDeadLetters] >= 1,
                 "Expected ancient DLQ row to be deleted (must not be -1, which signals SQL error).");
 
             var oldStill = await db.Database
@@ -342,6 +414,90 @@ public sealed class RetentionSweeperTests : PipelineTestBase
                 "DELETE FROM wolverine.wolverine_dead_letters WHERE id IN ({0}, {1})",
                 oldId, freshId);
         }
+    }
+
+    [Fact]
+    public async Task Sweep_PlatformAnswerDedup_UsesShortCleanupWindow_NotRetentionDays()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var configured = scope.ServiceProvider.GetRequiredService<IOptions<RetentionOptions>>().Value;
+
+        // Default cleanup window is 1h; seed one 30min-old row (must survive) and
+        // one 2h-old row (must be deleted). The 2h-old row is well inside the 7d
+        // global retention cutoff, proving the sweep now uses the dedicated knob.
+        var staleOffset = TimeSpan.FromHours(2);
+        var freshOffset = TimeSpan.FromMinutes(30);
+        Assert.True(staleOffset > configured.PlatformAnswerDedupCleanupAfter);
+        Assert.True(freshOffset < configured.PlatformAnswerDedupCleanupAfter);
+
+        var now = DateTimeOffset.UtcNow;
+        var stale = PlatformAnswerDedup.Stamp(UniquePhone(), 0xABCDEF01L, now - staleOffset);
+        var fresh = PlatformAnswerDedup.Stamp(UniquePhone(), 0x12345678L, now - freshOffset);
+        db.PlatformAnswerDedup.AddRange(stale, fresh);
+        await db.SaveChangesAsync();
+
+        try
+        {
+            var sweeper = Resolve(scope.ServiceProvider);
+            var result = await sweeper.RunOnceAsync(CancellationToken.None);
+
+            Assert.Equal(1, result.CountsByTable[RetentionTableKeys.PlatformAnswerDedup]);
+            Assert.False(await db.PlatformAnswerDedup.AsNoTracking()
+                .AnyAsync(d => d.Phone == stale.Phone && d.QuestionHash == stale.QuestionHash));
+            Assert.True(await db.PlatformAnswerDedup.AsNoTracking()
+                .AnyAsync(d => d.Phone == fresh.Phone && d.QuestionHash == fresh.QuestionHash));
+        }
+        finally
+        {
+            await db.PlatformAnswerDedup
+                .Where(d => d.Phone == stale.Phone || d.Phone == fresh.Phone)
+                .ExecuteDeleteAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Sweep_PendingClaimed_EmitsSweptMetric_WithOpUpdateTag()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HookDbContext>();
+        var opts = scope.ServiceProvider.GetRequiredService<IOptions<RetentionOptions>>().Value;
+        var now = DateTimeOffset.UtcNow;
+        var stale = now - opts.PendingFeedbackClaimAfter - TimeSpan.FromHours(1);
+
+        var (_, staleMatch) = await SeedRequestAndMatchAsync(db, stale);
+        var stalePending = MatchFeedback.CreatePending(
+            staleMatch.Id, staleMatch.RequestId, FeedbackStep.DidYouFind, stale);
+        db.MatchFeedback.Add(stalePending);
+        await db.SaveChangesAsync();
+
+        var captured = new List<(long Value, string Table, string Op)>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Meter.Name == HookMetrics.MeterName
+                && instrument.Name == "hook.retention.swept.total")
+                l.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, measurement, tags, state) =>
+        {
+            string table = string.Empty, op = string.Empty;
+            foreach (var kv in tags)
+            {
+                if (kv.Key == "table") table = kv.Value?.ToString() ?? string.Empty;
+                if (kv.Key == "op") op = kv.Value?.ToString() ?? string.Empty;
+            }
+            captured.Add((measurement, table, op));
+        });
+        listener.Start();
+
+        var sweeper = Resolve(scope.ServiceProvider);
+        await sweeper.RunOnceAsync(CancellationToken.None);
+
+        Assert.Contains(captured, m =>
+            m.Table == RetentionTableKeys.MatchFeedbackPendingClaimed
+            && m.Op == RetentionOps.Update
+            && m.Value >= 1);
     }
 
     [Fact]
@@ -367,7 +523,7 @@ public sealed class RetentionSweeperTests : PipelineTestBase
 
             var result = await sweeper.RunOnceAsync(CancellationToken.None);
 
-            Assert.Empty(result.DeletedByTable);
+            Assert.Empty(result.CountsByTable);
             Assert.True(await db.WhatsappContacts.AsNoTracking().AnyAsync(c => c.Phone == phone));
         }
         finally

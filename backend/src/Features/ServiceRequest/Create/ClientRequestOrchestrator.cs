@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
+using Hook.Features.Ai.PlatformQa;
 using Hook.Features.Feedback;
 using Hook.Features.Feedback.AggregateStats;
 using Hook.Features.Geocoding.Geocode;
@@ -23,6 +24,7 @@ public sealed class ClientRequestOrchestrator(
     IServiceRequestRepository requests,
     IProviderAvailabilityRepository availability,
     IMessageBus bus,
+    PlatformQaDispatcher platformQa,
     IOptions<MatchingOptions> matchingOptions,
     IOptions<FeedbackOptions> feedbackOptions,
     TimeProvider clock,
@@ -34,6 +36,24 @@ public sealed class ClientRequestOrchestrator(
         var now = clock.GetUtcNow();
         var existing = await drafts.GetAsync(phone.Value, ct);
         var draft = existing ?? ClientRequestDraft.Start(phone.Value, now);
+
+        // Mid-flow Q&A: the user asked a platform question while a draft is active.
+        // Answer asynchronously via the durable outbox AND re-prompt the current step
+        // synchronously so the funnel stays on track. Deliberately runs BEFORE
+        // draft.Touch / UpsertAsync — spam Q&A must not extend the draft's UpdatedAt
+        // and block inactivity expiry.
+        if (existing is not null
+            && message.Kind == InboundMessageKind.Text
+            && QuickIntent.LooksLikePlatformQuestion(message.Text)
+            && QuickIntent.Detect(message.Text) is null
+            && QuickIntent.DetectIntentHint(message.Text) is null)
+        {
+            await platformQa.DispatchMidFlowAsync(
+                phone, message.Text ?? string.Empty, "en", draft.Step.ToString());
+            await RepromptCurrentStepAsync(draft, phone, ct);
+            return;
+        }
+
         if (existing is not null) draft.Touch(now);
 
         // Slug switch mid-funnel: if the user is at a location step and sends a strong
@@ -393,7 +413,8 @@ public sealed class ClientRequestOrchestrator(
             await requests.AddAsync(request, ct);
             await drafts.DeleteAsync(phone.Value, ct);
 
-            await bus.PublishAsync(new SendWhatsAppTextCommand(phone, "Looking for nearby providers…"));
+            await bus.PublishAsync(new SendWhatsAppTextCommand(
+                phone, "Looking for nearby providers…", Tip: Tips.TipTrigger.AfterDraftDone));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -409,6 +430,14 @@ public sealed class ClientRequestOrchestrator(
                 "Try again in a moment — reply with what you need (e.g. \"I need a plumber\")."));
         }
     }
+
+    // Canonical re-prompt for each draft step. Delegates to ClientRequestStepPrompts
+    // so the orchestrator's mid-flow-Q&A re-prompt and the per-step handlers share
+    // one source of truth for the wording.
+    private ValueTask RepromptCurrentStepAsync(
+        ClientRequestDraft draft, PhoneNumber phone, CancellationToken ct) =>
+        bus.PublishAsync(new SendWhatsAppTextCommand(
+            phone, ClientRequestStepPrompts.For(draft.Step, draft.DraftServiceSlug)));
 
     private static bool IsSkipDescription([System.Diagnostics.CodeAnalysis.NotNullWhen(false)] string? text)
     {

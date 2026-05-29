@@ -1,5 +1,5 @@
+using Hook.Shared.Persistence;
 using Hook.Shared.Persistence.Data;
-using Microsoft.EntityFrameworkCore;
 
 namespace Hook.Features.ServiceTaxonomy.JudgeParent;
 
@@ -12,12 +12,9 @@ public sealed class JudgeParentDedupGate(HookDbContext db, TimeProvider clock) :
 {
     public static readonly TimeSpan Window = TimeSpan.FromMinutes(5);
 
-    // Single round-trip: INSERT new row OR refresh-on-conflict only when judged_at
-    // has aged past the window. RETURNING emits a row on both INSERT and the WHERE-
-    // satisfied UPDATE path; an unsatisfied WHERE leaves the row untouched and
-    // returns nothing. FirstOrDefaultAsync(0) ⇒ claimed=false for the hot
-    // "seen <5min ago" path.
-    public async Task<bool> TryClaimAsync(string slug, CancellationToken ct)
+    // Single round-trip dedup gate; see TimedDedupGate for the materialisation
+    // contract. RETURNING emits a row on both INSERT and WHERE-satisfied UPDATE.
+    public Task<bool> TryClaimAsync(string slug, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
         var cutoff = now - Window;
@@ -28,9 +25,6 @@ public sealed class JudgeParentDedupGate(HookDbContext db, TimeProvider clock) :
               WHERE judge_parent_dedup."JudgedAt" <= {2}
             RETURNING 1
             """;
-        var rows = await db.Database
-            .SqlQueryRaw<int>(sql, slug, now, cutoff)
-            .ToListAsync(ct);
-        return rows.Count > 0;
+        return TimedDedupGate.TryClaimAsync(db.Database, sql, [slug, now, cutoff], ct);
     }
 }

@@ -2,6 +2,7 @@ using Hook.Features.ChatPrivacyRouting.RouteMatch;
 using Hook.Features.Matching.MatchAggregate;
 using Hook.Features.ProviderAvailability.AvailabilityAggregate;
 using Hook.Features.ServiceRequest.RequestAggregate;
+using Hook.Features.Tips;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Core;
 using Hook.Shared.Pipeline.PostCommitSends;
@@ -52,7 +53,8 @@ public sealed class PhoneExchanger(
         if (match.ContactShared)
         {
             await bus.PublishAsync(new SendWhatsAppTextCommand(clientPhone,
-                FormatProviderResend(matchPosition, match.ServiceSlug, providerPhone)));
+                FormatProviderResend(matchPosition, match.ServiceSlug, providerPhone),
+                Tip: TipTrigger.AfterContactShared));
             return ExchangeOutcome.AlreadyShared;
         }
 
@@ -103,7 +105,8 @@ public sealed class PhoneExchanger(
         }
 
         await bus.PublishAsync(new SendWhatsAppTextCommand(clientPhone,
-            FormatProviderResend(matchPosition, match.ServiceSlug, providerPhone)));
+            FormatProviderResend(matchPosition, match.ServiceSlug, providerPhone),
+            Tip: TipTrigger.AfterContactShared));
         var providerText = RequestDetailsFormatter.AppendIfPresent(
             $"Client wants {match.ServiceSlug} ({clientPhone.Value}). Expect a message.",
             request.Description);

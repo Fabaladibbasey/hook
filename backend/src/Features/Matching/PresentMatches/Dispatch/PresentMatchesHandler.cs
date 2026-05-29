@@ -2,6 +2,7 @@ using System.Text.Json;
 using Hook.Features.Ai;
 using Hook.Features.Ai.Models;
 using Hook.Features.Matching.MatchAggregate;
+using Hook.Features.Tips;
 using Hook.Features.Whatsapp.Phone;
 using Hook.Shared.Pipeline.PostCommitSends;
 using Microsoft.Extensions.Options;
@@ -75,7 +76,8 @@ public sealed class PresentMatchesHandler(
         var fallback = $"Top matches for {command.ServiceSlug}:\n{string.Join("\n", fallbackLines)}";
 
         var reply = await AiReplyHelper.TryGenerateOrFallbackAsync(ai, ctx, "match_presenter", fallback, logger, ct);
-        await bus.PublishAsync(new SendWhatsAppTextCommand(command.ClientPhone, $"{reply}\n\n{pickHint}"));
+        await bus.PublishAsync(new SendWhatsAppTextCommand(
+            command.ClientPhone, $"{reply}\n\n{pickHint}", Tip: TipTrigger.AfterMatchPresented));
     }
 
     private static string Mask(string phone) =>

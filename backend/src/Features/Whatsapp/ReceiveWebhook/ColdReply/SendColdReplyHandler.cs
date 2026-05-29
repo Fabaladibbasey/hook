@@ -32,6 +32,6 @@ public sealed class SendColdReplyHandler(
             : "I help connect people who need services with providers. "
                 + "Reply REQUEST if you need help, or REGISTER if you offer a service.";
         var reply = await AiReplyHelper.TryGenerateOrFallbackAsync(ai, ctx, evt.Purpose, fallback, logger, ct);
-        await bus.PublishAsync(new SendWhatsAppTextCommand(evt.To, reply));
+        await bus.PublishAsync(new SendWhatsAppTextCommand(evt.To, reply, Tip: evt.Tip));
     }
 }

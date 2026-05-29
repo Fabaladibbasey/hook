@@ -1,3 +1,4 @@
+using Hook.Features.Ai.PlatformQa;
 using Hook.Features.ChatSession.AccessLog;
 using Hook.Features.ChatSession.ParticipantAggregate;
 using Hook.Features.ChatSession.SessionAggregate;
@@ -35,6 +36,7 @@ public class HookDbContext(DbContextOptions<HookDbContext> options) : DbContext(
     public DbSet<ProviderStats> ProviderStats => Set<ProviderStats>();
     public DbSet<WhatsappContact> WhatsappContacts => Set<WhatsappContact>();
     public DbSet<AmbiguousIntentDraft> AmbiguousIntentDrafts => Set<AmbiguousIntentDraft>();
+    public DbSet<PlatformAnswerDedup> PlatformAnswerDedup => Set<PlatformAnswerDedup>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

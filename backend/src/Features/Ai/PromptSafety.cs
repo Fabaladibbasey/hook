@@ -13,15 +13,32 @@ public static class PromptSafety
     // to drop messages that *echo* obvious jailbreak markers — not to catch every
     // possible attack. Defence-in-depth: the model should already refuse, this
     // is a belt-and-braces server-side filter on inbound user text and outbound
-    // model replies.
+    // model replies. Multilingual coverage is tight on purpose: high-confidence
+    // phrases only, never inflections that overlap with benign speech. Wolof
+    // shares Latin script so the French markers cover incidental code-switching;
+    // Arabic markers cover its own script.
     private static readonly Regex JailbreakRx = new(
         @"\b(ignor\w* (all |any |the )?(previous|prior|above) (instructions?|prompts?|rules?))" +
         @"|((reveal|print|show|leak)\s+(?:\w+\s+){0,3}(system|developer)\s+(prompt|message|rules?))" +
         @"|<\|im_(start|end)\|>" +
         @"|(\byou are now (in )?(developer|admin|jailbreak|dan) mode\b)" +
         @"|(\b(in )?(developer|admin|jailbreak|dan) mode\b)" +
-        @"|(\bact(?:ing)? as (an? )?(unrestricted|uncensored|jailbroken)\b)",
+        @"|(\bact(?:ing)? as (an? )?(unrestricted|uncensored|jailbroken)\b)" +
+        @"|(ignorez\s+(toutes\s+)?(les\s+)?(instructions?|consignes?|règles?)\s+(précédentes?|antérieures?|ci-dessus))" +
+        @"|((révèle|montre|affiche|divulgue)\s+(?:\w+\s+){0,3}(le\s+)?(prompt|message|instructions?|règles?)\s+(système|systeme|développeur|developpeur))" +
+        @"|(تجاهل\s+(جميع\s+|كل\s+|أي\s+)?(التعليمات|الإرشادات|الأوامر|القواعد)\s+(السابقة|أعلاه|السابقه))" +
+        @"|((اكشف|أظهر|اعرض|أفصح)\s+(عن\s+)?(\S+\s+){0,3}(رسالة|تعليمات|أوامر|قواعد)\s+(النظام|المطور|المطوّر))" +
+        @"|(ignora\s+(todas?\s+)?(las\s+)?(instrucciones?|reglas?|órdenes?)\s+(anteriores?|previas?))" +
+        @"|(ignor[ae]?\s+(todas?\s+)?(as\s+)?(instruções|regras|ordens)\s+(anteriores?|prévias?))",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // Collapse runs of 2+ newlines (incl. CRLF pairs and bare CR runs) to a
+    // single \n so a user cannot use blank lines inside the fence to forge a
+    // fake role boundary that the model might parse as a system / assistant
+    // turn. Classic-Mac `\r\r\r` is rare in WhatsApp inputs but the alternation
+    // is free defence.
+    private static readonly Regex MultiNewlineRx = new(
+        @"(?:\r\n|\r|\n){2,}", RegexOptions.Compiled);
 
     private static readonly Regex SlugRx = new(
         @"^[a-z0-9]+(-[a-z0-9]+)*$", RegexOptions.Compiled);
@@ -46,6 +63,7 @@ public static class PromptSafety
             .Replace(Open, "<user input>", StringComparison.OrdinalIgnoreCase)
             .Replace(Close, "</user input>", StringComparison.OrdinalIgnoreCase);
         safe = ControlTokensRx.Replace(safe, m => "<" + m.Value[2..^2] + ">");
+        safe = MultiNewlineRx.Replace(safe, "\n");
         if (safe.Length > maxChars) safe = safe[..maxChars] + "…";
         return $"{Open}\n{safe}\n{Close}";
     }

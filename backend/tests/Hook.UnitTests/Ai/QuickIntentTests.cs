@@ -135,8 +135,33 @@ public class QuickIntentTests
     [InlineData("new!", IntentKind.NewRequest)]
     [InlineData("yes,", IntentKind.Confirmation)]
     [InlineData("no,", IntentKind.Rejection)]
+    // Tip request — phrase variants. Bare "tip"/"tips"/"advice" are caught by
+    // DetectIntentHint (see TipRequest_BareKeywords below), not by Detect.
+    [InlineData("any tip", IntentKind.TipRequest)]
+    [InlineData("Any Tip", IntentKind.TipRequest)]
+    [InlineData("any tips", IntentKind.TipRequest)]
+    [InlineData("got a tip", IntentKind.TipRequest)]
+    [InlineData("got tips", IntentKind.TipRequest)]
+    [InlineData("got any tips", IntentKind.TipRequest)]
+    [InlineData("any advice", IntentKind.TipRequest)]
+    [InlineData("got advice", IntentKind.TipRequest)]
+    [InlineData("give me a tip", IntentKind.TipRequest)]
+    [InlineData("tip please", IntentKind.TipRequest)]
+    [InlineData("any tip?", IntentKind.TipRequest)]
     public void Detect_KnownInputs(string input, IntentKind expected)
         => Assert.Equal(expected, QuickIntent.Detect(input));
+
+    [Theory]
+    [InlineData("tip")]
+    [InlineData("TIP")]
+    [InlineData(" Tip ")]
+    [InlineData("tips")]
+    [InlineData("advice")]
+    [InlineData("tip.")]
+    [InlineData("tip!")]
+    [InlineData("tip?")]
+    public void DetectIntentHint_BareKeywords_ReturnTipRequest(string input)
+        => Assert.Equal(IntentKind.TipRequest, QuickIntent.DetectIntentHint(input));
 
     [Theory]
     [InlineData(null)]
@@ -388,4 +413,30 @@ public class QuickIntentTests
     [InlineData(null)]
     public void TryExtractRelativeEta_NoMatch_ReturnsNull(string? text) =>
         Assert.Null(QuickIntent.TryExtractRelativeEta(text, DateTimeOffset.UtcNow));
+
+    [Theory]
+    // Positives: question mark
+    [InlineData("Is this free?")]
+    [InlineData("how does this work?")]
+    [InlineData("can I cancel anytime?")]
+    [InlineData("what's your privacy policy?")]
+    // Positives: bare interrogative lead-in (no '?')
+    [InlineData("how does this work")]
+    [InlineData("what is this")]
+    [InlineData("does it cost money")]
+    public void LooksLikePlatformQuestion_Positive(string text) =>
+        Assert.True(QuickIntent.LooksLikePlatformQuestion(text));
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("?")]                          // length < 3 after trim
+    [InlineData("I need a plumber")]           // service request
+    [InlineData("yes")]                        // confirmation
+    [InlineData("REQUEST")]                    // bare command
+    [InlineData("my pipe is leaking")]         // problem statement
+    [InlineData("can someone explain")]        // ask-for-help hint wins over Q&A
+    public void LooksLikePlatformQuestion_Negative(string? text) =>
+        Assert.False(QuickIntent.LooksLikePlatformQuestion(text));
 }

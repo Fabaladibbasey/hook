@@ -158,6 +158,15 @@ public static class QuickIntent
         ("youre right",    IntentKind.Confirmation),
         ("you got it",    IntentKind.Confirmation),
         ("got it",        IntentKind.Confirmation),
+        ("any tip",       IntentKind.TipRequest),
+        ("any tips",      IntentKind.TipRequest),
+        ("got a tip",     IntentKind.TipRequest),
+        ("got tips",      IntentKind.TipRequest),
+        ("got any tips",  IntentKind.TipRequest),
+        ("any advice",    IntentKind.TipRequest),
+        ("got advice",    IntentKind.TipRequest),
+        ("give me a tip", IntentKind.TipRequest),
+        ("tip please",    IntentKind.TipRequest),
         ("sounds good",   IntentKind.Confirmation),
         ("sounds right",  IntentKind.Confirmation),
         ("that's it",     IntentKind.Confirmation),
@@ -309,6 +318,31 @@ public static class QuickIntent
         return compact.Length >= 4 && FuzzyMatch.MatchesAny(compact, InProgressTokens, 1);
     }
 
+    // Interrogative leaders — the cheap deterministic gate the cold-path Q&A
+    // short-circuit and the mid-flow orchestrators check before falling back to
+    // the LLM. Trailing '?' is the dominant signal; the regex covers bare
+    // English question lead-ins. "is/are/will/who" deliberately omitted —
+    // they collide with service-request patterns ("is my pipe leaking",
+    // "are you free", "will it cost", "who can help") which the hint detector
+    // already classifies as ServiceRequest.
+    private static readonly Regex PlatformQuestionRx = new(
+        @"^\s*(what|how|why|when|where|which|can|could|does|do|should)\b",
+        RxOpts);
+
+    /// <summary>True when the text reads as an English question — either ends with '?' or
+    /// leads with an interrogative pronoun/auxiliary, AND no deterministic service-request /
+    /// provider-registration hint applies (those hints win — e.g. "is my pipe leaking?"
+    /// reads as ServiceRequest, not a platform question). Used as a deterministic prefilter
+    /// before publishing <c>AnswerPlatformQuestionCommand</c>.</summary>
+    public static bool LooksLikePlatformQuestion(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        var s = text.Trim();
+        if (s.Length < 3) return false;
+        if (!s.EndsWith('?') && !PlatformQuestionRx.IsMatch(s)) return false;
+        return DetectIntentHint(text) is null;
+    }
+
     private static readonly Regex RelativeEtaRx = new(
         @"\bin\s+(\d{1,3})\s+(hour|hr|minute|min|day)s?\b",
         RxOpts);
@@ -341,19 +375,23 @@ public static class QuickIntent
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
         var s = text.Trim();
-        // Short utterances handled by Detect (yes/no/edit/etc) shouldn't be re-classified here.
-        if (s.Length < 4) return null;
 
         // Bare-keyword shortcuts: single words the bot advertises ("REQUEST a service",
-        // "Reply HIRE or OFFER"). Deterministic so the LLM never sees them.
+        // "Reply HIRE or OFFER", "TIP for usage guidance"). Deterministic so the LLM
+        // never sees them. Lifted above the length floor so 3-char "tip" matches.
         var lower = s.ToLowerInvariant().TrimEnd('.', '!', '?');
         var bareIntent = lower switch
         {
             "request" or "hire" => (IntentKind?)IntentKind.ServiceRequest,
             "register" or "offer" => IntentKind.ProviderRegistration,
+            "tip" or "tips" or "advice" => IntentKind.TipRequest,
             _ => null
         };
         if (bareIntent is not null) return bareIntent;
+
+        // Short utterances handled by Detect (yes/no/edit/etc) shouldn't be re-classified
+        // against the regex HintRules.
+        if (s.Length < 4) return null;
 
         foreach (var (rx, intent) in HintRules)
             if (rx.IsMatch(s)) return intent;

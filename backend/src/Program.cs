@@ -17,6 +17,7 @@ using Hook.Features.RateLimiting;
 using Hook.Features.ServiceRequest;
 using Hook.Features.ServiceTaxonomy;
 using Hook.Features.ServiceTaxonomy.SeedRoots;
+using Hook.Features.Tips;
 using Hook.Features.Whatsapp;
 using Hook.Features.Whatsapp.Dev;
 using Hook.Features.Whatsapp.ReceiveWebhook;
@@ -125,6 +126,7 @@ try
     builder.Services.AddFeedback(builder.Configuration);
     builder.Services.AddRateLimiting(builder.Configuration);
     builder.Services.AddMetaTemplates();
+    builder.Services.AddTips(builder.Configuration);
     builder.Services.AddObservability();
 
     builder.Services.AddSingleton<AiWarmupHostedService>();

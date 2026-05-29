@@ -11,5 +11,7 @@ public static class RetentionTableKeys
     public const string ClientRequestDrafts = "client_request_drafts";
     public const string AmbiguousIntentDrafts = "ambiguous_intent_drafts";
     public const string MatchFeedback = "match_feedback";
+    public const string MatchFeedbackPendingClaimed = "match_feedback_pending_claimed";
+    public const string PlatformAnswerDedup = "platform_answer_dedup";
     public const string WolverineDeadLetters = "wolverine_dead_letters";
 }

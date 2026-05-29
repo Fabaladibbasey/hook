@@ -1,4 +1,5 @@
 using Hook.Features.MetaTemplates;
+using Hook.Features.Tips;
 using Hook.Shared.Persistence.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -47,6 +48,113 @@ public sealed class WhatsappContactRepositoryTests : PipelineTestBase
 
         var loaded = await db.WhatsappContacts.AsNoTracking().FirstAsync(c => c.Phone == phone);
         loaded.LastInboundAt.ShouldBe(later, TimeSpan.FromMilliseconds(1));
+    }
+
+    [Fact]
+    public async Task GetForTipsAsync_UnknownPhone_ReturnsNull()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IWhatsappContactRepository>();
+
+        var state = await repo.GetForTipsAsync(UniquePhone());
+
+        state.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task GetForTipsAsync_FreshContact_ReturnsEmptyCooldownDict()
+    {
+        var phone = UniquePhone();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IWhatsappContactRepository>();
+        await repo.UpsertInboundAsync(phone, DateTimeOffset.UtcNow);
+
+        var state = await repo.GetForTipsAsync(phone);
+
+        state.ShouldNotBeNull();
+        state!.Cooldowns.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task RecordTipAsync_PersistsTriggerAndTimestamp()
+    {
+        var phone = UniquePhone();
+        var at = DateTimeOffset.UtcNow;
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IWhatsappContactRepository>();
+        await repo.UpsertInboundAsync(phone, at);
+
+        await repo.RecordTipAsync(phone, TipTrigger.AfterWelcome, at);
+
+        var state = await repo.GetForTipsAsync(phone);
+        state.ShouldNotBeNull();
+        state!.Cooldowns.ShouldContainKey(TipTrigger.AfterWelcome);
+        state.Cooldowns[TipTrigger.AfterWelcome].ShouldBe(at, TimeSpan.FromMilliseconds(1));
+    }
+
+    [Fact]
+    public async Task RecordTipAsync_TwoTriggers_BothPersistedIndependently()
+    {
+        // Confirms jsonb_set keys by trigger ordinal — a second RecordTip on a
+        // different trigger must MERGE rather than replace the dict. Round-trip
+        // through the EF ValueConverter + ValueComparer wires up end-to-end.
+        var phone = UniquePhone();
+        var at1 = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var at2 = DateTimeOffset.UtcNow;
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IWhatsappContactRepository>();
+        await repo.UpsertInboundAsync(phone, at2);
+
+        await repo.RecordTipAsync(phone, TipTrigger.AfterWelcome, at1);
+        await repo.RecordTipAsync(phone, TipTrigger.UserRequested, at2);
+
+        var state = await repo.GetForTipsAsync(phone);
+        state.ShouldNotBeNull();
+        state!.Cooldowns.Count.ShouldBe(2);
+        state.Cooldowns[TipTrigger.AfterWelcome].ShouldBe(at1, TimeSpan.FromMilliseconds(1));
+        state.Cooldowns[TipTrigger.UserRequested].ShouldBe(at2, TimeSpan.FromMilliseconds(1));
+    }
+
+    [Fact]
+    public async Task RecordTipAsync_SameTriggerTwice_OverwritesTimestamp()
+    {
+        var phone = UniquePhone();
+        var earlier = DateTimeOffset.UtcNow.AddMinutes(-30);
+        var later = DateTimeOffset.UtcNow;
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IWhatsappContactRepository>();
+        await repo.UpsertInboundAsync(phone, later);
+
+        await repo.RecordTipAsync(phone, TipTrigger.AfterWelcome, earlier);
+        await repo.RecordTipAsync(phone, TipTrigger.AfterWelcome, later);
+
+        var state = await repo.GetForTipsAsync(phone);
+        state.ShouldNotBeNull();
+        state!.Cooldowns[TipTrigger.AfterWelcome].ShouldBe(later, TimeSpan.FromMilliseconds(1));
+    }
+
+    [Fact]
+    public async Task GetPreferredLocaleAsync_UnknownPhone_ReturnsEmpty()
+    {
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IWhatsappContactRepository>();
+
+        var locale = await repo.GetPreferredLocaleAsync(UniquePhone());
+
+        locale.ShouldBe(string.Empty);
+    }
+
+    [Fact]
+    public async Task UpdatePreferredLocaleAsync_PersistsLocale()
+    {
+        var phone = UniquePhone();
+        await using var scope = _fx.Factory.Services.CreateAsyncScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IWhatsappContactRepository>();
+        await repo.UpsertInboundAsync(phone, DateTimeOffset.UtcNow);
+
+        await repo.UpdatePreferredLocaleAsync(phone, "fr");
+
+        (await repo.GetPreferredLocaleAsync(phone)).ShouldBe("fr");
     }
 
     [Fact]
